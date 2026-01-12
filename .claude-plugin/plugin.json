@@ -1,0 +1,57 @@
+{
+  "name": "unity-agentic-tools",
+  "version": "1.0.0",
+  "displayName": "Unity Agentic Tools",
+  "description": "Token-efficient CLI tools for Unity YAML parsing, scene analysis, and prefab inspection via AI agents",
+  "author": "Anthropic",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "bin": {
+    "unity-yaml": "./dist/cli.js"
+  },
+  "scripts": {
+    "install": "bun install && bun run build",
+    "postinstall": "echo 'Unity Agentic Tools installed successfully!'"
+  },
+  "commands": [
+    {
+      "name": "unity-yaml",
+      "description": "Analyze Unity scenes, prefabs, and assets",
+      "usage": "unity-yaml <command> [options]"
+    }
+  ],
+  "agents": [
+    {
+      "name": "unity-scanner",
+      "displayName": "Unity Scene Scanner",
+      "description": "Analyze and search Unity scenes and prefabs"
+    },
+    {
+      "name": "unity-analyst",
+      "displayName": "Unity Asset Analyst",
+      "description": "Inspect and analyze Unity GameObjects and components"
+    },
+    {
+      "name": "unity-editor",
+      "displayName": "Unity File Editor",
+      "description": "Edit and modify Unity YAML files safely"
+    }
+  ],
+  "capabilities": {
+    "scanScene": true,
+    "analyzePrefab": true,
+    "editYAML": true,
+    "resolveReferences": true
+  },
+  "keywords": [
+    "unity",
+    "yaml",
+    "parser",
+    "scene",
+    "prefab",
+    "gameobject",
+    "ai",
+    "cli",
+    "agentic"
+  ]
+}

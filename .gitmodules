@@ -1,0 +1,3 @@
+[submodule "test-samples/ProjectTinySamples"]
+	path = test-samples/ProjectTinySamples
+	url = https://github.com/Unity-Technologies/ProjectTinySamples

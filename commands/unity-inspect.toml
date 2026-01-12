@@ -1,0 +1,12 @@
+prompt = "Inspect Unity scene or prefab (recommended - single call)"
+name = "unity-inspect"
+description = "Get complete GameObject information with all components and resolved script names in one call. This is the recommended command for AI agents."
+
+[parameters]
+file_path = { type = "string", description = "Path to .unity or .prefab file" }
+identifier = { type = "string", optional = true, description = "GameObject name or file ID (omit to inspect entire file)" }
+include_properties = { type = "boolean", optional = true, description = "Include component properties in output" }
+
+[execute]
+command = "node"
+args = ["${extensionPath}/unity-yaml/dist/cli.js", "inspect", "{{file_path}}", "{{#identifier}}{{identifier}}{{/identifier}}", "{{#include_properties}}--properties{{/include_properties}}"]

@@ -1,0 +1,14 @@
+{
+  "name": "unity-agentic-tools-marketplace",
+  "owner": {
+    "name": "taconotsandwich"
+  },
+  "plugins": [
+    {
+      "name": "unity-agentic-tools",
+      "description": "Token-efficient Unity file access with intelligent selective loading for scenes, prefabs, and assets",
+      "version": "1.0.0",
+      "source": "./"
+    }
+  ]
+}

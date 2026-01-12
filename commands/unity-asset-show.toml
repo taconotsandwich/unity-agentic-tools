@@ -1,0 +1,10 @@
+prompt = "Show all GameObjects in Unity asset"
+name = "unity-asset-show"
+description = "List all GameObjects in an asset file"
+
+[parameters]
+file_path = { type = "string", description = "Path to .asset file" }
+
+[execute]
+command = "node"
+args = ["${extensionPath}/unity-yaml/dist/cli.js", "list", "{{file_path}}"]

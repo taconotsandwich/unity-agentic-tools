@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: Install root dependencies
+        run: bun install
+
+      - name: Install unity-yaml dependencies
+        working-directory: unity-yaml
+        run: bun install
+
+      - name: Build MCP server
+        run: bun run build
+
+      - name: Build unity-yaml
+        working-directory: unity-yaml
+        run: bun run build
+
+      - name: Run tests
+        working-directory: unity-yaml
+        run: bun run test
+
+      - name: Validate extensions
+        run: .github/scripts/validate-extensions.sh
+
+      - name: Check version sync
+        run: node scripts/sync-version.js --check
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get commits since last tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s" $PREV_TAG..HEAD)
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s" -10)
+          fi
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release v${{ steps.version.outputs.VERSION }}
+          body: |
+            ## What's Changed
+
+            ${{ steps.changelog.outputs.CHANGELOG }}
+
+            ## Installation
+
+            ### Claude Code Plugin
+            ```shell
+            /plugin marketplace add taconotsandwich/unity-agentic-tools
+            /plugin install unity-agentic-tools@unity-agentic-tools-marketplace
+            ```
+
+            ### Direct CLI Usage
+            ```bash
+            git clone https://github.com/taconotsandwich/unity-agentic-tools.git
+            bun unity-agentic-tools/unity-yaml/dist/cli.js --help
+            ```
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Optional: Publish to npm (uncomment when ready)
+      # - name: Publish to npm
+      #   working-directory: unity-yaml
+      #   run: npm publish --access public
+      #   env:
+      #     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

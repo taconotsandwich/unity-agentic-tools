@@ -1,0 +1,12 @@
+prompt = "Get detailed GameObject information from Unity scene"
+name = "unity-scene-get"
+description = "Get detailed GameObject information including all components with resolved script names"
+
+[parameters]
+file_path = { type = "string", description = "Path to .unity file" }
+object_id = { type = "string", description = "GameObject file ID" }
+component = { type = "string", optional = true, description = "Get specific component type details" }
+
+[execute]
+command = "node"
+args = ["${extensionPath}/unity-yaml/dist/cli.js", "get", "{{file_path}}", "{{object_id}}", "{{#component}}--component{{/component}}", "{{#component}}{{component}}{{/component}}"]

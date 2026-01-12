@@ -1,0 +1,63 @@
+name: Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: Install dependencies (root)
+        run: bun install
+
+      - name: Install dependencies (unity-yaml)
+        working-directory: ./unity-yaml
+        run: bun install
+
+      - name: Build MCP server
+        run: bun run build
+
+      - name: Build unity-yaml library
+        working-directory: ./unity-yaml
+        run: bun run build
+
+      - name: Run tests (unity-yaml)
+        working-directory: ./unity-yaml
+        run: bun run test
+
+      - name: Run CLI integration tests
+        working-directory: ./unity-yaml
+        run: bash test/cli-integration.test.sh
+
+      - name: Validate extension configurations
+        run: bash .github/scripts/validate-extensions.sh
+
+      - name: Generate test coverage
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: ./unity-yaml
+        run: bun run test:coverage
+
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./unity-yaml/coverage/coverage-final.json
+          flags: unittests
+          name: unity-yaml-coverage
+          fail_ci_if_error: false
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

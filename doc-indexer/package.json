@@ -1,0 +1,22 @@
+{
+  "name": "unity-doc-indexer",
+  "version": "1.0.0",
+  "description": "Fast Unity documentation indexer with RAG",
+  "main": "dist/cli.js",
+  "type": "module",
+  "bin": {
+    "unity-doc-indexer": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "dev": "ts-node src/cli.ts"
+  },
+  "dependencies": {
+    "commander": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "typescript": "^5.0.0"
+  }
+}

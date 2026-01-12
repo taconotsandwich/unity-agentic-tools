@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  quick-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: Install dependencies (root)
+        run: bun install
+
+      - name: Install dependencies (unity-yaml)
+        working-directory: ./unity-yaml
+        run: bun install
+
+      - name: Build all
+        run: bun run build
+
+      - name: Build unity-yaml library
+        working-directory: ./unity-yaml
+        run: bun run build
+
+      - name: Run tests
+        working-directory: ./unity-yaml
+        run: bun run test
+
+      - name: Run CLI integration tests
+        working-directory: ./unity-yaml
+        run: bash test/cli-integration.test.sh
+
+      - name: Validate extension configurations
+        run: bash .github/scripts/validate-extensions.sh

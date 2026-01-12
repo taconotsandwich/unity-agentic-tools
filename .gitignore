@@ -1,0 +1,65 @@
+build/
+wheels/
+*.egg-info
+.ruff_cache/
+*.cover
+.coverage
+htmlcov/
+.ruff.toml
+
+# Node.js
+node_modules/
+yarn.lock
+.pnp.*
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build artifacts
+dist/
+*.tsbuildinfo
+*.map
+*.min.js
+
+# Bun
+bun_modules/
+bun.lockb
+
+# Unity
+.cache/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+*.tmp
+*.swp
+*.bak
+*~
+*.orig
+*.rej
+*.test_orig
+
+# Test samples
+test-samples/
+
+# Other directories
+.claude/
+ts/
+
+# MCP server
+mcp-server.mjs
+mcp-server.ts

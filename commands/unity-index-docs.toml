@@ -1,0 +1,7 @@
+prompt = "Index Unity package documentation at {{path}}"
+name = "unity-index-docs"
+description = "Index Unity package documentation"
+
+[execute]
+command = "node"
+args = ["${extensionPath}/unity-yaml/dist/cli.js", "index-docs", "{{path}}"]

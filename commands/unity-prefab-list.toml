@@ -1,0 +1,10 @@
+prompt = "List GameObjects in Unity prefab"
+name = "unity-prefab-list"
+description = "List all GameObjects with their components in a prefab file"
+
+[parameters]
+file_path = { type = "string", description = "Path to .prefab file" }
+
+[execute]
+command = "node"
+args = ["${extensionPath}/unity-yaml/dist/cli.js", "list", "{{file_path}}"]
