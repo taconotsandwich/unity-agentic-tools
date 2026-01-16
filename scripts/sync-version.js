@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Version Synchronization Script
  *
@@ -8,9 +8,9 @@
  * - marketplace.json
  *
  * Usage:
- *   node scripts/sync-version.js          # Sync versions
- *   node scripts/sync-version.js --check  # Check without modifying
- *   node scripts/sync-version.js --set 1.2.3  # Set specific version
+ *   bun scripts/sync-version.js          # Sync versions
+ *   bun scripts/sync-version.js --check  # Check without modifying
+ *   bun scripts/sync-version.js --set 1.2.3  # Set specific version
  */
 
 const fs = require('fs');
@@ -130,7 +130,7 @@ if (args.includes('--check')) {
   const versionIndex = args.indexOf('--set') + 1;
   const version = args[versionIndex];
   if (!version || version.startsWith('-')) {
-    console.error('Usage: node scripts/sync-version.js --set <version>');
+    console.error('Usage: bun scripts/sync-version.js --set <version>');
     process.exit(1);
   }
   syncVersions(version);

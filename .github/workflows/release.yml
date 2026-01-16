@@ -43,7 +43,7 @@ jobs:
         run: .github/scripts/validate-extensions.sh
 
       - name: Check version sync
-        run: node scripts/sync-version.js --check
+        run: bun scripts/sync-version.js --check
 
       - name: Extract version from tag
         id: version

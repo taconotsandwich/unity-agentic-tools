@@ -139,7 +139,7 @@ program.command('search-docs <query>')
     if (options.compress) args.push('-c');
     if (options.json) args.push('-j');
 
-    exec(`node ${args.join(' ')}`, (error, stdout, _stderr) => {
+    exec(`bun ${args.join(' ')}`, (error, stdout, _stderr) => {
       if (error) {
         console.error('Error:', error.message);
         process.exit(1);

@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Hook: PreToolUse (Claude Code)
  * Purpose: Validate Unity YAML before Edit/Write operations

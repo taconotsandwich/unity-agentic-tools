@@ -19390,7 +19390,7 @@ var server = new McpServer({
 async function runUnityCli(args) {
   return new Promise((resolve, reject) => {
     const cliPath = path.join(__dirname2, "unity-yaml", "dist", "cli.js");
-    const child = spawn("node", [cliPath, ...args], {
+    const child = spawn("bun", [cliPath, ...args], {
       cwd: __dirname2
     });
     let stdout = "";

@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Hook: UserPromptSubmit (Claude Code)
  * Purpose: Detect Unity files in user prompt and inject tool context

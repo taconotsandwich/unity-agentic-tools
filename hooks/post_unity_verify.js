@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Hook: PostToolUse (Claude Code)
  * Purpose: Verify GameObject integrity after Edit operations

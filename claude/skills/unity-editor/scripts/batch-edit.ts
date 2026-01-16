@@ -1,15 +1,15 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 const { exec } = require('child_process');
 
 const args = process.argv.slice(2);
 
 if (args.length < 2) {
-  console.error('Usage: node batch-edit.ts <file_path> <json_edits>');
+  console.error('Usage: bun batch-edit.ts <file_path> <json_edits>');
   process.exit(1);
 }
 
-exec(`node ${__dirname}/../../../unity-yaml/dist/cli.js edit ${args.join(' ')}`, (error, stdout, _stderr) => {
+exec(`bun ${__dirname}/../../../unity-yaml/dist/cli.js edit ${args.join(' ')}`, (error, stdout, _stderr) => {
   if (error) {
     console.error('Error:', error.message);
     process.exit(1);

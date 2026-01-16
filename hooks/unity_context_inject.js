@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Hook: PreToolUse (Claude Code)
  * Purpose: Inject Unity tool suggestions for Read operations
