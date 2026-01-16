@@ -8,15 +8,17 @@
     "unity-doc-indexer": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/cli.js",
-    "dev": "ts-node src/cli.ts"
+    "build": "bun build src/cli.ts --outfile=dist/cli.js --target=bun --format=cjs",
+    "start": "bun dist/cli.js",
+    "dev": "bun src/cli.ts"
   },
   "dependencies": {
     "commander": "^14.0.0"
   },
   "devDependencies": {
-    "@types/node": "^25.0.0",
-    "typescript": "^5.0.0"
+    "@types/node": "^25.0.0"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
   }
 }

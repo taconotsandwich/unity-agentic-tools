@@ -36,10 +36,10 @@ async function main() {
 
       if (isUnityFile(filePath)) {
         const suggestion = `# Tip: For Unity files, use specialized tools for token efficiency:
-# - List hierarchy: node unity-yaml/dist/cli.js list "${filePath}"
-# - Find object: node unity-yaml/dist/cli.js find "${filePath}" <pattern>
-# - Get details: node unity-yaml/dist/cli.js get "${filePath}" <object_id>
-# - Edit value: node unity-yaml/dist/cli.js edit "${filePath}" <object_name> <property> <value> --save
+# - List hierarchy: bun unity-yaml/dist/cli.js list "${filePath}"
+# - Find object: bun unity-yaml/dist/cli.js find "${filePath}" <pattern>
+# - Get details: bun unity-yaml/dist/cli.js get "${filePath}" <object_id>
+# - Edit value: bun unity-yaml/dist/cli.js edit "${filePath}" <object_name> <property> <value> --save
 `;
         data.context = suggestion + (data.context || '');
       }
