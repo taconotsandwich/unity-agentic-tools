@@ -1,4 +1,5 @@
 {
+  "packageManager": "bun@latest",
   "scripts": {
     "build": "bun run build:mcp-server && cd unity-yaml && bun run build",
     "build:mcp-server": "bun build mcp-server.ts --outfile=mcp-server.mjs --target=bun --external:node:child_process --external:node:fs --external:node:path --external:node:url"

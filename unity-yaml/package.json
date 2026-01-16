@@ -1,5 +1,6 @@
 {
   "name": "unity-yaml",
+  "packageManager": "bun@latest",
   "version": "1.0.0",
   "description": "Fast, token-efficient Unity YAML parser for AI agents",
   "exports": {

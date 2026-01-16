@@ -1,5 +1,6 @@
 {
   "name": "unity-agentic-tools",
+  "packageManager": "bun@latest",
   "version": "1.0.0",
   "displayName": "Unity Agentic Tools",
   "description": "Token-efficient CLI tools for Unity YAML parsing, scene analysis, and prefab inspection via AI agents",
