@@ -143,6 +143,8 @@ NavMeshSettings:
   m_m_IsActive: false
   m_m_IsActive: false
   m_m_IsActive: false
+  m_m_IsActive: false
+  m_m_IsActive: false
 --- !u!1 &62938757
 GameObject:
   m_ObjectHideFlags: 0

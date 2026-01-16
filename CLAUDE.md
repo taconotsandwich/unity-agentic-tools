@@ -20,25 +20,25 @@ When working with this repository or plugin, use the TypeScript CLI.
 **1. Inspect File (Recommended)**
 Get complete information in one call.
 ```bash
-node unity-yaml/dist/cli.js inspect <path/to/file.unity>
+bun unity-yaml/dist/cli.js inspect <path/to/file.unity>
 ```
 
 **2. List Hierarchy**
 View structure of a scene or prefab.
 ```bash
-node unity-yaml/dist/cli.js list <path/to/file.unity>
+bun unity-yaml/dist/cli.js list <path/to/file.unity>
 ```
 
 **3. Find GameObjects**
 Search by name (fuzzy matching by default).
 ```bash
-node unity-yaml/dist/cli.js find <path/to/file.unity> "Camera"
+bun unity-yaml/dist/cli.js find <path/to/file.unity> "Camera"
 ```
 
 **4. Get Details**
 Get specific GameObject by ID.
 ```bash
-node unity-yaml/dist/cli.js get <path/to/file.unity> 1847675923
+bun unity-yaml/dist/cli.js get <path/to/file.unity> 1847675923
 ```
 
 ## Token Efficiency Guidelines

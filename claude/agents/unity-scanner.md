@@ -27,25 +27,25 @@ You are a specialized Unity scene scanner focused on read-only operations with m
 Use these commands via bash tool:
 ```bash
 # List GameObjects
-node unity-yaml/dist/cli.js list Assets/Scenes/MainScene.unity
+bun unity-yaml/dist/cli.js list Assets/Scenes/MainScene.unity
 
 # Find GameObjects (fuzzy)
-node unity-yaml/dist/cli.js find Assets/Scenes/MainScene.unity "Camera"
+bun unity-yaml/dist/cli.js find Assets/Scenes/MainScene.unity "Camera"
 
 # Find GameObjects (exact)
-node unity-yaml/dist/cli.js find Assets/Scenes/MainScene.unity "Camera" --exact
+bun unity-yaml/dist/cli.js find Assets/Scenes/MainScene.unity "Camera" --exact
 
 # Get GameObject by ID
-node unity-yaml/dist/cli.js get Assets/Scenes/MainScene.unity 508316491
+bun unity-yaml/dist/cli.js get Assets/Scenes/MainScene.unity 508316491
 
 # Inspect GameObject (RECOMMENDED - single call)
-node unity-yaml/dist/cli.js inspect Assets/Scenes/MainScene.unity "Player"
+bun unity-yaml/dist/cli.js inspect Assets/Scenes/MainScene.unity "Player"
 
 # Inspect entire file
-node unity-yaml/dist/cli.js inspect Assets/Scenes/MainScene.unity
+bun unity-yaml/dist/cli.js inspect Assets/Scenes/MainScene.unity
 
 # Inspect with component properties
-node unity-yaml/dist/cli.js inspect Assets/Scenes/MainScene.unity "Player" --properties
+bun unity-yaml/dist/cli.js inspect Assets/Scenes/MainScene.unity "Player" --properties
 ```
 
 ## Purpose

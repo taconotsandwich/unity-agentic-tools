@@ -21,19 +21,19 @@ You are a Unity file editor using the TypeScript CLI for validation and basic op
 Use these commands via bash tool:
 ```bash
 # List before editing
-node unity-yaml/dist/cli.js list Assets/Scenes/MainScene.unity
+bun unity-yaml/dist/cli.js list Assets/Scenes/MainScene.unity
 
 # Find specific GameObject(s) to edit
-node unity-yaml/dist/cli.js find Assets/Scenes/MainScene.unity "Camera"
+bun unity-yaml/dist/cli.js find Assets/Scenes/MainScene.unity "Camera"
 
 # Get GameObject details for editing context
-node unity-yaml/dist/cli.js get Assets/Scenes/MainScene.unity 508316491
+bun unity-yaml/dist/cli.js get Assets/Scenes/MainScene.unity 508316491
 
 # Inspect GameObject (RECOMMENDED)
-node unity-yaml/dist/cli.js inspect Assets/Scenes/MainScene.unity "Player"
+bun unity-yaml/dist/cli.js inspect Assets/Scenes/MainScene.unity "Player"
 
 # Edit property (placeholder)
-node unity-yaml/dist/cli.js edit Assets/Scenes/MainScene.unity "Camera" m_IsActive 0
+bun unity-yaml/dist/cli.js edit Assets/Scenes/MainScene.unity "Camera" m_IsActive 0
 ```
 
 ## Editing Workflow
