@@ -6,26 +6,26 @@ This directory contains GitHub Actions workflows for testing and CI/CD.
 
 ### `ci.yml`
 Quick CI workflow that runs on every push and pull request:
-- Runs on Ubuntu with Node.js 20.x
+- Runs on Ubuntu with Bun runtime
 - Installs dependencies
 - Builds all projects
 - Runs unit tests
 - Runs CLI integration tests
-- Validates extension configurations (Claude Code & Gemini CLI)
+- Validates plugin configuration
 - Provides fast feedback for PRs
 
 ### `test.yml`
 Comprehensive test suite that runs on:
 - **OS**: Ubuntu, macOS, Windows
-- **Node.js**: 18.x, 20.x, 22.x
+- **Runtime**: Bun (built into Claude Code)
 
 Steps:
-- Install dependencies
+- Install dependencies with Bun
 - Build MCP server and unity-yaml library
 - Run unit tests
 - Run CLI integration tests
-- Validate extension configurations (Claude Code & Gemini CLI)
-- Generate test coverage (on Ubuntu + Node 20.x)
+- Validate plugin configuration
+- Generate test coverage
 
 ## Usage
 
@@ -33,21 +33,14 @@ These workflows run automatically on:
 - Push to `main` or `develop` branches
 - Pull requests targeting `main` or `develop` branches
 
-## Extension Validation
+## Validation
 
 The validation script (`.github/scripts/validate-extensions.sh`) checks:
 
-**Claude Code:**
+**Claude Code Plugin:**
 - `plugin.json` is valid JSON
-- Referenced command files exist
-- Referenced agent files exist
-- Hooks file exists and is valid
-
-**Gemini CLI:**
-- `gemini-extension.json` is valid JSON
-- MCP server configurations are valid
-- Command files in `commands/` directory
-- Context files (if referenced)
+- Plugin metadata is complete
+- Versions are synchronized
 
 **CLI & MCP:**
 - unity-yaml CLI is built and functional
@@ -59,22 +52,20 @@ Before pushing, you can run the same tests locally:
 
 ```bash
 # Install dependencies
-npm ci
-cd unity-yaml && npm ci && cd ..
+bun install
 
 # Build all projects
-npm run build
-cd unity-yaml && npm run build && cd ..
+bun run build
 
 # Run tests
-cd unity-yaml && npm test
+bun run test
 
 # Run CLI integration tests
 cd unity-yaml && bash test/cli-integration.test.sh
 
 # Run coverage
-cd unity-yaml && npm run test:coverage
+bun run test:coverage
 
-# Validate extension configurations
+# Validate configurations
 bash .github/scripts/validate-extensions.sh
 ```

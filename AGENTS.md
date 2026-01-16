@@ -4,48 +4,45 @@ This document provides essential guidelines for agentic coding tools working in 
 
 ## Project Overview
 
-TypeScript CLI providing token-efficient Unity file manipulation utilities. Supports multiple platforms (Claude Code, Gemini CLI).
+TypeScript CLI providing token-efficient Unity file manipulation utilities for Claude Code.
 
 **Core Structure:**
 - `unity-yaml/src/` - TypeScript source code
-- `unity-yaml/dist/` - Compiled JavaScript output
+- `unity-yaml/dist/` - Compiled JavaScript output (built by Bun)
 - `unity-yaml/test/` - TypeScript tests
-- `commands/` - TOML command definitions for Gemini CLI
-- `gemini-extension.json` - Gemini CLI extension manifest (at repository root)
-- `claude/` - Claude Code plugin
-- `gemini/` - Gemini CLI skill context
+- `.claude-plugin/` - Claude Code plugin manifest
+- `agents/` - Claude agent definitions
+- `doc-indexer/` - Documentation indexing module
 
 ## Quick Setup
 
 **Claude Code:**
 ```bash
-cd claude
+# Install from marketplace
+/plugin marketplace add https://github.com/taconotsandwich/unity-agentic-tools
+/plugin install unity-agentic-tools
+```
+
+Or develop locally:
+```bash
 ln -s $(pwd) ~/.claude/plugins/unity-agentic-tools
 ```
 
-**Gemini CLI:**
-```bash
-gemini extensions install git@github.com:taconotsandwich/unity-agentic-tools.git
-```
-
-## Build/Test/Lint Commands
+## Build/Test Commands
 
 ### Building
 ```bash
-cd unity-yaml
-npm run build
+bun run build
 ```
 
 ### Running Tests
 ```bash
-cd unity-yaml
-npm test
+bun run test
 ```
 
-### Linting
+### Watch Mode
 ```bash
-cd unity-yaml
-npm run lint
+bun run dev
 ```
 
 ## Code Style Guidelines
@@ -70,20 +67,17 @@ npm run lint
 
 ## CLI Commands Reference
 
-All commands use `node unity-yaml/dist/cli.js`:
+All commands use `bun unity-yaml/dist/cli.js`:
 - `list <file>` - List GameObject hierarchy
-- `find <file> <pattern>` - Find GameObjects
-- `get <file> <object_id>` - Get GameObject details
-- `inspect <file> [identifier]` - Inspect file or object
-- `inspect-all <file>` - Inspect entire file
+- `find <file> <pattern>` - Find GameObjects by name
+- `get <file> <object_id>` - Get GameObject by ID
+- `inspect <file> [identifier]` - Inspect file or GameObject
+- `inspect-all <file>` - Inspect entire file with all details
+- `search-docs <query>` - Search Unity documentation
 
-## Platform Integration
+## Claude Code Integration
 
-### Claude Code
-Commands defined in `.claude-plugin/plugin.json`
-Agent definitions in `claude/agents/`
-
-### Gemini CLI
-Extension config in `gemini-extension.json` (at repository root)
-Commands in `commands/*.toml`
-Skill context in `gemini/GEMINI.md`
+- Plugin manifest: `.claude-plugin/plugin.json`
+- Agent definitions: `agents/` directory
+- Hook handlers: `claude/hooks.json`
+- Documentation: See docs/claude.md
