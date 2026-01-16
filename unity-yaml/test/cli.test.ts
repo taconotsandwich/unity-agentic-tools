@@ -4,7 +4,7 @@ import { execSync } from 'child_process';
 describe('CLI', () => {
   describe('inspect command', () => {
     it('should output valid JSON', () => {
-      const result = execSync('node dist/cli.js inspect test/fixtures/TestSample.unity TestObject --json', { encoding: 'utf-8' });
+      const result = execSync('bun dist/cli.js inspect test/fixtures/TestSample.unity TestObject --json', { encoding: 'utf-8' });
       const json = JSON.parse(result.toString());
       expect(json).toHaveProperty('name');
       expect(json).toHaveProperty('file_id');
@@ -14,7 +14,7 @@ describe('CLI', () => {
 
   describe('list command', () => {
     it('should list all GameObjects', () => {
-      const result = execSync('node dist/cli.js list test/fixtures/TestSample.unity --json', { encoding: 'utf-8' });
+      const result = execSync('bun dist/cli.js list test/fixtures/TestSample.unity --json', { encoding: 'utf-8' });
       const json = JSON.parse(result.toString());
       expect(json).toHaveProperty('file');
       expect(json).toHaveProperty('count');
@@ -25,7 +25,7 @@ describe('CLI', () => {
 
   describe('find command', () => {
     it('should find objects by name', () => {
-      const result = execSync('npx tsx src/cli.ts find test/fixtures/SampleScene.unity Player --json', { encoding: 'utf-8' });
+      const result = execSync('bun dist/cli.js find test/fixtures/SampleScene.unity Player --json', { encoding: 'utf-8' });
       const json = JSON.parse(result.toString());
       expect(json).toHaveProperty('file');
       expect(json).toHaveProperty('pattern');

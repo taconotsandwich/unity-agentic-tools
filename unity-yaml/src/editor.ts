@@ -88,7 +88,9 @@ export function validateUnityYAML(content: string): boolean {
     return false;
   }
 
-  const invalidGuids = content.match(/guid:\s*[a-f0-9]{1,31}\b/g);
+  // Check for GUIDs that are too short (less than 30 hex characters)
+  // Valid Unity GUIDs are typically 32-36 hex characters
+  const invalidGuids = content.match(/guid:\s*[a-f0-9]{1,29}\b/g);
   if (invalidGuids) {
     console.error('Found invalid GUID format (missing characters)');
     return false;

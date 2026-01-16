@@ -170,12 +170,12 @@ export class UnityScanner {
     // Build clean or verbose output
     const outputObj: any = {
       name: details.name,
+      file_id: details.file_id,
       active: details.active,
     };
 
     // Add verbose fields
     if (verbose) {
-      outputObj.file_id = details.file_id;
       outputObj.tag = details.tag;
       outputObj.layer = details.layer;
     }
