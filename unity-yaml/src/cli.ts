@@ -4,6 +4,13 @@ import { UnityScanner } from './scanner';
 import * as path from 'path';
 const { exec } = require('child_process');
 
+if (!(process as any).versions.bun) {
+  console.error('CRITICAL ERROR: This tool MUST be run with BUN.');
+  console.error('You are currently using: Node.js');
+  console.error('Please run with: bun unity-yaml/dist/cli.js <command>');
+  process.exit(1);
+}
+
 const scanner = new UnityScanner();
 
 program

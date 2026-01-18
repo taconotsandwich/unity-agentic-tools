@@ -11,68 +11,51 @@ Supports read/edit operations on Unity files and fast documentation indexing wit
 - **Bun** 1.0.0 or higher (built-in with Claude Code)
 - **Claude Code** desktop app
 
-### Option 1: Install from Marketplace (Recommended)
-
+### Option 1: Install from GitHub
 ```bash
-# Add marketplace (first time only)
-/plugin marketplace add https://github.com/taconotsandwich/unity-agentic-tools
-
-# Install plugin
-/plugin install unity-agentic-tools
-
-# Restart Claude Code
+# Install directly from the repository
+/plugin add https://github.com/taconotsandwich/unity-agentic-tools
 ```
 
-The plugin automatically runs `bun install && bun run build` on install.
-
-### Option 2: Install Directly (Development)
-
+### Option 2: Local Development
 ```bash
-# Clone repository
+# Clone the repository
 git clone https://github.com/taconotsandwich/unity-agentic-tools.git
-
-# Build
 cd unity-agentic-tools
-bun install
-bun run build
 
-# Link to Claude Code plugins
-ln -s $(pwd) ~/.claude/plugins/unity-agentic-tools
-
-# Restart Claude Code
+# Load the plugin for the current session
+claude --plugin-dir .
 ```
 
 ## Usage
 
-### CLI
+### Slash Commands (Recommended)
+
+The most direct way to use the tools is via the built-in slash commands:
+
+-   **/unity:inspect**: Analyze a specific Unity file.
+    -   Example: `/unity:inspect Assets/Scenes/Main.unity`
+-   **/unity:edit**: Modify a component property safely.
+    -   Example: `/unity:edit Assets/Scenes/Main.unity "Player" "m_IsActive" 0`
+
+### Specialized Agents
+
+This plugin provides specialized agents that Claude can switch to for complex tasks (type `/agents` to view):
+
+-   **Unity Asset Analyst**: Deep inspection of hierarchy and components.
+-   **Unity Editor**: Safe modifications of YAML files.
+-   **Unity Project Scanner**: Broad project-wide discovery.
+
+### CLI (Manual)
+
+If you need to run the tools outside of the Claude interface:
 
 ```bash
-# List all GameObjects in a scene
-bun unity-yaml/dist/cli.js list Assets/Scenes/MainScene.unity
+# List hierarchy
+bun unity-yaml/dist/cli.js list <file_path>
 
-# Find GameObjects (fuzzy matching)
-bun unity-yaml/dist/cli.js find Assets/Scenes/MainScene.unity "Camera"
-
-# Find GameObjects (exact match)
-bun unity-yaml/dist/cli.js find Assets/Scenes/MainScene.unity "Camera" --exact
-
-# Get GameObject by ID
-bun unity-yaml/dist/cli.js get Assets/Scenes/MainScene.unity 508316491
-
-# Inspect GameObject (recommended)
-bun unity-yaml/dist/cli.js inspect Assets/Scenes/MainScene.unity "Player"
-
-# Inspect entire file
-bun unity-yaml/dist/cli.js inspect Assets/Scenes/MainScene.unity
-
-# Inspect with all properties
-bun unity-yaml/dist/cli.js inspect Assets/Scenes/MainScene.unity "Player" --properties
-
-# Search Unity documentation
-bun unity-yaml/dist/cli.js search-docs "Rigidbody component"
-
-# Index local documentation
-bun unity-yaml/dist/cli.js index-docs path/to/Documentation~
+# Inspect with properties
+bun unity-yaml/dist/cli.js inspect <file_path> <object_name> --properties
 ```
 
 ### Claude Code Integration
@@ -109,8 +92,11 @@ unity-agentic-tools/
 │   └── package.json
 ├── .claude-plugin/          # Claude Code plugin manifest
 │   └── plugin.json       # Plugin configuration
-├── agents/                  # Claude agent definitions
-└── commands/              # Skill command definitions
+├── agents/                  # Specialized Claude agent definitions
+├── commands/                # Definition of /unity:* slash commands
+├── skills/                  # Core capability definitions
+│   └── unity-yaml/
+│       └── SKILL.md      # Main skill logic
 ```
 
 ---
