@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 import { program } from 'commander';
 import { UnityScanner } from './scanner';
+import * as path from 'path';
+const { exec } = require('child_process');
 
 const scanner = new UnityScanner();
 
@@ -126,18 +128,34 @@ program.command('edit <file> <object_name> <property> <value>')
   });
 
 // Search docs command (uses doc-indexer CLI)
-const { exec } = require('child_process');
-
 program.command('search-docs <query>')
   .description('Search Unity documentation')
   .option('--summarize', '-s', 'Summarize results')
   .option('--compress', '-c', 'Compress results')
   .option('-j, --json', 'Output as JSON')
   .action((query, options) => {
-    const args = ['doc-indexer', 'search', query];
+    const docIndexerPath = path.join(__dirname, '..', '..', 'doc-indexer', 'dist', 'cli.js');
+    const args = [docIndexerPath, 'search', query];
     if (options.summarize) args.push('-s');
     if (options.compress) args.push('-c');
     if (options.json) args.push('-j');
+
+    exec(`bun ${args.join(' ')}`, (error, stdout, _stderr) => {
+      if (error) {
+        console.error('Error:', error.message);
+        process.exit(1);
+      }
+
+      console.log(stdout);
+    });
+  });
+
+// Index docs command
+program.command('index-docs <path>')
+  .description('Index Unity documentation')
+  .action((pathArg) => {
+    const docIndexerPath = path.join(__dirname, '..', '..', 'doc-indexer', 'dist', 'cli.js');
+    const args = [docIndexerPath, 'index', pathArg];
 
     exec(`bun ${args.join(' ')}`, (error, stdout, _stderr) => {
       if (error) {

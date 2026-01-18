@@ -23,6 +23,10 @@ The CLI is located at `${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js`. Always run
   - Retrieves raw YAML data for a specific object.
 - **Edit Property**: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js edit <file_path> <object_name> <property> <value>`
   - Safely modifies a property value while preserving GUIDs.
+- **Search Docs**: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js search-docs <query>`
+  - Searches indexed Unity documentation.
+- **Index Docs**: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js index-docs <path_to_docs>`
+  - Indexes a directory of markdown files or Unity docs.
 
 ## Workflow
 

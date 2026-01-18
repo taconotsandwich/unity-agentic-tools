@@ -13,6 +13,9 @@ This toolkit provides token-efficient TypeScript CLI for:
 
 ## Usage
 
+> [!IMPORTANT]
+> Always use `bun` for all commands in this repository. NEVER use `node`.
+
 When working with this repository or plugin, use the TypeScript CLI.
 
 ### Commands
