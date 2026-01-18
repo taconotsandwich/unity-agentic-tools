@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/detect_unity.js"
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/hooks/detect_unity.js"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre_unity_validate.js"
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/hooks/pre_unity_validate.js"
           }
         ]
       },
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/unity_context_inject.js"
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/hooks/unity_context_inject.js"
           }
         ]
       }
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post_unity_verify.js"
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/hooks/post_unity_verify.js"
           }
         ]
       }
@@ -48,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/unity_docs_index.js"
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/hooks/unity_docs_index.js"
           }
         ]
       }

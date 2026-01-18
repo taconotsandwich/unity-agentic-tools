@@ -60,6 +60,4 @@ test-samples/
 .claude/
 ts/
 
-# MCP server
-mcp-server.mjs
-mcp-server.ts
+# MCP

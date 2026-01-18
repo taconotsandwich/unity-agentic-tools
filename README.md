@@ -110,8 +110,7 @@ unity-agentic-tools/
 ├── .claude-plugin/          # Claude Code plugin manifest
 │   └── plugin.json       # Plugin configuration
 ├── agents/                  # Claude agent definitions
-├── commands/              # Skill command definitions
-└── mcp-server.ts          # MCP server for external integrations
+└── commands/              # Skill command definitions
 ```
 
 ---

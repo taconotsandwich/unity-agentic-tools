@@ -114,16 +114,6 @@ else
 fi
 
 echo ""
-echo "Validating MCP server..."
-
-# Check if MCP server is built
-if [ -f "mcp-server.mjs" ]; then
-    print_success "MCP server is built"
-else
-    print_warning "MCP server not built (run: bun run build:mcp-server)"
-fi
-
-echo ""
 echo "========================================"
 if [ $ERRORS -eq 0 ]; then
     echo -e "${GREEN}✅ All validations passed!${NC}"
