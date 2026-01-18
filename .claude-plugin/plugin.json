@@ -6,7 +6,6 @@
   "description": "Token-efficient CLI tools for Unity YAML parsing, scene analysis, and prefab inspection via AI agents",
   "author": "Anthropic",
   "license": "MIT",
-  "main": "./dist/index.js",
   "bin": {
     "unity-yaml": "./dist/cli.js"
   },

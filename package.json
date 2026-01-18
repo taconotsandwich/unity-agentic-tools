@@ -1,14 +1,11 @@
 {
   "packageManager": "bun@latest",
   "scripts": {
-    "build": "bun run build:mcp-server && cd unity-yaml && bun run build",
-    "build:mcp-server": "bun build mcp-server.ts --outfile=mcp-server.mjs --target=bun --external:node:child_process --external:node:fs --external:node:path --external:node:url"
+    "build": "cd unity-yaml && bun run build"
   },
   "devDependencies": {
     "@types/node": "^25.0.5",
     "typescript": "^5.9.3"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.25.2"
-  }
+  "dependencies": {}
 }
