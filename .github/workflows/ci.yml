@@ -26,11 +26,16 @@ jobs:
             unity-yaml/bun.lock
             doc-indexer/bun.lock
 
-      - name: Install dependencies
-        run: |
-          bun install
-          (cd unity-yaml && bun install)
-          (cd doc-indexer && bun install)
+      - name: Install root dependencies
+        run: bun install
+
+      - name: Install unity-yaml dependencies
+        working-directory: ./unity-yaml
+        run: bun install
+
+      - name: Install doc-indexer dependencies
+        working-directory: ./doc-indexer
+        run: bun install
 
       - name: Build packages
         run: bun run build

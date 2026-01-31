@@ -33,11 +33,16 @@ jobs:
             unity-yaml/bun.lock
             doc-indexer/bun.lock
 
-      - name: Install dependencies
-        run: |
-          bun install
-          (cd unity-yaml && bun install)
-          (cd doc-indexer && bun install)
+      - name: Install root dependencies
+        run: bun install
+
+      - name: Install unity-yaml dependencies
+        working-directory: ./unity-yaml
+        run: bun install
+
+      - name: Install doc-indexer dependencies
+        working-directory: ./doc-indexer
+        run: bun install
 
       - name: Build packages
         run: bun run build
@@ -45,11 +50,13 @@ jobs:
       - name: Run tests
         run: bun run test
 
-      - name: Run CLI integration tests
+      - name: Run CLI integration tests (Unix)
+        if: runner.os != 'Windows'
         working-directory: ./unity-yaml
         run: bash test/cli-integration.test.sh
 
-      - name: Validate extension configurations
+      - name: Validate extension configurations (Unix)
+        if: runner.os != 'Windows'
         run: bash .github/scripts/validate-extensions.sh
 
       - name: Generate test coverage

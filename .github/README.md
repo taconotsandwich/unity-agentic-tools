@@ -51,10 +51,10 @@ The validation script (`.github/scripts/validate-extensions.sh`) checks:
 Before pushing, you can run the same tests locally:
 
 ```bash
-# Install dependencies (root + packages)
+# Install dependencies
 bun install
-(cd unity-yaml && bun install)
-(cd doc-indexer && bun install)
+cd unity-yaml && bun install && cd ..
+cd doc-indexer && bun install && cd ..
 
 # Build packages
 bun run build
@@ -62,12 +62,12 @@ bun run build
 # Run tests
 bun run test
 
-# Run CLI integration tests
-cd unity-yaml && bash test/cli-integration.test.sh
+# Run CLI integration tests (Unix only)
+bun run test:integration
 
 # Run coverage
 bun run test:coverage
 
-# Validate configurations
+# Validate configurations (Unix only)
 bash .github/scripts/validate-extensions.sh
 ```
