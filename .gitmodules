@@ -1,3 +1,3 @@
-[submodule "test-samples/ProjectTinySamples"]
-	path = test-samples/ProjectTinySamples
-	url = https://github.com/Unity-Technologies/ProjectTinySamples
+[submodule "test/fixtures/external"]
+	path = test/fixtures/external
+	url = https://github.com/striderzz/2D-Platformer-Unity.git

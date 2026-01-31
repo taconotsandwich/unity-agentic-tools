@@ -7,8 +7,8 @@ This directory contains GitHub Actions workflows for testing and CI/CD.
 ### `ci.yml`
 Quick CI workflow that runs on every push and pull request:
 - Runs on Ubuntu with Bun runtime
-- Installs dependencies
-- Builds all projects
+- Installs dependencies (root + packages)
+- Builds packages (unity-yaml + doc-indexer)
 - Runs unit tests
 - Runs CLI integration tests
 - Validates plugin configuration
@@ -20,8 +20,8 @@ Comprehensive test suite that runs on:
 - **Runtime**: Bun (built into Claude Code)
 
 Steps:
-- Install dependencies with Bun
-- Build MCP server and unity-yaml library
+- Install dependencies with Bun (root + packages)
+- Build packages (unity-yaml + doc-indexer)
 - Run unit tests
 - Run CLI integration tests
 - Validate plugin configuration
@@ -51,10 +51,12 @@ The validation script (`.github/scripts/validate-extensions.sh`) checks:
 Before pushing, you can run the same tests locally:
 
 ```bash
-# Install dependencies
+# Install dependencies (root + packages)
 bun install
+(cd unity-yaml && bun install)
+(cd doc-indexer && bun install)
 
-# Build all projects
+# Build packages
 bun run build
 
 # Run tests

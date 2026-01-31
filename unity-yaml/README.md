@@ -135,4 +135,4 @@ All CLI commands output JSON by default:
 
 ## License
 
-MIT
+Apache-2.0

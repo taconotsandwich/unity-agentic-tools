@@ -1,7 +1,14 @@
 {
   "packageManager": "bun@latest",
   "scripts": {
-    "build": "cd unity-yaml && bun run build"
+    "build": "bun run build:unity-yaml && bun run build:doc-indexer",
+    "build:unity-yaml": "cd unity-yaml && bun run build",
+    "build:doc-indexer": "cd doc-indexer && bun run build",
+    "test": "cd unity-yaml && bun run test",
+    "test:quick": "cd unity-yaml && bun run test",
+    "test:coverage": "cd unity-yaml && bun run test:coverage",
+    "type-check": "cd unity-yaml && tsc --noEmit && cd ../doc-indexer && tsc --noEmit",
+    "lint": "echo 'No linter configured'"
   },
   "devDependencies": {
     "@types/node": "^25.0.5",

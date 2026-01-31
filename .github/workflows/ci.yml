@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quick-test:
     runs-on: ubuntu-latest
@@ -15,28 +19,24 @@ jobs:
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
+        with:
+          cache: true
+          cache-dependency-path: |
+            bun.lock
+            unity-yaml/bun.lock
+            doc-indexer/bun.lock
 
-      - name: Install dependencies (root)
-        run: bun install
+      - name: Install dependencies
+        run: |
+          bun install
+          (cd unity-yaml && bun install)
+          (cd doc-indexer && bun install)
 
-      - name: Install dependencies (unity-yaml)
-        working-directory: ./unity-yaml
-        run: bun install
-
-      - name: Build all
-        run: bun run build
-
-      - name: Build unity-yaml library
-        working-directory: ./unity-yaml
+      - name: Build packages
         run: bun run build
 
       - name: Run tests
-        working-directory: ./unity-yaml
         run: bun run test
-
-      - name: Run CLI integration tests
-        working-directory: ./unity-yaml
-        run: bash test/cli-integration.test.sh
 
       - name: Validate extension configurations
         run: bash .github/scripts/validate-extensions.sh
