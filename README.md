@@ -1,65 +1,94 @@
 # Unity Agentic Tools
 
-Token-efficient Unity file operations for Claude Code. Read and edit scenes, prefabs, and assets.
+A Claude Code plugin for reading and editing Unity scenes, prefabs, and assets with minimal token usage.
 
-## Usage
+## Features
 
-### Install
+- **Scene Analysis** - List hierarchies, search GameObjects, inspect components
+- **Prefab Support** - Same capabilities for prefab files
+- **Safe Editing** - Modify properties while preserving Unity's YAML format
+- **Fast Parsing** - Rust-powered backend for large files
+
+## Installation
+
+### From Marketplace
 
 ```bash
-/install https://github.com/taconotsandwich/unity-agentic-tools
+# Add the marketplace (run in Claude Code)
+/plugin
+
+# Navigate to Marketplaces → Add:
+https://github.com/taconotsandwich/unity-agentic-tools
+
+# Then install the plugin
+/plugin install unity-agentic-tools@unity-agentic-tools-marketplace
+
+# Install the native binary
+/unity-agentic-tools:initial-install
 ```
 
-### Commands
-
-| Command    | Description                 | Example                                                  |
-|------------|-----------------------------|----------------------------------------------------------|
-| `/inspect` | Analyze a Unity file        | `/inspect Assets/Scenes/Main.unity`                      |
-| `/edit`    | Modify a component property | `/edit Assets/Scenes/Main.unity "Player" "m_IsActive" 0` |
-
-### Natural Language
-
-Ask Claude directly:
-- "List all GameObjects in SampleScene.unity"
-- "Find objects with Camera component"
-- "Inspect the Player prefab"
-
-## Contributing
-
-### Setup
+### From Source
 
 ```bash
 git clone https://github.com/taconotsandwich/unity-agentic-tools.git
 cd unity-agentic-tools
-bun install
-bun run build
+
+# Build Rust core (requires Rust toolchain)
+cd rust-core && bun install && bun run build && cd ..
+
+# Build TypeScript CLI
+cd unity-yaml && bun install && bun run build && cd ..
+
+# Load plugin locally
+claude --plugin-dir ./
 ```
 
-### Test
+## Usage
+
+Ask Claude naturally:
+
+- "List all GameObjects in SampleScene.unity"
+- "Find objects with Camera component"
+- "Inspect the Player prefab"
+- "Set Player's m_IsActive to 0"
+
+Or use slash commands directly:
 
 ```bash
-# Fetch test fixtures (Unity project submodule)
-git submodule update --init
+/inspect Assets/Scenes/Main.unity
+/edit Assets/Prefabs/Player.prefab
+```
 
+## Project Structure
+
+```
+.claude-plugin/   Plugin manifest
+commands/         Slash commands
+skills/           Agent skills
+agents/           Specialized subagents
+hooks/            Event handlers
+unity-yaml/       TypeScript CLI
+rust-core/        Native Rust module (napi-rs)
+```
+
+## Development
+
+```bash
 # Run tests
 bun run test
 
-# Watch mode
-bun run test:watch
+# Run CLI integration tests
+bun run test:integration
 
-# Coverage
-bun run test:coverage
+# Type check
+bun run type-check
 ```
 
-### Structure
+## Requirements
 
-```
-unity-yaml/       # Core parser and editor
-doc-indexer/      # Documentation indexing (RAG)
-agents/           # Specialized agent definitions
-commands/         # Slash command definitions
-skills/           # Skill definitions
-```
+- Claude Code CLI
+- Bun runtime (bundled with Claude Code)
+- Rust toolchain (for building from source)
 
 ## License
 
