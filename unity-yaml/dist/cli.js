@@ -2420,21 +2420,32 @@ var {
 var import_module = require("module");
 var import_path = require("path");
 var __filename = "/Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src/scanner.ts";
-var RustScanner;
+var RustScanner = null;
+var nativeModuleError = null;
 try {
   const customRequire = import_module.createRequire("file:///Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src/scanner.ts");
   const rustCorePath = import_path.join(import_path.dirname(__filename), "..", "..", "rust-core");
   const rustModule = customRequire(rustCorePath);
   RustScanner = rustModule.Scanner;
 } catch (err) {
-  throw new Error(`Failed to load native Rust module. Please install the pre-built binary for your platform.
-` + `Download from: https://github.com/anthropics/unity-agentic-tools/releases
-` + `Original error: ${err.message}`);
+  nativeModuleError = `Failed to load native Rust module. Please install the pre-built binary for your platform.
+` + `Download from: https://github.com/taconotsandwich/unity-agentic-tools/releases
+` + `Run: /initial-install (if using as Claude Code plugin)
+` + `Original error: ${err.message}`;
+}
+function isNativeModuleAvailable() {
+  return RustScanner !== null;
+}
+function getNativeModuleError() {
+  return nativeModuleError;
 }
 
 class UnityScanner {
   scanner;
   constructor() {
+    if (!RustScanner) {
+      throw new Error(nativeModuleError || "Native module not available");
+    }
     this.scanner = new RustScanner;
   }
   setProjectRoot(path) {
@@ -2730,10 +2741,20 @@ if (!process.versions.bun) {
   console.error("Please run with: bun unity-yaml/dist/cli.js <command>");
   process.exit(1);
 }
-var scanner = new UnityScanner;
+var _scanner = null;
+function getScanner() {
+  if (!_scanner) {
+    if (!isNativeModuleAvailable()) {
+      console.error(getNativeModuleError());
+      process.exit(1);
+    }
+    _scanner = new UnityScanner;
+  }
+  return _scanner;
+}
 program.name("unity-yaml").description("Fast, token-efficient Unity YAML parser").version("1.0.0");
 program.command("list <file>").description("List GameObject hierarchy in Unity file").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, options) => {
-  const result = scanner.scan_scene_with_components(file, { verbose: options.verbose });
+  const result = getScanner().scan_scene_with_components(file, { verbose: options.verbose });
   const output = {
     file,
     count: result.length,
@@ -2743,7 +2764,7 @@ program.command("list <file>").description("List GameObject hierarchy in Unity f
 });
 program.command("find <file> <pattern>").description("Find GameObjects by name pattern").option("-e, --exact", "Use exact matching").option("-j, --json", "Output as JSON").action((file, pattern, options) => {
   const fuzzy = options.exact !== true;
-  const result = scanner.find_by_name(file, pattern, fuzzy);
+  const result = getScanner().find_by_name(file, pattern, fuzzy);
   const output = {
     file,
     pattern,
@@ -2754,7 +2775,7 @@ program.command("find <file> <pattern>").description("Find GameObjects by name p
   console.log(JSON.stringify(output, null, 2));
 });
 program.command("get <file> <object_id>").description("Get GameObject details by ID").option("-c, --component <type>", "Get specific component type").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, object_id, options) => {
-  const result = scanner.inspect({
+  const result = getScanner().inspect({
     file,
     identifier: object_id,
     verbose: options.verbose
@@ -2774,11 +2795,11 @@ program.command("get <file> <object_id>").description("Get GameObject details by
 });
 program.command("inspect <file> [identifier]").description("Inspect Unity file or specific GameObject").option("-p, --properties", "Include component properties").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, identifier, options) => {
   if (!identifier) {
-    const result2 = scanner.inspect_all(file, options.properties === true, options.verbose === true);
+    const result2 = getScanner().inspect_all(file, options.properties === true, options.verbose === true);
     console.log(JSON.stringify(result2, null, 2));
     return;
   }
-  const result = scanner.inspect({
+  const result = getScanner().inspect({
     file,
     identifier,
     include_properties: options.properties === true,
@@ -2791,7 +2812,7 @@ program.command("inspect <file> [identifier]").description("Inspect Unity file o
   console.log(JSON.stringify(result, null, 2));
 });
 program.command("inspect-all <file>").description("Inspect entire Unity file with all details").option("-p, --properties", "Include component properties").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, options) => {
-  const result = scanner.inspect_all(file, options.properties === true, options.verbose === true);
+  const result = getScanner().inspect_all(file, options.properties === true, options.verbose === true);
   console.log(JSON.stringify(result, null, 2));
 });
 program.command("edit <file> <object_name> <property> <value>").description("Edit GameObject property value safely").option("-j, --json", "Output as JSON").action((file, object_name, property, value, _options) => {
@@ -2871,7 +2892,9 @@ program.command("status").description("Show current configuration and status").o
     config,
     guid_cache_count: guidCacheCount,
     runtime: "bun",
-    version: "1.0.0"
+    version: "1.0.0",
+    native_module: isNativeModuleAvailable(),
+    native_module_error: isNativeModuleAvailable() ? null : getNativeModuleError()
   };
   console.log(JSON.stringify(status, null, 2));
 });

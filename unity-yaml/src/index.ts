@@ -1,4 +1,4 @@
-export { UnityScanner } from './scanner';
+export { UnityScanner, isNativeModuleAvailable, getNativeModuleError } from './scanner';
 export { setup } from './setup';
 export { cleanup } from './cleanup';
 export type {

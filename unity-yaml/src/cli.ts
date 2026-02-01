@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { program } from 'commander';
-import { UnityScanner } from './scanner';
+import { UnityScanner, isNativeModuleAvailable, getNativeModuleError } from './scanner';
 import { setup } from './setup';
 import { cleanup } from './cleanup';
 import * as path from 'path';
@@ -13,7 +13,18 @@ if (!(process as any).versions.bun) {
   process.exit(1);
 }
 
-const scanner = new UnityScanner();
+// Lazily create scanner only when needed
+let _scanner: UnityScanner | null = null;
+function getScanner(): UnityScanner {
+  if (!_scanner) {
+    if (!isNativeModuleAvailable()) {
+      console.error(getNativeModuleError());
+      process.exit(1);
+    }
+    _scanner = new UnityScanner();
+  }
+  return _scanner;
+}
 
 program
   .name('unity-yaml')
@@ -26,7 +37,7 @@ program.command('list <file>')
   .option('-j, --json', 'Output as JSON')
   .option('-v, --verbose', 'Show internal Unity IDs')
   .action((file, options) => {
-    const result = scanner.scan_scene_with_components(file, { verbose: options.verbose });
+    const result = getScanner().scan_scene_with_components(file, { verbose: options.verbose });
     const output = {
       file,
       count: result.length,
@@ -42,7 +53,7 @@ program.command('find <file> <pattern>')
   .option('-j, --json', 'Output as JSON')
   .action((file, pattern, options) => {
     const fuzzy = options.exact !== true;
-    const result = scanner.find_by_name(file, pattern, fuzzy);
+    const result = getScanner().find_by_name(file, pattern, fuzzy);
     const output = {
       file,
       pattern,
@@ -60,7 +71,7 @@ program.command('get <file> <object_id>')
   .option('-j, --json', 'Output as JSON')
   .option('-v, --verbose', 'Show internal Unity IDs')
   .action((file, object_id, options) => {
-    const result = scanner.inspect({
+    const result = getScanner().inspect({
       file,
       identifier: object_id,
       verbose: options.verbose
@@ -91,7 +102,7 @@ program.command('inspect <file> [identifier]')
   .action((file, identifier, options) => {
     // If no identifier provided, inspect the entire file
     if (!identifier) {
-      const result = scanner.inspect_all(
+      const result = getScanner().inspect_all(
         file,
         options.properties === true,
         options.verbose === true
@@ -100,7 +111,7 @@ program.command('inspect <file> [identifier]')
       return;
     }
 
-    const result = scanner.inspect({
+    const result = getScanner().inspect({
       file,
       identifier,
       include_properties: options.properties === true,
@@ -122,7 +133,7 @@ program.command('inspect-all <file>')
   .option('-j, --json', 'Output as JSON')
   .option('-v, --verbose', 'Show internal Unity IDs')
   .action((file, options) => {
-    const result = scanner.inspect_all(
+    const result = getScanner().inspect_all(
       file,
       options.properties === true,
       options.verbose === true
@@ -252,6 +263,8 @@ program.command('status')
       guid_cache_count: guidCacheCount,
       runtime: 'bun',
       version: '1.0.0',
+      native_module: isNativeModuleAvailable(),
+      native_module_error: isNativeModuleAvailable() ? null : getNativeModuleError(),
     };
 
     console.log(JSON.stringify(status, null, 2));

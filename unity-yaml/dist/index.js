@@ -321,6 +321,8 @@ var require_rust_core = __commonJS((exports2, module2) => {
 var exports_src = {};
 __export(exports_src, {
   setup: () => setup,
+  isNativeModuleAvailable: () => isNativeModuleAvailable,
+  getNativeModuleError: () => getNativeModuleError,
   cleanup: () => cleanup,
   UnityScanner: () => UnityScanner
 });
@@ -330,21 +332,32 @@ module.exports = __toCommonJS(exports_src);
 var import_module = require("module");
 var import_path = require("path");
 var __filename = "/Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src/scanner.ts";
-var RustScanner;
+var RustScanner = null;
+var nativeModuleError = null;
 try {
   const customRequire = import_module.createRequire("file:///Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src/scanner.ts");
   const rustCorePath = import_path.join(import_path.dirname(__filename), "..", "..", "rust-core");
   const rustModule = customRequire(rustCorePath);
   RustScanner = rustModule.Scanner;
 } catch (err) {
-  throw new Error(`Failed to load native Rust module. Please install the pre-built binary for your platform.
-` + `Download from: https://github.com/anthropics/unity-agentic-tools/releases
-` + `Original error: ${err.message}`);
+  nativeModuleError = `Failed to load native Rust module. Please install the pre-built binary for your platform.
+` + `Download from: https://github.com/taconotsandwich/unity-agentic-tools/releases
+` + `Run: /initial-install (if using as Claude Code plugin)
+` + `Original error: ${err.message}`;
+}
+function isNativeModuleAvailable() {
+  return RustScanner !== null;
+}
+function getNativeModuleError() {
+  return nativeModuleError;
 }
 
 class UnityScanner {
   scanner;
   constructor() {
+    if (!RustScanner) {
+      throw new Error(nativeModuleError || "Native module not available");
+    }
     this.scanner = new RustScanner;
   }
   setProjectRoot(path) {
