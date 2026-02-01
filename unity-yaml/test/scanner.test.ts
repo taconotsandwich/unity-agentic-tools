@@ -1,9 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { UnityScanner } from '../src/scanner';
+import { UnityScanner, isNativeModuleAvailable } from '../src/scanner';
 
-const scanner = new UnityScanner();
+// Skip all tests if native module is not available
+const describeIfNative = isNativeModuleAvailable() ? describe : describe.skip;
 
-describe('UnityScanner', () => {
+let scanner: UnityScanner;
+if (isNativeModuleAvailable()) {
+  scanner = new UnityScanner();
+}
+
+describeIfNative('UnityScanner', () => {
 
   describe('scan_scene_minimal', () => {
     it('should parse GameObjects from Unity file', () => {

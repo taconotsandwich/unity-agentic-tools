@@ -3,7 +3,8 @@ import { join, dirname } from 'path';
 import { GameObject, GameObjectDetail, SceneInspection, InspectOptions, ScanOptions } from './types';
 
 // Load the native Rust module
-let RustScanner: any;
+let RustScanner: any = null;
+let nativeModuleError: string | null = null;
 
 try {
   const customRequire = createRequire(import.meta.url || __filename);
@@ -11,11 +12,25 @@ try {
   const rustModule = customRequire(rustCorePath);
   RustScanner = rustModule.Scanner;
 } catch (err) {
-  throw new Error(
+  nativeModuleError =
     `Failed to load native Rust module. Please install the pre-built binary for your platform.\n` +
-    `Download from: https://github.com/anthropics/unity-agentic-tools/releases\n` +
-    `Original error: ${(err as Error).message}`
-  );
+    `Download from: https://github.com/taconotsandwich/unity-agentic-tools/releases\n` +
+    `Run: /initial-install (if using as Claude Code plugin)\n` +
+    `Original error: ${(err as Error).message}`;
+}
+
+/**
+ * Check if the native Rust module is available
+ */
+export function isNativeModuleAvailable(): boolean {
+  return RustScanner !== null;
+}
+
+/**
+ * Get the native module error message if it failed to load
+ */
+export function getNativeModuleError(): string | null {
+  return nativeModuleError;
 }
 
 /**
@@ -25,6 +40,9 @@ export class UnityScanner {
   private scanner: any;
 
   constructor() {
+    if (!RustScanner) {
+      throw new Error(nativeModuleError || 'Native module not available');
+    }
     this.scanner = new RustScanner();
   }
 

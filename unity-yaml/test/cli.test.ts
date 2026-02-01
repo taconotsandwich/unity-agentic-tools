@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
 import { resolve } from 'path';
 import { create_temp_fixture } from './test-utils';
+import { isNativeModuleAvailable } from '../src/scanner';
 
 const repo_root = resolve(__dirname, '..');
 const fixtures_dir = resolve(__dirname, 'fixtures');
+
+// Skip all tests if native module is not available
+const describeIfNative = isNativeModuleAvailable() ? describe : describe.skip;
 
 function run_cli(args: string[]): string {
     return execFileSync('bun', ['dist/cli.js', ...args], {
@@ -13,7 +17,7 @@ function run_cli(args: string[]): string {
     });
 }
 
-describe('CLI', () => {
+describeIfNative('CLI', () => {
     describe('inspect command', () => {
         it('should output valid JSON', () => {
             const result = run_cli([
