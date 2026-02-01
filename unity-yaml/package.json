@@ -18,8 +18,10 @@
   ],
   "scripts": {
     "build": "bun run build:lib && bun run build:cli",
-    "build:lib": "bun build src/index.ts --outfile=dist/index.js --target=bun --format=cjs --declaration",
-    "build:cli": "bun build src/cli.ts --outfile=dist/cli.js --target=bun --format=cjs",
+    "build:lib": "bun build src/index.ts --outdir=dist --target=bun --format=cjs",
+    "build:cli": "bun build src/cli.ts --outdir=dist --target=bun --format=cjs",
+    "build:rust": "cd ../rust-core && bun install && bun run build",
+    "build:all": "bun run build:rust || echo 'Rust build skipped' && bun run build",
     "dev": "bun build src/index.ts --watch",
     "clean": "rm -rf dist",
     "rebuild": "bun run clean && bun run build",

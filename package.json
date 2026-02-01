@@ -4,6 +4,8 @@
     "build": "bun run build:unity-yaml && bun run build:doc-indexer",
     "build:unity-yaml": "cd unity-yaml && bun run build",
     "build:doc-indexer": "cd doc-indexer && bun run build",
+    "build:rust": "cd rust-core && bun install && bun run build",
+    "build:all": "bun run build:rust || echo 'Rust build skipped' && bun run build",
     "test": "cd unity-yaml && bun run test",
     "test:quick": "cd unity-yaml && bun run test",
     "test:all": "cd unity-yaml && bun run test",

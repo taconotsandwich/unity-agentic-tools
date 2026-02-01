@@ -61,3 +61,6 @@ test-samples/
 ts/
 
 # MCP
+
+# Native binaries
+*.node
