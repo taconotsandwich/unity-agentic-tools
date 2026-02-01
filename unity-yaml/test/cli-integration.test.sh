@@ -4,6 +4,14 @@ set -u
 
 echo "=== Testing Unity CLI Integration ==="
 
+# Check if native module is available
+status_output=$(bun dist/cli.js status 2>&1)
+if echo "$status_output" | grep -q '"native_module": false'; then
+    echo "⚠ Native Rust module not available - skipping integration tests"
+    echo "  Run /initial-install to download the pre-built binary"
+    exit 0
+fi
+
 failures=0
 tmp_dir="$(mktemp -d 2>/dev/null || mktemp -d -t unity-cli-test)"
 
