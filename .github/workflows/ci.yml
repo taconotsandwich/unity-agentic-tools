@@ -26,6 +26,14 @@ jobs:
             unity-yaml/bun.lock
             doc-indexer/bun.lock
 
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core -> target
+
       - name: Install root dependencies
         run: bun install
 
@@ -36,6 +44,14 @@ jobs:
       - name: Install doc-indexer dependencies
         working-directory: ./doc-indexer
         run: bun install
+
+      - name: Install rust-core dependencies
+        working-directory: ./rust-core
+        run: bun install
+
+      - name: Build native module
+        working-directory: ./rust-core
+        run: bun run build
 
       - name: Build packages
         run: bun run build
