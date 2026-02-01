@@ -2111,6 +2111,295 @@ var require_commander = __commonJS((exports2) => {
   exports2.InvalidOptionArgumentError = InvalidArgumentError;
 });
 
+// ../rust-core/unity-agentic-core.darwin-arm64.node
+var require_unity_agentic_core_darwin_arm64 = __commonJS((exports2, module2) => {
+  module2.exports = require("./unity-agentic-core.darwin-arm64-x8b2vckr.node");
+});
+
+// ../rust-core/index.js
+var require_rust_core = __commonJS((exports2, module2) => {
+  var __dirname = "/Users/taco/Documents/Projects/unity-agentic-tools/rust-core";
+  var { existsSync, readFileSync } = require("fs");
+  var { join: join2 } = require("path");
+  var { platform, arch } = process;
+  var nativeBinding = null;
+  var localFileExisted = false;
+  var loadError = null;
+  function isMusl() {
+    if (!process.report || typeof process.report.getReport !== "function") {
+      try {
+        const lddPath = require("child_process").execSync("which ldd").toString().trim();
+        return readFileSync(lddPath, "utf8").includes("musl");
+      } catch (e) {
+        return true;
+      }
+    } else {
+      const { glibcVersionRuntime } = process.report.getReport().header;
+      return !glibcVersionRuntime;
+    }
+  }
+  switch (platform) {
+    case "android":
+      switch (arch) {
+        case "arm64":
+          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.android-arm64.node"));
+          try {
+            if (localFileExisted) {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.android-arm64.node");})();
+            } else {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-android-arm64");})();
+            }
+          } catch (e) {
+            loadError = e;
+          }
+          break;
+        case "arm":
+          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.android-arm-eabi.node"));
+          try {
+            if (localFileExisted) {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.android-arm-eabi.node");})();
+            } else {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-android-arm-eabi");})();
+            }
+          } catch (e) {
+            loadError = e;
+          }
+          break;
+        default:
+          throw new Error(`Unsupported architecture on Android ${arch}`);
+      }
+      break;
+    case "win32":
+      switch (arch) {
+        case "x64":
+          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.win32-x64-msvc.node"));
+          try {
+            if (localFileExisted) {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.win32-x64-msvc.node");})();
+            } else {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-win32-x64-msvc");})();
+            }
+          } catch (e) {
+            loadError = e;
+          }
+          break;
+        case "ia32":
+          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.win32-ia32-msvc.node"));
+          try {
+            if (localFileExisted) {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.win32-ia32-msvc.node");})();
+            } else {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-win32-ia32-msvc");})();
+            }
+          } catch (e) {
+            loadError = e;
+          }
+          break;
+        case "arm64":
+          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.win32-arm64-msvc.node"));
+          try {
+            if (localFileExisted) {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.win32-arm64-msvc.node");})();
+            } else {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-win32-arm64-msvc");})();
+            }
+          } catch (e) {
+            loadError = e;
+          }
+          break;
+        default:
+          throw new Error(`Unsupported architecture on Windows: ${arch}`);
+      }
+      break;
+    case "darwin":
+      localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.darwin-universal.node"));
+      try {
+        if (localFileExisted) {
+          nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.darwin-universal.node");})();
+        } else {
+          nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-darwin-universal");})();
+        }
+        break;
+      } catch {}
+      switch (arch) {
+        case "x64":
+          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.darwin-x64.node"));
+          try {
+            if (localFileExisted) {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.darwin-x64.node");})();
+            } else {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-darwin-x64");})();
+            }
+          } catch (e) {
+            loadError = e;
+          }
+          break;
+        case "arm64":
+          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.darwin-arm64.node"));
+          try {
+            if (localFileExisted) {
+              nativeBinding = require_unity_agentic_core_darwin_arm64();
+            } else {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-darwin-arm64");})();
+            }
+          } catch (e) {
+            loadError = e;
+          }
+          break;
+        default:
+          throw new Error(`Unsupported architecture on macOS: ${arch}`);
+      }
+      break;
+    case "freebsd":
+      if (arch !== "x64") {
+        throw new Error(`Unsupported architecture on FreeBSD: ${arch}`);
+      }
+      localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.freebsd-x64.node"));
+      try {
+        if (localFileExisted) {
+          nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.freebsd-x64.node");})();
+        } else {
+          nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-freebsd-x64");})();
+        }
+      } catch (e) {
+        loadError = e;
+      }
+      break;
+    case "linux":
+      switch (arch) {
+        case "x64":
+          if (isMusl()) {
+            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-x64-musl.node"));
+            try {
+              if (localFileExisted) {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-x64-musl.node");})();
+              } else {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-linux-x64-musl");})();
+              }
+            } catch (e) {
+              loadError = e;
+            }
+          } else {
+            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-x64-gnu.node"));
+            try {
+              if (localFileExisted) {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-x64-gnu.node");})();
+              } else {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-linux-x64-gnu");})();
+              }
+            } catch (e) {
+              loadError = e;
+            }
+          }
+          break;
+        case "arm64":
+          if (isMusl()) {
+            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-arm64-musl.node"));
+            try {
+              if (localFileExisted) {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-arm64-musl.node");})();
+              } else {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-linux-arm64-musl");})();
+              }
+            } catch (e) {
+              loadError = e;
+            }
+          } else {
+            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-arm64-gnu.node"));
+            try {
+              if (localFileExisted) {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-arm64-gnu.node");})();
+              } else {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-linux-arm64-gnu");})();
+              }
+            } catch (e) {
+              loadError = e;
+            }
+          }
+          break;
+        case "arm":
+          if (isMusl()) {
+            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-arm-musleabihf.node"));
+            try {
+              if (localFileExisted) {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-arm-musleabihf.node");})();
+              } else {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-linux-arm-musleabihf");})();
+              }
+            } catch (e) {
+              loadError = e;
+            }
+          } else {
+            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-arm-gnueabihf.node"));
+            try {
+              if (localFileExisted) {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-arm-gnueabihf.node");})();
+              } else {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-linux-arm-gnueabihf");})();
+              }
+            } catch (e) {
+              loadError = e;
+            }
+          }
+          break;
+        case "riscv64":
+          if (isMusl()) {
+            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-riscv64-musl.node"));
+            try {
+              if (localFileExisted) {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-riscv64-musl.node");})();
+              } else {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-linux-riscv64-musl");})();
+              }
+            } catch (e) {
+              loadError = e;
+            }
+          } else {
+            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-riscv64-gnu.node"));
+            try {
+              if (localFileExisted) {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-riscv64-gnu.node");})();
+              } else {
+                nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-linux-riscv64-gnu");})();
+              }
+            } catch (e) {
+              loadError = e;
+            }
+          }
+          break;
+        case "s390x":
+          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-s390x-gnu.node"));
+          try {
+            if (localFileExisted) {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-s390x-gnu.node");})();
+            } else {
+              nativeBinding = (()=>{throw new Error("Cannot require module "+"unity-agentic-core-linux-s390x-gnu");})();
+            }
+          } catch (e) {
+            loadError = e;
+          }
+          break;
+        default:
+          throw new Error(`Unsupported architecture on Linux: ${arch}`);
+      }
+      break;
+    default:
+      throw new Error(`Unsupported OS: ${platform}, architecture: ${arch}`);
+  }
+  if (!nativeBinding) {
+    if (loadError) {
+      throw loadError;
+    }
+    throw new Error(`Failed to load native binding`);
+  }
+  var { ChunkType, Scanner, Indexer, getVersion, isNativeAvailable } = nativeBinding;
+  module2.exports.ChunkType = ChunkType;
+  module2.exports.Scanner = Scanner;
+  module2.exports.Indexer = Indexer;
+  module2.exports.getVersion = getVersion;
+  module2.exports.isNativeAvailable = isNativeAvailable;
+});
+
 // node_modules/commander/esm.mjs
 var import__ = __toESM(require_commander(), 1);
 var {
@@ -2128,419 +2417,211 @@ var {
 } = import__.default;
 
 // src/scanner.ts
-var import_fs2 = require("fs");
-var import_path2 = require("path");
-
-// src/guid-resolver.ts
-var import_fs = require("fs");
+var import_module = require("module");
 var import_path = require("path");
+var __filename = "/Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src/scanner.ts";
+var RustScanner;
+try {
+  const customRequire = import_module.createRequire("file:///Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src/scanner.ts");
+  const rustCorePath = import_path.join(import_path.dirname(__filename), "..", "..", "rust-core");
+  const rustModule = customRequire(rustCorePath);
+  RustScanner = rustModule.Scanner;
+} catch (err) {
+  throw new Error(`Failed to load native Rust module. Please install the pre-built binary for your platform.
+` + `Download from: https://github.com/anthropics/unity-agentic-tools/releases
+` + `Original error: ${err.message}`);
+}
 
-class GuidResolver {
-  guidMap = {};
-  projectRoot;
-  initialized = false;
-  constructor(projectRoot) {
-    this.projectRoot = projectRoot || process.cwd();
+class UnityScanner {
+  scanner;
+  constructor() {
+    this.scanner = new RustScanner;
   }
-  buildGuidMap() {
-    if (!import_fs.existsSync(this.projectRoot)) {
-      console.warn(`Project root does not exist: ${this.projectRoot}`);
-      return;
-    }
-    const assetsDir = import_path.join(this.projectRoot, "Assets");
-    if (!import_fs.existsSync(assetsDir)) {
-      console.warn(`Assets directory not found: ${assetsDir}`);
-      return;
-    }
-    this.guidMap = {};
-    this.scanDirectory(assetsDir);
-    this.initialized = true;
+  setProjectRoot(path) {
+    this.scanner.setProjectRoot(path);
   }
-  scanDirectory(dir) {
-    try {
-      const entries = import_fs.readdirSync(dir);
-      for (const entry of entries) {
-        const fullPath = import_path.join(dir, entry);
-        const stat = import_fs.statSync(fullPath);
-        if (stat.isDirectory()) {
-          this.scanDirectory(fullPath);
-        } else if (entry.endsWith(".meta")) {
-          this.parseMetaFile(fullPath);
-        }
-      }
-    } catch (error) {}
+  scan_scene_minimal(file) {
+    return this.scanner.scanSceneMinimal(file);
   }
-  parseMetaFile(metaPath) {
-    try {
-      const content = import_fs.readFileSync(metaPath, "utf-8");
-      const guidMatch = content.match(/^guid:\s*([a-f0-9]{32})/m);
-      if (guidMatch) {
-        const guid = guidMatch[1];
-        const assetPath = metaPath.slice(0, -5);
-        const relativePath = import_path.relative(this.projectRoot, assetPath);
-        this.guidMap[guid] = relativePath;
-      }
-    } catch (error) {}
+  scan_scene_with_components(file, options) {
+    return this.scanner.scanSceneWithComponents(file, options);
   }
-  resolve(guid) {
-    if (!this.initialized) {
-      this.buildGuidMap();
-    }
-    return this.guidMap[guid];
+  find_by_name(file, pattern, fuzzy = true) {
+    return this.scanner.findByName(file, pattern, fuzzy);
   }
-  getGuidMap() {
-    if (!this.initialized) {
-      this.buildGuidMap();
-    }
-    return { ...this.guidMap };
+  inspect(options) {
+    return this.scanner.inspect({
+      file: options.file,
+      identifier: options.identifier,
+      includeProperties: options.include_properties,
+      verbose: options.verbose
+    });
   }
-  clear() {
-    this.guidMap = {};
-    this.initialized = false;
-  }
-  static findProjectRoot(startPath) {
-    let currentPath = startPath;
-    while (currentPath !== import_path.dirname(currentPath)) {
-      const assetsPath = import_path.join(currentPath, "Assets");
-      if (import_fs.existsSync(assetsPath) && import_fs.statSync(assetsPath).isDirectory()) {
-        return currentPath;
-      }
-      currentPath = import_path.dirname(currentPath);
-    }
-    return null;
+  inspect_all(file, include_properties = false, verbose = false) {
+    return this.scanner.inspectAll(file, include_properties, verbose);
   }
 }
 
-// src/scanner.ts
-var GAMEOBJECT_PATTERN = /--- !u!1 &(\d+)\s*\nGameObject:\s*\n.*?m_Name:\s*([^\n]+).*?m_IsActive:\s*(\d)/gs;
-var COMPONENT_REF_PATTERN = /component:\s*{fileID:\s*(\d+)}/g;
-var TAG_PATTERN = /m_TagString:\s*([^\n]+)/;
-var LAYER_PATTERN = /m_Layer:\s*(\d+)/;
-var TRANSFORM_PATTERN = /m_Father:\s*{fileID:\s*(\d+)}/g;
-var CHILDREN_PATTERN = /m_Children:\s*\[\s*(\{fileID:\s*\d+}(\s*,?\s*)*\s*)]/g;
-
-class UnityScanner {
-  guidResolver = null;
-  ensureGuidResolver(file) {
-    if (!this.guidResolver) {
-      const projectRoot = GuidResolver.findProjectRoot(import_path2.dirname(file));
-      if (projectRoot) {
-        this.guidResolver = new GuidResolver(projectRoot);
-        this.guidResolver.buildGuidMap();
-      }
-    }
+// src/setup.ts
+var import_fs = require("fs");
+var import_path2 = require("path");
+var CONFIG_DIR = ".unity-agentic";
+var CONFIG_FILE = "config.json";
+var GUID_CACHE_FILE = "guid-cache.json";
+var DOC_INDEX_FILE = "doc-index.json";
+function setup(options = {}) {
+  const projectPath = import_path2.resolve(options.project || process.cwd());
+  const assetsPath = import_path2.join(projectPath, "Assets");
+  if (!import_fs.existsSync(assetsPath)) {
+    return {
+      success: false,
+      project_path: projectPath,
+      config_path: "",
+      guid_cache_created: false,
+      doc_index_created: false,
+      error: `Not a Unity project: Assets folder not found at ${assetsPath}`
+    };
   }
-  scan_scene_minimal(file) {
-    if (!import_fs2.existsSync(file)) {
-      return [];
-    }
-    const content = import_fs2.readFileSync(file, "utf-8");
-    const gameobjects = [];
-    for (const match of content.matchAll(GAMEOBJECT_PATTERN)) {
-      gameobjects.push({
-        name: match[2].trim(),
-        file_id: match[1],
-        active: match[3] === "1"
-      });
-    }
-    return gameobjects;
+  const configPath = import_path2.join(projectPath, CONFIG_DIR);
+  if (!import_fs.existsSync(configPath)) {
+    import_fs.mkdirSync(configPath, { recursive: true });
   }
-  scan_scene_with_components(file, options) {
-    const content = import_fs2.readFileSync(file, "utf-8");
-    const gameobjects = this.scan_scene_minimal(file);
-    const withComponents = [];
-    const verbose = options?.verbose || false;
-    for (const obj of gameobjects) {
-      const newObj = {
-        name: obj.name,
-        active: obj.active
-      };
-      if (verbose) {
-        newObj.file_id = obj.file_id;
-      }
-      const go_pattern = new RegExp(`--- !u!1 &${obj.file_id}\\s*\\nGameObject:.*?(?=--- !u!1|$)`, "gs");
-      const go_match = content.match(go_pattern);
-      const components = [];
-      if (go_match) {
-        const comp_refs = Array.from(go_match[0].matchAll(COMPONENT_REF_PATTERN));
-        if (verbose) {
-          newObj.component_count = comp_refs.length;
-        }
-        for (const ref of comp_refs) {
-          const comp_type = this.get_component_type(content, ref[1], file);
-          if (comp_type) {
-            components.push(comp_type);
+  const config = {
+    version: "1.0.0",
+    project_path: projectPath,
+    created_at: new Date().toISOString(),
+    rust_enabled: isRustAvailable()
+  };
+  import_fs.writeFileSync(import_path2.join(configPath, CONFIG_FILE), JSON.stringify(config, null, 2));
+  const guidCache = buildGuidCache(projectPath);
+  const guidCachePath = import_path2.join(configPath, GUID_CACHE_FILE);
+  import_fs.writeFileSync(guidCachePath, JSON.stringify(guidCache, null, 2));
+  let docIndexCreated = false;
+  if (options.indexDocs) {
+    const docIndex = { chunks: {}, last_updated: Date.now() };
+    import_fs.writeFileSync(import_path2.join(configPath, DOC_INDEX_FILE), JSON.stringify(docIndex, null, 2));
+    docIndexCreated = true;
+  }
+  return {
+    success: true,
+    project_path: projectPath,
+    config_path: configPath,
+    guid_cache_created: true,
+    doc_index_created: docIndexCreated,
+    guid_count: Object.keys(guidCache).length
+  };
+}
+function buildGuidCache(projectRoot) {
+  const cache = {};
+  const assetsDir = import_path2.join(projectRoot, "Assets");
+  if (!import_fs.existsSync(assetsDir)) {
+    return cache;
+  }
+  scanMetaFiles(assetsDir, projectRoot, cache);
+  return cache;
+}
+function scanMetaFiles(dir, projectRoot, cache) {
+  try {
+    const entries = import_fs.readdirSync(dir);
+    for (const entry of entries) {
+      const fullPath = import_path2.join(dir, entry);
+      const stat = import_fs.statSync(fullPath);
+      if (stat.isDirectory()) {
+        scanMetaFiles(fullPath, projectRoot, cache);
+      } else if (entry.endsWith(".meta")) {
+        try {
+          const content = import_fs.readFileSync(fullPath, "utf-8");
+          const guidMatch = content.match(/^guid:\s*([a-f0-9]{32})/m);
+          if (guidMatch) {
+            const guid = guidMatch[1];
+            const assetPath = fullPath.slice(0, -5);
+            const relativePath = import_path2.relative(projectRoot, assetPath);
+            cache[guid] = relativePath;
           }
-        }
+        } catch {}
       }
-      if (verbose) {
-        newObj.components = components.map((c) => this.verboseComponent(c, false));
-      } else {
-        newObj.components = components.map((c) => this.cleanComponent(c, false));
-      }
-      withComponents.push(newObj);
     }
-    return withComponents;
+  } catch {}
+}
+function isRustAvailable() {
+  try {
+    require_rust_core();
+    return true;
+  } catch {
+    return false;
   }
-  find_by_name(file, pattern, fuzzy = true) {
-    const gameobjects = this.scan_scene_minimal(file);
-    const matches = [];
-    if (fuzzy) {
-      const lower_pattern = pattern.toLowerCase();
-      for (const obj of gameobjects) {
-        const lower_name = obj.name.toLowerCase();
-        if (lower_name.includes(lower_pattern)) {
-          matches.push({
-            ...obj,
-            match_score: this.calculate_fuzzy_score(lower_pattern, lower_name)
-          });
-        }
-      }
-      matches.sort((a, b) => (b.match_score || 0) - (a.match_score || 0));
-    } else {
-      for (const obj of gameobjects) {
-        if (obj.name === pattern) {
-          matches.push(obj);
-        }
-      }
-    }
-    return matches;
-  }
-  inspect(options) {
-    const content = import_fs2.readFileSync(options.file, "utf-8");
-    let target_file_id = null;
-    if (/^\d+$/.test(options.identifier || "")) {
-      target_file_id = options.identifier || null;
-    } else if (options.identifier) {
-      const matches = this.find_by_name(options.file, options.identifier, true);
-      if (matches.length > 0) {
-        target_file_id = matches[0].file_id;
-      }
-    } else {
-      return null;
-    }
-    if (!target_file_id)
-      return null;
-    const all_gameobjects = this.scan_scene_minimal(options.file);
-    const target_obj = all_gameobjects.find((o) => o.file_id === target_file_id);
-    if (!target_obj)
-      return null;
-    const go_pattern = new RegExp(`--- !u!1 &${target_file_id}\\s*\\nGameObject:.*?(?=--- !u!1|$)`, "gs");
-    const go_match = content.match(go_pattern);
-    const components = [];
-    if (go_match) {
-      const comp_refs = Array.from(go_match[0].matchAll(COMPONENT_REF_PATTERN));
-      for (const ref of comp_refs) {
-        const comp_type = this.get_component_type(content, ref[1], options.file);
-        if (comp_type) {
-          components.push(comp_type);
-        }
-      }
-    }
-    const target_with_components = {
-      ...target_obj,
-      components
-    };
-    const details = this.extract_gameobject_details(content, target_with_components);
-    const verbose = options.verbose || false;
-    const include_properties = options.include_properties || false;
-    const outputObj = {
-      name: details.name,
-      file_id: details.file_id,
-      active: details.active
-    };
-    if (verbose) {
-      outputObj.tag = details.tag;
-      outputObj.layer = details.layer;
-    }
-    if (verbose) {
-      outputObj.components = details.components.map((c) => this.verboseComponent(c, include_properties));
-    } else {
-      outputObj.components = details.components.map((c) => this.cleanComponent(c, include_properties));
-    }
-    if (verbose) {
-      outputObj.children = details.children;
-      if (details.parent_transform_id) {
-        outputObj.parent_transform_id = details.parent_transform_id;
-      }
-    }
-    return outputObj;
-  }
-  inspect_all(file, include_properties = false, verbose = false) {
-    const content = import_fs2.readFileSync(file, "utf-8");
-    const gameobjects = this.scan_scene_with_components(file);
-    const detailed_objects = [];
-    for (const obj of gameobjects) {
-      const details = this.extract_gameobject_details(content, obj);
-      const outputObj = {
-        name: details.name,
-        active: details.active
-      };
-      if (verbose) {
-        outputObj.file_id = details.file_id;
-        outputObj.tag = details.tag;
-        outputObj.layer = details.layer;
-      }
-      if (verbose) {
-        outputObj.components = details.components.map((c) => this.verboseComponent(c, include_properties));
-      } else {
-        outputObj.components = details.components.map((c) => this.cleanComponent(c, include_properties));
-      }
-      if (verbose) {
-        outputObj.children = details.children;
-        if (details.parent_transform_id) {
-          outputObj.parent_transform_id = details.parent_transform_id;
-        }
-      }
-      detailed_objects.push(outputObj);
-    }
+}
+
+// src/cleanup.ts
+var import_fs2 = require("fs");
+var import_path3 = require("path");
+var CONFIG_DIR2 = ".unity-agentic";
+var CONFIG_FILE2 = "config.json";
+var GUID_CACHE_FILE2 = "guid-cache.json";
+var DOC_INDEX_FILE2 = "doc-index.json";
+function cleanup(options = {}) {
+  const projectPath = import_path3.resolve(options.project || process.cwd());
+  const configPath = import_path3.join(projectPath, CONFIG_DIR2);
+  if (!import_fs2.existsSync(configPath)) {
     return {
-      file,
-      count: detailed_objects.length,
-      gameobjects: detailed_objects
+      success: true,
+      project_path: projectPath,
+      files_removed: [],
+      directory_removed: false,
+      error: `No ${CONFIG_DIR2} directory found`
     };
   }
-  get_component_type(content, file_id, file) {
-    const comp_pattern = new RegExp(`--- !u!\\d+ &${file_id}\\s*\\n.*?([A-Za-z][A-Za-z0-9_]*):`, "s");
-    const match = comp_pattern.exec(content);
-    if (!match)
-      return null;
-    const type_name = match[1];
-    const class_id_match = content.match(new RegExp(`--- !u!(\\d+) &${file_id}`));
-    const class_id = class_id_match ? parseInt(class_id_match[1]) : 0;
-    const component = {
-      type: type_name,
-      class_id,
-      file_id
-    };
-    const script_guid_match = content.match(new RegExp(`--- !u!114 &${file_id}.*?m_Script:\\s*\\{fileID:\\s*\\d+,\\s*guid:\\s*([a-f0-9]{32})`, "s"));
-    if (script_guid_match) {
-      const guid = script_guid_match[1];
-      component.script_guid = guid;
-      this.ensureGuidResolver(file);
-      if (this.guidResolver) {
-        const path = this.guidResolver.resolve(guid);
-        if (path) {
-          component.script_path = path;
-        }
-      }
-    }
-    return component;
-  }
-  cleanComponent(comp, includeProperties = false) {
-    const cleaned = {
-      type: comp.type
-    };
-    if (comp.script_path) {
-      cleaned.script = comp.script_path;
-    }
-    if (includeProperties && comp.properties) {
-      cleaned.properties = comp.properties;
-    }
-    return cleaned;
-  }
-  verboseComponent(comp, includeProperties = false) {
-    const verbose = {
-      type: comp.type,
-      class_id: comp.class_id,
-      file_id: comp.file_id
-    };
-    if (comp.script_path) {
-      verbose.script_path = comp.script_path;
-    }
-    if (comp.script_guid) {
-      verbose.script_guid = comp.script_guid;
-    }
-    if (comp.script_name) {
-      verbose.script_name = comp.script_name;
-    }
-    if (includeProperties && comp.properties) {
-      verbose.properties = comp.properties;
-    }
-    return verbose;
-  }
-  calculate_fuzzy_score(pattern, text) {
-    if (pattern === text)
-      return 100;
-    if (text.startsWith(pattern))
-      return 85;
-    if (text.includes(pattern))
-      return 70;
-    const common_chars = [...pattern].filter((char) => text.includes(char)).length;
-    return pattern.length > 0 ? common_chars / pattern.length * 50 : 0;
-  }
-  extract_gameobject_details(content, obj) {
-    const go_pattern = new RegExp(`--- !u!1 &${obj.file_id}\\s*\\nGameObject:.*?(?=--- !u!1|$)`, "gs");
-    const go_match = content.match(go_pattern);
-    if (!go_match) {
+  const filesRemoved = [];
+  let directoryRemoved = false;
+  if (options.all) {
+    try {
+      removeDirectoryRecursive(configPath);
+      directoryRemoved = true;
+      filesRemoved.push(CONFIG_DIR2);
+    } catch (err) {
       return {
-        name: obj.name,
-        file_id: obj.file_id,
-        active: obj.active,
-        tag: "Untagged",
-        layer: 0,
-        components: obj.components.map((c) => ({
-          type: c.type,
-          class_id: c.class_id,
-          file_id: c.file_id,
-          script_path: c.script_path,
-          script_guid: c.script_guid,
-          script_name: c.script_name,
-          properties: {}
-        })),
-        children: []
+        success: false,
+        project_path: projectPath,
+        files_removed: filesRemoved,
+        directory_removed: false,
+        error: `Failed to remove directory: ${err}`
       };
     }
-    const go_content = go_match[0];
-    const tag_match = go_content.match(TAG_PATTERN);
-    const tag = tag_match ? tag_match[1].trim() : "Untagged";
-    const layer_match = go_content.match(LAYER_PATTERN);
-    const layer = layer_match ? parseInt(layer_match[1]) : 0;
-    const components = obj.components.map((comp) => {
-      const comp_content = this.get_component_section(content, comp.file_id);
-      const properties = {};
-      if (comp_content) {
-        const props = comp_content.matchAll(/^\s*m_([A-Za-z0-9_]+):\s*(.+)$/gm);
-        for (const prop of props) {
-          const clean_name = prop[1].replace(/^m_/, "");
-          properties[clean_name] = prop[2].trim();
-        }
-      }
-      return {
-        type: comp.type,
-        class_id: comp.class_id,
-        file_id: comp.file_id,
-        script_path: comp.script_path,
-        script_guid: comp.script_guid,
-        script_name: comp.script_name,
-        properties
-      };
-    });
-    const transform_match = go_content.match(TRANSFORM_PATTERN);
-    const parent_id = transform_match ? transform_match[1] : null;
-    const children_match = go_content.match(CHILDREN_PATTERN);
-    const children = [];
-    if (children_match) {
-      for (const child of children_match[1].matchAll(/{fileID:\s*(\d+)}/g)) {
-        children.push(child[1]);
+  } else {
+    const filesToRemove = [GUID_CACHE_FILE2, DOC_INDEX_FILE2];
+    for (const file of filesToRemove) {
+      const filePath = import_path3.join(configPath, file);
+      if (import_fs2.existsSync(filePath)) {
+        try {
+          import_fs2.unlinkSync(filePath);
+          filesRemoved.push(file);
+        } catch {}
       }
     }
-    return {
-      name: obj.name,
-      file_id: obj.file_id,
-      active: obj.active,
-      tag,
-      layer,
-      components,
-      parent_transform_id: parent_id,
-      children
-    };
+    const remaining = import_fs2.readdirSync(configPath);
+    if (remaining.length === 0 || remaining.length === 1 && remaining[0] === CONFIG_FILE2) {}
   }
-  get_component_section(content, file_id) {
-    const pattern = new RegExp(`--- !u!\\d+ &${file_id}\\s*\\n.*?([A-Za-z][A-Za-z0-9_]*):.*?(?=--- !u!|$)`, "gs");
-    const match = content.match(pattern);
-    return match ? match[0] : null;
+  return {
+    success: true,
+    project_path: projectPath,
+    files_removed: filesRemoved,
+    directory_removed: directoryRemoved
+  };
+}
+function removeDirectoryRecursive(dir) {
+  if (!import_fs2.existsSync(dir)) {
+    return;
   }
+  const entries = import_fs2.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = import_path3.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      removeDirectoryRecursive(fullPath);
+    } else {
+      import_fs2.unlinkSync(fullPath);
+    }
+  }
+  import_fs2.rmdirSync(dir);
 }
 
 // src/cli.ts
@@ -2749,6 +2830,50 @@ program.command("index-docs <path>").description("Index Unity documentation").ac
     }
     console.log(stdout);
   });
+});
+program.command("setup").description("Set up unity-agentic tools for a Unity project").option("-p, --project <path>", "Path to Unity project (defaults to current directory)").option("--index-docs", "Also create documentation index").action((options) => {
+  const result = setup({
+    project: options.project,
+    indexDocs: options.indexDocs
+  });
+  console.log(JSON.stringify(result, null, 2));
+  if (!result.success) {
+    process.exit(1);
+  }
+});
+program.command("cleanup").description("Clean up unity-agentic files from a Unity project").option("-p, --project <path>", "Path to Unity project (defaults to current directory)").option("--all", "Remove entire .unity-agentic directory").action((options) => {
+  const result = cleanup({
+    project: options.project,
+    all: options.all
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("status").description("Show current configuration and status").option("-p, --project <path>", "Path to Unity project (defaults to current directory)").action((options) => {
+  const projectPath = path.resolve(options.project || process.cwd());
+  const configPath = path.join(projectPath, ".unity-agentic");
+  const configFile = path.join(configPath, "config.json");
+  let config = null;
+  let guidCacheCount = 0;
+  try {
+    const { existsSync: existsSync4, readFileSync: readFileSync3 } = require("fs");
+    if (existsSync4(configFile)) {
+      config = JSON.parse(readFileSync3(configFile, "utf-8"));
+    }
+    const guidCachePath = path.join(configPath, "guid-cache.json");
+    if (existsSync4(guidCachePath)) {
+      const guidCache = JSON.parse(readFileSync3(guidCachePath, "utf-8"));
+      guidCacheCount = Object.keys(guidCache).length;
+    }
+  } catch {}
+  const status = {
+    project_path: projectPath,
+    configured: config !== null,
+    config,
+    guid_cache_count: guidCacheCount,
+    runtime: "bun",
+    version: "1.0.0"
+  };
+  console.log(JSON.stringify(status, null, 2));
 });
 program.parse();
 })

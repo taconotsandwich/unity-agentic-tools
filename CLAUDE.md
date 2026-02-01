@@ -44,6 +44,24 @@ Get specific GameObject by ID.
 bun unity-yaml/dist/cli.js get <path/to/file.unity> 1847675923
 ```
 
+**5. Setup Project**
+Create GUID cache for faster script path resolution.
+```bash
+bun unity-yaml/dist/cli.js setup --project <path/to/unity/project>
+```
+
+**6. Check Status**
+View current configuration and Rust availability.
+```bash
+bun unity-yaml/dist/cli.js status --project <path/to/unity/project>
+```
+
+**7. Cleanup**
+Remove cached files from a project.
+```bash
+bun unity-yaml/dist/cli.js cleanup --project <path/to/unity/project> --all
+```
+
 ## Token Efficiency Guidelines
 
 1. **Use inspect for complete analysis**: Single call returns all GameObjects with components

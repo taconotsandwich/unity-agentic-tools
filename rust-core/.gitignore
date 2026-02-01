@@ -1,0 +1,15 @@
+# Rust build artifacts
+target/
+
+# napi-rs build output
+*.node
+index.js
+index.d.ts
+
+# Node.js
+node_modules/
+bun.lockb
+package-lock.json
+
+# Cargo.lock for libraries
+Cargo.lock

@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 import { program } from 'commander';
 import { UnityScanner } from './scanner';
+import { setup } from './setup';
+import { cleanup } from './cleanup';
 import * as path from 'path';
 const { exec } = require('child_process');
 
@@ -183,6 +185,76 @@ program.command('index-docs <path>')
 
       console.log(stdout);
     });
+  });
+
+// Setup command
+program.command('setup')
+  .description('Set up unity-agentic tools for a Unity project')
+  .option('-p, --project <path>', 'Path to Unity project (defaults to current directory)')
+  .option('--index-docs', 'Also create documentation index')
+  .action((options) => {
+    const result = setup({
+      project: options.project,
+      indexDocs: options.indexDocs,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+
+    if (!result.success) {
+      process.exit(1);
+    }
+  });
+
+// Cleanup command
+program.command('cleanup')
+  .description('Clean up unity-agentic files from a Unity project')
+  .option('-p, --project <path>', 'Path to Unity project (defaults to current directory)')
+  .option('--all', 'Remove entire .unity-agentic directory')
+  .action((options) => {
+    const result = cleanup({
+      project: options.project,
+      all: options.all,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Status command
+program.command('status')
+  .description('Show current configuration and status')
+  .option('-p, --project <path>', 'Path to Unity project (defaults to current directory)')
+  .action((options) => {
+    const projectPath = path.resolve(options.project || process.cwd());
+    const configPath = path.join(projectPath, '.unity-agentic');
+    const configFile = path.join(configPath, 'config.json');
+
+    let config = null;
+    let guidCacheCount = 0;
+
+    try {
+      const { existsSync, readFileSync } = require('fs');
+      if (existsSync(configFile)) {
+        config = JSON.parse(readFileSync(configFile, 'utf-8'));
+      }
+      const guidCachePath = path.join(configPath, 'guid-cache.json');
+      if (existsSync(guidCachePath)) {
+        const guidCache = JSON.parse(readFileSync(guidCachePath, 'utf-8'));
+        guidCacheCount = Object.keys(guidCache).length;
+      }
+    } catch {
+      // Ignore errors
+    }
+
+    const status = {
+      project_path: projectPath,
+      configured: config !== null,
+      config: config,
+      guid_cache_count: guidCacheCount,
+      runtime: 'bun',
+      version: '1.0.0',
+    };
+
+    console.log(JSON.stringify(status, null, 2));
   });
 
 program.parse();
