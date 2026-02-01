@@ -2549,22 +2549,53 @@ var path = __toESM(require("path"));
 // src/editor.ts
 var import_fs3 = require("fs");
 function safeUnityYAMLEdit(filePath, objectName, propertyName, newValue) {
-  const content = import_fs3.readFileSync(filePath, "utf-8");
-  const goPattern = new RegExp(`(--- !u!1 &(\\d+)\\s*\\nGameObject:\\s*.*?m_Name:\\s*${objectName}\\s*.*?(?=--- !u!1|$))`, "gs");
-  const goMatch = content.match(goPattern);
-  if (!goMatch) {
+  if (!import_fs3.existsSync(filePath)) {
+    return {
+      success: false,
+      file_path: filePath,
+      error: `File not found: ${filePath}`
+    };
+  }
+  let content;
+  try {
+    content = import_fs3.readFileSync(filePath, "utf-8");
+  } catch (err) {
+    return {
+      success: false,
+      file_path: filePath,
+      error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const normalizedProperty = propertyName.startsWith("m_") ? propertyName.slice(2) : propertyName;
+  const blocks = content.split(/(?=--- !u!)/);
+  const escapedName = objectName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const namePattern = new RegExp(`^\\s*m_Name:\\s*${escapedName}\\s*$`, "m");
+  let targetBlockIndex = -1;
+  for (let i = 0;i < blocks.length; i++) {
+    const block = blocks[i];
+    if (block.startsWith("--- !u!1 ") && namePattern.test(block)) {
+      targetBlockIndex = i;
+      break;
+    }
+  }
+  if (targetBlockIndex === -1) {
     return {
       success: false,
       file_path: filePath,
       error: `GameObject "${objectName}" not found in file`
     };
   }
-  const goBlock = goMatch[0];
-  const propertyPattern = new RegExp(`(m_${propertyName}:\\s*)(\\S+)`, "gs");
-  const updatedBlock = goBlock.replace(propertyPattern, `$1${newValue}`);
-  const finalBlock = updatedBlock === goBlock ? goBlock.replace(/(\s*)(?=--- !u!1|\n---)/, `$1  m_${propertyName}: ${newValue}
-`) : updatedBlock;
-  const finalContent = content.replace(goPattern, finalBlock);
+  const targetBlock = blocks[targetBlockIndex];
+  const propertyPattern = new RegExp(`(^\\s*m_${normalizedProperty}:\\s*)([^\\n]*)`, "m");
+  let updatedBlock;
+  if (propertyPattern.test(targetBlock)) {
+    updatedBlock = targetBlock.replace(propertyPattern, `$1${newValue}`);
+  } else {
+    updatedBlock = targetBlock.replace(/(\n)(--- !u!|$)/, `
+  m_${normalizedProperty}: ${newValue}$1$2`);
+  }
+  blocks[targetBlockIndex] = updatedBlock;
+  const finalContent = blocks.join("");
   return atomicWrite(filePath, finalContent);
 }
 function editProperty(options) {
@@ -2661,13 +2692,18 @@ program.command("get <file> <object_id>").description("Get GameObject details by
   console.log(JSON.stringify({ file, object: result }, null, 2));
 });
 program.command("inspect <file> [identifier]").description("Inspect Unity file or specific GameObject").option("-p, --properties", "Include component properties").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, identifier, options) => {
+  if (!identifier) {
+    const result2 = scanner.inspect_all(file, options.properties === true, options.verbose === true);
+    console.log(JSON.stringify(result2, null, 2));
+    return;
+  }
   const result = scanner.inspect({
     file,
-    identifier: identifier || "",
+    identifier,
     include_properties: options.properties === true,
     verbose: options.verbose
   });
-  if (!result && identifier) {
+  if (!result) {
     console.log(JSON.stringify({ error: `GameObject '${identifier}' not found` }, null, 2));
     return;
   }

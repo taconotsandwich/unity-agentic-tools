@@ -24,16 +24,51 @@ export function safeUnityYAMLEdit(
   propertyName: string,
   newValue: string
 ): EditResult {
-  const content = readFileSync(filePath, 'utf-8');
+  // Check if file exists first
+  if (!existsSync(filePath)) {
+    return {
+      success: false,
+      file_path: filePath,
+      error: `File not found: ${filePath}`
+    };
+  }
 
-  const goPattern = new RegExp(
-    `(--- !u!1 &(\\d+)\\s*\\nGameObject:\\s*.*?m_Name:\\s*${objectName}\\s*.*?(?=--- !u!1|$))`,
-    'gs'
-  );
+  let content: string;
+  try {
+    content = readFileSync(filePath, 'utf-8');
+  } catch (err) {
+    return {
+      success: false,
+      file_path: filePath,
+      error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
 
-  const goMatch = content.match(goPattern);
+  // Normalize property name: strip m_ prefix if provided, we'll add it back
+  const normalizedProperty = propertyName.startsWith('m_')
+    ? propertyName.slice(2)
+    : propertyName;
 
-  if (!goMatch) {
+  // Split the file into Unity YAML blocks (each starts with --- !u!)
+  // Keep the delimiter with the block that follows it
+  const blocks = content.split(/(?=--- !u!)/);
+
+  // Find the GameObject block (!u!1) that contains m_Name: objectName
+  // We need to escape special regex characters in the object name
+  const escapedName = objectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const namePattern = new RegExp(`^\\s*m_Name:\\s*${escapedName}\\s*$`, 'm');
+
+  let targetBlockIndex = -1;
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    // Check if this is a GameObject block (!u!1) and contains the target name
+    if (block.startsWith('--- !u!1 ') && namePattern.test(block)) {
+      targetBlockIndex = i;
+      break;
+    }
+  }
+
+  if (targetBlockIndex === -1) {
     return {
       success: false,
       file_path: filePath,
@@ -41,23 +76,27 @@ export function safeUnityYAMLEdit(
     };
   }
 
-  const goBlock = goMatch[0];
-
+  // Edit only the target block
+  const targetBlock = blocks[targetBlockIndex];
   const propertyPattern = new RegExp(
-    `(m_${propertyName}:\\s*)(\\S+)`,
-    'gs'
+    `(^\\s*m_${normalizedProperty}:\\s*)([^\\n]*)`,
+    'm'
   );
 
-  const updatedBlock = goBlock.replace(propertyPattern, `$1${newValue}`);
+  let updatedBlock: string;
+  if (propertyPattern.test(targetBlock)) {
+    // Replace existing property
+    updatedBlock = targetBlock.replace(propertyPattern, `$1${newValue}`);
+  } else {
+    // Property doesn't exist, add it before the next block marker or at the end
+    updatedBlock = targetBlock.replace(
+      /(\n)(--- !u!|$)/,
+      `\n  m_${normalizedProperty}: ${newValue}$1$2`
+    );
+  }
 
-  const finalBlock = updatedBlock === goBlock
-    ? goBlock.replace(
-        /(\s*)(?=--- !u!1|\n---)/,
-        `$1  m_${propertyName}: ${newValue}\n`
-      )
-    : updatedBlock;
-
-  const finalContent = content.replace(goPattern, finalBlock);
+  blocks[targetBlockIndex] = updatedBlock;
+  const finalContent = blocks.join('');
   return atomicWrite(filePath, finalContent);
 }
 
@@ -199,13 +238,20 @@ export function batchEditProperties(
 export function getGameObjectBlock(filePath: string, objectName: string): string | null {
   const content = readFileSync(filePath, 'utf-8');
 
-  const goPattern = new RegExp(
-    `(--- !u!1 &(\\d+)\\s*GameObject:\\s*.*?m_Name:\\s*${objectName}\\s*.*?(?=--- !u!1|$))`,
-    'gs'
-  );
+  // Split the file into Unity YAML blocks
+  const blocks = content.split(/(?=--- !u!)/);
 
-  const match = content.match(goPattern);
-  return match ? match[0] : null;
+  // Find the GameObject block (!u!1) that contains m_Name: objectName
+  const escapedName = objectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const namePattern = new RegExp(`^\\s*m_Name:\\s*${escapedName}\\s*$`, 'm');
+
+  for (const block of blocks) {
+    if (block.startsWith('--- !u!1 ') && namePattern.test(block)) {
+      return block;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -218,22 +264,29 @@ export function replaceGameObjectBlock(
 ): EditResult {
   const content = readFileSync(filePath, 'utf-8');
 
-  const goPattern = new RegExp(
-    `(--- !u!1 &(\\d+)\\s*GameObject:\\s*.*?m_Name:\\s*${objectName}\\s*.*?(?=--- !u!1|$))`,
-    'gs'
-  );
+  // Split the file into Unity YAML blocks
+  const blocks = content.split(/(?=--- !u!)/);
 
-  const goMatch = content.match(goPattern);
+  // Find the GameObject block (!u!1) that contains m_Name: objectName
+  const escapedName = objectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const namePattern = new RegExp(`^\\s*m_Name:\\s*${escapedName}\\s*$`, 'm');
 
-  if (!goMatch) {
+  let targetBlockIndex = -1;
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    if (block.startsWith('--- !u!1 ') && namePattern.test(block)) {
+      targetBlockIndex = i;
+      break;
+    }
+  }
+
+  if (targetBlockIndex === -1) {
     return {
       success: false,
       file_path: filePath,
       error: `GameObject "${objectName}" not found in file`
     };
   }
-
-  const finalContent = content.replace(goPattern, newBlockContent);
 
   if (!validateUnityYAML(newBlockContent)) {
     return {
@@ -243,5 +296,7 @@ export function replaceGameObjectBlock(
     };
   }
 
+  blocks[targetBlockIndex] = newBlockContent;
+  const finalContent = blocks.join('');
   return atomicWrite(filePath, finalContent);
 }

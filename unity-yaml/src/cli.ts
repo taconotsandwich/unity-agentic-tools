@@ -87,14 +87,25 @@ program.command('inspect <file> [identifier]')
   .option('-j, --json', 'Output as JSON')
   .option('-v, --verbose', 'Show internal Unity IDs')
   .action((file, identifier, options) => {
+    // If no identifier provided, inspect the entire file
+    if (!identifier) {
+      const result = scanner.inspect_all(
+        file,
+        options.properties === true,
+        options.verbose === true
+      );
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
     const result = scanner.inspect({
       file,
-      identifier: identifier || '',
+      identifier,
       include_properties: options.properties === true,
       verbose: options.verbose
     });
 
-    if (!result && identifier) {
+    if (!result) {
       console.log(JSON.stringify({ error: `GameObject '${identifier}' not found` }, null, 2));
       return;
     }
