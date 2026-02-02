@@ -57,7 +57,8 @@ export function read_project_version(projectPath: string): UnityVersion {
         throw new Error(`ProjectVersion.txt not found at: ${versionFile}`);
     }
 
-    const content = fs.readFileSync(versionFile, 'utf-8');
+    // Normalize line endings (Windows CRLF -> LF)
+    const content = fs.readFileSync(versionFile, 'utf-8').replace(/\r\n/g, '\n');
 
     // Parse m_EditorVersion: 6000.0.23f1
     const versionMatch = content.match(/m_EditorVersion:\s*(.+)/);
