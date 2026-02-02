@@ -47,7 +47,8 @@ function parse_editor_build_settings(filePath) {
     if (!fs.existsSync(filePath)) {
         throw new Error(`EditorBuildSettings.asset not found: ${filePath}`);
     }
-    const content = fs.readFileSync(filePath, 'utf-8');
+    // Normalize line endings (Windows CRLF -> LF)
+    const content = fs.readFileSync(filePath, 'utf-8').replace(/\r\n/g, '\n');
     const scenes = [];
     // Match scene entries in m_Scenes array
     // Format:
