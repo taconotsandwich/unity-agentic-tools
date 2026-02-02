@@ -64,3 +64,6 @@ ts/
 
 # Native binaries
 *.node
+
+# Rust
+target/

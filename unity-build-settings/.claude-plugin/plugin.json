@@ -1,0 +1,14 @@
+{
+  "name": "unity-build-settings",
+  "version": "1.0.0",
+  "description": "Read and analyze Unity project build settings, version detection, and build profiles",
+  "author": {
+    "name": "taconotsandwich"
+  },
+  "license": "Apache-2.0",
+  "autoDiscover": {
+    "commands": "../commands",
+    "skills": "../skills",
+    "agents": "../agents"
+  }
+}

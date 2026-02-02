@@ -1,17 +1,20 @@
 {
   "packageManager": "bun@latest",
   "scripts": {
-    "build": "bun run build:unity-yaml && bun run build:doc-indexer",
+    "build": "bun run build:unity-yaml && bun run build:doc-indexer && bun run build:build-settings",
     "build:unity-yaml": "cd unity-yaml && bun run build",
     "build:doc-indexer": "cd doc-indexer && bun run build",
+    "build:build-settings": "cd unity-build-settings && bun run build",
     "build:rust": "cd rust-core && bun install && bun run build",
     "build:all": "bun run build:rust || echo 'Rust build skipped' && bun run build",
-    "test": "cd unity-yaml && bun run test",
+    "test": "bun run test:unity-yaml && bun run test:build-settings",
+    "test:unity-yaml": "cd unity-yaml && bun run test",
+    "test:build-settings": "cd unity-build-settings && bun run test",
     "test:quick": "cd unity-yaml && bun run test",
-    "test:all": "cd unity-yaml && bun run test",
+    "test:all": "bun run test",
     "test:integration": "cd unity-yaml && bash test/cli-integration.test.sh",
     "test:coverage": "cd unity-yaml && bun run test:coverage",
-    "type-check": "cd unity-yaml && tsc --noEmit && cd ../doc-indexer && tsc --noEmit",
+    "type-check": "cd unity-yaml && tsc --noEmit && cd ../doc-indexer && tsc --noEmit && cd ../unity-build-settings && tsc --noEmit",
     "lint": "echo 'No linter configured'"
   },
   "devDependencies": {
