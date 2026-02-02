@@ -56,7 +56,8 @@ function read_build_settings_content(projectPath) {
     if (!fs.existsSync(filePath)) {
         throw new Error(`EditorBuildSettings.asset not found: ${filePath}`);
     }
-    return fs.readFileSync(filePath, 'utf-8');
+    // Normalize line endings (Windows CRLF -> LF)
+    return fs.readFileSync(filePath, 'utf-8').replace(/\r\n/g, '\n');
 }
 /**
  * Generate YAML for a scene entry
