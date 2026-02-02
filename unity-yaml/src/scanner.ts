@@ -1,21 +1,30 @@
 import { createRequire } from 'module';
-import { join, dirname } from 'path';
+import { existsSync } from 'fs';
 import { GameObject, GameObjectDetail, SceneInspection, InspectOptions, ScanOptions } from './types';
+import { getBinaryPath, getBinaryDir } from './binary-path';
 
-// Load the native Rust module
+// Load the native Rust module from host machine
 let RustScanner: any = null;
 let nativeModuleError: string | null = null;
 
 try {
+  const binaryPath = getBinaryPath();
+
+  if (!existsSync(binaryPath)) {
+    throw new Error(`Binary not found at: ${binaryPath}`);
+  }
+
+  // Load the .node file directly using require
   const customRequire = createRequire(import.meta.url || __filename);
-  const rustCorePath = join(dirname(__filename), '..', '..', 'rust-core');
-  const rustModule = customRequire(rustCorePath);
+  const rustModule = customRequire(binaryPath);
   RustScanner = rustModule.Scanner;
 } catch (err) {
+  const binaryDir = getBinaryDir();
   nativeModuleError =
-    `Failed to load native Rust module. Please install the pre-built binary for your platform.\n` +
-    `Download from: https://github.com/taconotsandwich/unity-agentic-tools/releases\n` +
+    `Failed to load native Rust module from host location.\n` +
+    `Expected location: ${binaryDir}\n` +
     `Run: /initial-install (if using as Claude Code plugin)\n` +
+    `Or download from: https://github.com/taconotsandwich/unity-agentic-tools/releases\n` +
     `Original error: ${(err as Error).message}`;
 }
 

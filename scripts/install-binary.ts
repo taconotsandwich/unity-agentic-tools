@@ -1,13 +1,20 @@
 #!/usr/bin/env bun
 /**
  * Downloads and installs the pre-built native Rust binary for the current platform.
+ * Binary is stored on the host machine at ~/.claude/unity-agentic-tools/bin/
  */
 
 import { existsSync, mkdirSync, writeFileSync, chmodSync } from 'fs';
 import { join, dirname } from 'path';
+import { homedir } from 'os';
 
 const REPO = 'taconotsandwich/unity-agentic-tools';
 const BINARY_NAME = 'unity-agentic-core';
+
+// Get the directory where native binaries are stored on the host machine
+function getBinaryDir(): string {
+  return join(homedir(), '.claude', 'unity-agentic-tools', 'bin');
+}
 
 // Map platform/arch to binary filename
 function getBinaryFilename(): string {
@@ -107,15 +114,16 @@ async function main() {
   // Determine paths
   const scriptDir = dirname(new URL(import.meta.url).pathname);
   const pluginRoot = join(scriptDir, '..');
-  const rustCoreDir = join(pluginRoot, 'rust-core');
+  const binaryDir = getBinaryDir();
 
   try {
     // Get binary filename for this platform
     const filename = getBinaryFilename();
     console.log(`Platform: ${process.platform}-${process.arch}`);
-    console.log(`Binary: ${filename}\n`);
+    console.log(`Binary: ${filename}`);
+    console.log(`Host location: ${binaryDir}\n`);
 
-    const destPath = join(rustCoreDir, filename);
+    const destPath = join(binaryDir, filename);
 
     // Check if already installed
     if (existsSync(destPath)) {
@@ -132,12 +140,13 @@ async function main() {
 
     console.log('\n=== Installation Complete ===');
     console.log('You can now use the Unity Agentic Tools commands.');
+    console.log(`Binary location: ${destPath}`);
 
   } catch (error) {
     console.error('\nInstallation failed:', (error as Error).message);
     console.error('\nManual installation:');
     console.error(`1. Download the binary from: https://github.com/${REPO}/releases`);
-    console.error(`2. Place it in: ${rustCoreDir}/`);
+    console.error(`2. Place it in: ${binaryDir}/`);
     console.error('3. Run: cd unity-yaml && bun run build');
     process.exit(1);
   }

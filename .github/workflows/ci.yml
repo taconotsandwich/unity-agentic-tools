@@ -53,6 +53,13 @@ jobs:
         working-directory: ./rust-core
         run: bun run build
 
+      - name: Copy native binary to host location
+        run: |
+          mkdir -p ~/.claude/unity-agentic-tools/bin
+          find rust-core -name "*.node" -exec cp {} ~/.claude/unity-agentic-tools/bin/ \;
+          echo "Copied binary to host location:"
+          ls -la ~/.claude/unity-agentic-tools/bin/
+
       - name: Build packages
         run: bun run build
 
@@ -61,3 +68,17 @@ jobs:
 
       - name: Validate extension configurations
         run: bash .github/scripts/validate-extensions.sh
+
+      - name: Setup Node.js for Claude Code
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Test native module from host location
+        run: |
+          echo "Testing CLI with native module from host location..."
+          bun unity-yaml/dist/cli.js status
+          echo "Native module loaded successfully from ~/.claude/unity-agentic-tools/bin/"

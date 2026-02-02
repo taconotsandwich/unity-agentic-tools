@@ -2119,7 +2119,7 @@ var require_unity_agentic_core_darwin_arm64 = __commonJS((exports2, module2) => 
 // ../rust-core/index.js
 var require_rust_core = __commonJS((exports2, module2) => {
   var __dirname = "/Users/taco/Documents/Projects/unity-agentic-tools/rust-core";
-  var { existsSync, readFileSync } = require("fs");
+  var { existsSync: existsSync2, readFileSync } = require("fs");
   var { join: join2 } = require("path");
   var { platform, arch } = process;
   var nativeBinding = null;
@@ -2142,7 +2142,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
     case "android":
       switch (arch) {
         case "arm64":
-          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.android-arm64.node"));
+          localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.android-arm64.node"));
           try {
             if (localFileExisted) {
               nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.android-arm64.node");})();
@@ -2154,7 +2154,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
           }
           break;
         case "arm":
-          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.android-arm-eabi.node"));
+          localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.android-arm-eabi.node"));
           try {
             if (localFileExisted) {
               nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.android-arm-eabi.node");})();
@@ -2172,7 +2172,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
     case "win32":
       switch (arch) {
         case "x64":
-          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.win32-x64-msvc.node"));
+          localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.win32-x64-msvc.node"));
           try {
             if (localFileExisted) {
               nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.win32-x64-msvc.node");})();
@@ -2184,7 +2184,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
           }
           break;
         case "ia32":
-          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.win32-ia32-msvc.node"));
+          localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.win32-ia32-msvc.node"));
           try {
             if (localFileExisted) {
               nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.win32-ia32-msvc.node");})();
@@ -2196,7 +2196,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
           }
           break;
         case "arm64":
-          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.win32-arm64-msvc.node"));
+          localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.win32-arm64-msvc.node"));
           try {
             if (localFileExisted) {
               nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.win32-arm64-msvc.node");})();
@@ -2212,7 +2212,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
       }
       break;
     case "darwin":
-      localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.darwin-universal.node"));
+      localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.darwin-universal.node"));
       try {
         if (localFileExisted) {
           nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.darwin-universal.node");})();
@@ -2223,7 +2223,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
       } catch {}
       switch (arch) {
         case "x64":
-          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.darwin-x64.node"));
+          localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.darwin-x64.node"));
           try {
             if (localFileExisted) {
               nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.darwin-x64.node");})();
@@ -2235,7 +2235,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
           }
           break;
         case "arm64":
-          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.darwin-arm64.node"));
+          localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.darwin-arm64.node"));
           try {
             if (localFileExisted) {
               nativeBinding = require_unity_agentic_core_darwin_arm64();
@@ -2254,7 +2254,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
       if (arch !== "x64") {
         throw new Error(`Unsupported architecture on FreeBSD: ${arch}`);
       }
-      localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.freebsd-x64.node"));
+      localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.freebsd-x64.node"));
       try {
         if (localFileExisted) {
           nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.freebsd-x64.node");})();
@@ -2269,7 +2269,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
       switch (arch) {
         case "x64":
           if (isMusl()) {
-            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-x64-musl.node"));
+            localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.linux-x64-musl.node"));
             try {
               if (localFileExisted) {
                 nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-x64-musl.node");})();
@@ -2280,7 +2280,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
               loadError = e;
             }
           } else {
-            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-x64-gnu.node"));
+            localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.linux-x64-gnu.node"));
             try {
               if (localFileExisted) {
                 nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-x64-gnu.node");})();
@@ -2294,7 +2294,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
           break;
         case "arm64":
           if (isMusl()) {
-            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-arm64-musl.node"));
+            localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.linux-arm64-musl.node"));
             try {
               if (localFileExisted) {
                 nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-arm64-musl.node");})();
@@ -2305,7 +2305,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
               loadError = e;
             }
           } else {
-            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-arm64-gnu.node"));
+            localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.linux-arm64-gnu.node"));
             try {
               if (localFileExisted) {
                 nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-arm64-gnu.node");})();
@@ -2319,7 +2319,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
           break;
         case "arm":
           if (isMusl()) {
-            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-arm-musleabihf.node"));
+            localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.linux-arm-musleabihf.node"));
             try {
               if (localFileExisted) {
                 nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-arm-musleabihf.node");})();
@@ -2330,7 +2330,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
               loadError = e;
             }
           } else {
-            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-arm-gnueabihf.node"));
+            localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.linux-arm-gnueabihf.node"));
             try {
               if (localFileExisted) {
                 nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-arm-gnueabihf.node");})();
@@ -2344,7 +2344,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
           break;
         case "riscv64":
           if (isMusl()) {
-            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-riscv64-musl.node"));
+            localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.linux-riscv64-musl.node"));
             try {
               if (localFileExisted) {
                 nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-riscv64-musl.node");})();
@@ -2355,7 +2355,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
               loadError = e;
             }
           } else {
-            localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-riscv64-gnu.node"));
+            localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.linux-riscv64-gnu.node"));
             try {
               if (localFileExisted) {
                 nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-riscv64-gnu.node");})();
@@ -2368,7 +2368,7 @@ var require_rust_core = __commonJS((exports2, module2) => {
           }
           break;
         case "s390x":
-          localFileExisted = existsSync(join2(__dirname, "unity-agentic-core.linux-s390x-gnu.node"));
+          localFileExisted = existsSync2(join2(__dirname, "unity-agentic-core.linux-s390x-gnu.node"));
           try {
             if (localFileExisted) {
               nativeBinding = (()=>{throw new Error("Cannot require module "+"./unity-agentic-core.linux-s390x-gnu.node");})();
@@ -2418,19 +2418,51 @@ var {
 
 // src/scanner.ts
 var import_module = require("module");
+var import_fs = require("fs");
+
+// src/binary-path.ts
+var import_os = require("os");
 var import_path = require("path");
-var __filename = "/Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src/scanner.ts";
+var BINARY_NAME = "unity-agentic-core";
+function getBinaryDir() {
+  return import_path.join(import_os.homedir(), ".claude", "unity-agentic-tools", "bin");
+}
+function getBinaryFilename() {
+  const platform = process.platform;
+  const arch = process.arch;
+  if (platform === "darwin" && arch === "arm64") {
+    return `${BINARY_NAME}.darwin-arm64.node`;
+  } else if (platform === "darwin" && arch === "x64") {
+    return `${BINARY_NAME}.darwin-x64.node`;
+  } else if (platform === "linux" && arch === "x64") {
+    return `${BINARY_NAME}.linux-x64-gnu.node`;
+  } else if (platform === "win32" && arch === "x64") {
+    return `${BINARY_NAME}.win32-x64-msvc.node`;
+  } else {
+    throw new Error(`Unsupported platform: ${platform}-${arch}`);
+  }
+}
+function getBinaryPath() {
+  return import_path.join(getBinaryDir(), getBinaryFilename());
+}
+
+// src/scanner.ts
 var RustScanner = null;
 var nativeModuleError = null;
 try {
+  const binaryPath = getBinaryPath();
+  if (!import_fs.existsSync(binaryPath)) {
+    throw new Error(`Binary not found at: ${binaryPath}`);
+  }
   const customRequire = import_module.createRequire("file:///Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src/scanner.ts");
-  const rustCorePath = import_path.join(import_path.dirname(__filename), "..", "..", "rust-core");
-  const rustModule = customRequire(rustCorePath);
+  const rustModule = customRequire(binaryPath);
   RustScanner = rustModule.Scanner;
 } catch (err) {
-  nativeModuleError = `Failed to load native Rust module. Please install the pre-built binary for your platform.
-` + `Download from: https://github.com/taconotsandwich/unity-agentic-tools/releases
+  const binaryDir = getBinaryDir();
+  nativeModuleError = `Failed to load native Rust module from host location.
+` + `Expected location: ${binaryDir}
 ` + `Run: /initial-install (if using as Claude Code plugin)
+` + `Or download from: https://github.com/taconotsandwich/unity-agentic-tools/releases
 ` + `Original error: ${err.message}`;
 }
 function isNativeModuleAvailable() {
@@ -2474,7 +2506,7 @@ class UnityScanner {
 }
 
 // src/setup.ts
-var import_fs = require("fs");
+var import_fs2 = require("fs");
 var import_path2 = require("path");
 var CONFIG_DIR = ".unity-agentic";
 var CONFIG_FILE = "config.json";
@@ -2483,7 +2515,7 @@ var DOC_INDEX_FILE = "doc-index.json";
 function setup(options = {}) {
   const projectPath = import_path2.resolve(options.project || process.cwd());
   const assetsPath = import_path2.join(projectPath, "Assets");
-  if (!import_fs.existsSync(assetsPath)) {
+  if (!import_fs2.existsSync(assetsPath)) {
     return {
       success: false,
       project_path: projectPath,
@@ -2494,8 +2526,8 @@ function setup(options = {}) {
     };
   }
   const configPath = import_path2.join(projectPath, CONFIG_DIR);
-  if (!import_fs.existsSync(configPath)) {
-    import_fs.mkdirSync(configPath, { recursive: true });
+  if (!import_fs2.existsSync(configPath)) {
+    import_fs2.mkdirSync(configPath, { recursive: true });
   }
   const config = {
     version: "1.0.0",
@@ -2503,14 +2535,14 @@ function setup(options = {}) {
     created_at: new Date().toISOString(),
     rust_enabled: isRustAvailable()
   };
-  import_fs.writeFileSync(import_path2.join(configPath, CONFIG_FILE), JSON.stringify(config, null, 2));
+  import_fs2.writeFileSync(import_path2.join(configPath, CONFIG_FILE), JSON.stringify(config, null, 2));
   const guidCache = buildGuidCache(projectPath);
   const guidCachePath = import_path2.join(configPath, GUID_CACHE_FILE);
-  import_fs.writeFileSync(guidCachePath, JSON.stringify(guidCache, null, 2));
+  import_fs2.writeFileSync(guidCachePath, JSON.stringify(guidCache, null, 2));
   let docIndexCreated = false;
   if (options.indexDocs) {
     const docIndex = { chunks: {}, last_updated: Date.now() };
-    import_fs.writeFileSync(import_path2.join(configPath, DOC_INDEX_FILE), JSON.stringify(docIndex, null, 2));
+    import_fs2.writeFileSync(import_path2.join(configPath, DOC_INDEX_FILE), JSON.stringify(docIndex, null, 2));
     docIndexCreated = true;
   }
   return {
@@ -2525,7 +2557,7 @@ function setup(options = {}) {
 function buildGuidCache(projectRoot) {
   const cache = {};
   const assetsDir = import_path2.join(projectRoot, "Assets");
-  if (!import_fs.existsSync(assetsDir)) {
+  if (!import_fs2.existsSync(assetsDir)) {
     return cache;
   }
   scanMetaFiles(assetsDir, projectRoot, cache);
@@ -2533,15 +2565,15 @@ function buildGuidCache(projectRoot) {
 }
 function scanMetaFiles(dir, projectRoot, cache) {
   try {
-    const entries = import_fs.readdirSync(dir);
+    const entries = import_fs2.readdirSync(dir);
     for (const entry of entries) {
       const fullPath = import_path2.join(dir, entry);
-      const stat = import_fs.statSync(fullPath);
+      const stat = import_fs2.statSync(fullPath);
       if (stat.isDirectory()) {
         scanMetaFiles(fullPath, projectRoot, cache);
       } else if (entry.endsWith(".meta")) {
         try {
-          const content = import_fs.readFileSync(fullPath, "utf-8");
+          const content = import_fs2.readFileSync(fullPath, "utf-8");
           const guidMatch = content.match(/^guid:\s*([a-f0-9]{32})/m);
           if (guidMatch) {
             const guid = guidMatch[1];
@@ -2564,7 +2596,7 @@ function isRustAvailable() {
 }
 
 // src/cleanup.ts
-var import_fs2 = require("fs");
+var import_fs3 = require("fs");
 var import_path3 = require("path");
 var CONFIG_DIR2 = ".unity-agentic";
 var CONFIG_FILE2 = "config.json";
@@ -2573,7 +2605,7 @@ var DOC_INDEX_FILE2 = "doc-index.json";
 function cleanup(options = {}) {
   const projectPath = import_path3.resolve(options.project || process.cwd());
   const configPath = import_path3.join(projectPath, CONFIG_DIR2);
-  if (!import_fs2.existsSync(configPath)) {
+  if (!import_fs3.existsSync(configPath)) {
     return {
       success: true,
       project_path: projectPath,
@@ -2602,14 +2634,14 @@ function cleanup(options = {}) {
     const filesToRemove = [GUID_CACHE_FILE2, DOC_INDEX_FILE2];
     for (const file of filesToRemove) {
       const filePath = import_path3.join(configPath, file);
-      if (import_fs2.existsSync(filePath)) {
+      if (import_fs3.existsSync(filePath)) {
         try {
-          import_fs2.unlinkSync(filePath);
+          import_fs3.unlinkSync(filePath);
           filesRemoved.push(file);
         } catch {}
       }
     }
-    const remaining = import_fs2.readdirSync(configPath);
+    const remaining = import_fs3.readdirSync(configPath);
     if (remaining.length === 0 || remaining.length === 1 && remaining[0] === CONFIG_FILE2) {}
   }
   return {
@@ -2620,28 +2652,28 @@ function cleanup(options = {}) {
   };
 }
 function removeDirectoryRecursive(dir) {
-  if (!import_fs2.existsSync(dir)) {
+  if (!import_fs3.existsSync(dir)) {
     return;
   }
-  const entries = import_fs2.readdirSync(dir, { withFileTypes: true });
+  const entries = import_fs3.readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = import_path3.join(dir, entry.name);
     if (entry.isDirectory()) {
       removeDirectoryRecursive(fullPath);
     } else {
-      import_fs2.unlinkSync(fullPath);
+      import_fs3.unlinkSync(fullPath);
     }
   }
-  import_fs2.rmdirSync(dir);
+  import_fs3.rmdirSync(dir);
 }
 
 // src/cli.ts
 var path = __toESM(require("path"));
 
 // src/editor.ts
-var import_fs3 = require("fs");
+var import_fs4 = require("fs");
 function safeUnityYAMLEdit(filePath, objectName, propertyName, newValue) {
-  if (!import_fs3.existsSync(filePath)) {
+  if (!import_fs4.existsSync(filePath)) {
     return {
       success: false,
       file_path: filePath,
@@ -2650,7 +2682,7 @@ function safeUnityYAMLEdit(filePath, objectName, propertyName, newValue) {
   }
   let content;
   try {
-    content = import_fs3.readFileSync(filePath, "utf-8");
+    content = import_fs4.readFileSync(filePath, "utf-8");
   } catch (err) {
     return {
       success: false,
@@ -2700,13 +2732,13 @@ function editProperty(options) {
 function atomicWrite(filePath, content) {
   const tmpPath = `${filePath}.tmp`;
   try {
-    import_fs3.writeFileSync(tmpPath, content, "utf-8");
-    if (import_fs3.existsSync(filePath)) {
-      import_fs3.renameSync(filePath, `${filePath}.bak`);
+    import_fs4.writeFileSync(tmpPath, content, "utf-8");
+    if (import_fs4.existsSync(filePath)) {
+      import_fs4.renameSync(filePath, `${filePath}.bak`);
     }
-    import_fs3.renameSync(tmpPath, filePath);
+    import_fs4.renameSync(tmpPath, filePath);
     try {
-      if (import_fs3.existsSync(`${filePath}.bak`)) {
+      if (import_fs4.existsSync(`${filePath}.bak`)) {
         const fs = require("fs");
         fs.unlinkSync(`${filePath}.bak`);
       }
@@ -2717,9 +2749,9 @@ function atomicWrite(filePath, content) {
       bytes_written: Buffer.byteLength(content, "utf-8")
     };
   } catch (error) {
-    if (import_fs3.existsSync(`${filePath}.bak`)) {
+    if (import_fs4.existsSync(`${filePath}.bak`)) {
       try {
-        import_fs3.renameSync(`${filePath}.bak`, filePath);
+        import_fs4.renameSync(`${filePath}.bak`, filePath);
       } catch (restoreError) {
         console.error("Failed to restore backup:", restoreError);
       }
@@ -2876,12 +2908,12 @@ program.command("status").description("Show current configuration and status").o
   let config = null;
   let guidCacheCount = 0;
   try {
-    const { existsSync: existsSync4, readFileSync: readFileSync3 } = require("fs");
-    if (existsSync4(configFile)) {
+    const { existsSync: existsSync5, readFileSync: readFileSync3 } = require("fs");
+    if (existsSync5(configFile)) {
       config = JSON.parse(readFileSync3(configFile, "utf-8"));
     }
     const guidCachePath = path.join(configPath, "guid-cache.json");
-    if (existsSync4(guidCachePath)) {
+    if (existsSync5(guidCachePath)) {
       const guidCache = JSON.parse(readFileSync3(guidCachePath, "utf-8"));
       guidCacheCount = Object.keys(guidCache).length;
     }
