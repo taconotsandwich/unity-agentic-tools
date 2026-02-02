@@ -98,7 +98,8 @@ describe('has_build_profiles', () => {
         const result = has_build_profiles(FIXTURE_PATH);
 
         expect(result.exists).toBe(false);
-        expect(result.path).toContain('Assets/Settings/Build Profiles');
+        // Path separators differ between platforms
+        expect(result.path).toContain('Build Profiles');
     });
 });
 
