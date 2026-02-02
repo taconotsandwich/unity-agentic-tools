@@ -25,6 +25,7 @@ jobs:
             bun.lock
             unity-yaml/bun.lock
             doc-indexer/bun.lock
+            unity-build-settings/bun.lock
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -43,6 +44,10 @@ jobs:
 
       - name: Install doc-indexer dependencies
         working-directory: ./doc-indexer
+        run: bun install
+
+      - name: Install unity-build-settings dependencies
+        working-directory: ./unity-build-settings
         run: bun install
 
       - name: Install rust-core dependencies

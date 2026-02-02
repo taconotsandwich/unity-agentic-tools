@@ -9,6 +9,12 @@
       "description": "Token-efficient Unity file access with intelligent selective loading for scenes, prefabs, and assets",
       "version": "1.0.0",
       "source": "./"
+    },
+    {
+      "name": "unity-build-settings",
+      "description": "Read and analyze Unity project build settings, version detection, and build profiles",
+      "version": "1.0.0",
+      "source": "./unity-build-settings"
     }
   ]
 }
