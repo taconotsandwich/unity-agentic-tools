@@ -1,14 +1,9 @@
 {
   "name": "unity-agentic-tools",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Token-efficient CLI tools for Unity YAML parsing, scene analysis, and prefab inspection via AI agents",
   "author": {
     "name": "taconotsandwich"
   },
-  "license": "Apache-2.0",
-  "autoDiscover": {
-    "commands": "../commands",
-    "skills": "../skills",
-    "agents": "../agents"
-  }
+  "license": "Apache-2.0"
 }
