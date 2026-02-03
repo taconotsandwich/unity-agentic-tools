@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve } from 'path';
 import { readFileSync } from 'fs';
-import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject } from '../src/editor';
+import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform } from '../src/editor';
 import { create_temp_fixture } from './test-utils';
 import type { TempFixture } from './test-utils';
 
@@ -791,6 +791,177 @@ describe('createGameObject', () => {
         const objectMatch = content.match(objectPattern);
         expect(objectMatch).not.toBeNull();
         expect(objectMatch![0]).toContain('m_Layer: 5');
+    });
+});
+
+describe('editTransform', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should edit transform position', () => {
+        // First create an object to get a known transform ID
+        const createResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'PositionTest'
+        });
+        expect(createResult.success).toBe(true);
+
+        const editResult = editTransform({
+            file_path: temp_fixture.temp_path,
+            transform_id: createResult.transform_id!,
+            position: { x: 10, y: 20, z: 30 }
+        });
+
+        expect(editResult.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('m_LocalPosition: {x: 10, y: 20, z: 30}');
+    });
+
+    it('should edit transform scale', () => {
+        const createResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'ScaleTest'
+        });
+        expect(createResult.success).toBe(true);
+
+        const editResult = editTransform({
+            file_path: temp_fixture.temp_path,
+            transform_id: createResult.transform_id!,
+            scale: { x: 2, y: 3, z: 4 }
+        });
+
+        expect(editResult.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('m_LocalScale: {x: 2, y: 3, z: 4}');
+    });
+
+    it('should edit transform rotation with Euler angles', () => {
+        const createResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'RotationTest'
+        });
+        expect(createResult.success).toBe(true);
+
+        const editResult = editTransform({
+            file_path: temp_fixture.temp_path,
+            transform_id: createResult.transform_id!,
+            rotation: { x: 45, y: 90, z: 0 }
+        });
+
+        expect(editResult.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // Check Euler hint is set correctly
+        expect(content).toContain('m_LocalEulerAnglesHint: {x: 45, y: 90, z: 0}');
+        // Find the transform block and verify quaternion has changed
+        const transformPattern = new RegExp(`--- !u!4 &${createResult.transform_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const match = content.match(transformPattern);
+        expect(match).not.toBeNull();
+        // Quaternion should not be identity (0,0,0,1) - rotation was applied
+        expect(match![0]).not.toMatch(/m_LocalRotation:\s*\{x: 0, y: 0, z: 0, w: 1\}/);
+    });
+
+    it('should edit multiple properties at once', () => {
+        const createResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'MultiEditTest'
+        });
+        expect(createResult.success).toBe(true);
+
+        const editResult = editTransform({
+            file_path: temp_fixture.temp_path,
+            transform_id: createResult.transform_id!,
+            position: { x: 5, y: 10, z: 15 },
+            rotation: { x: 0, y: 180, z: 0 },
+            scale: { x: 0.5, y: 0.5, z: 0.5 }
+        });
+
+        expect(editResult.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('m_LocalPosition: {x: 5, y: 10, z: 15}');
+        expect(content).toContain('m_LocalScale: {x: 0.5, y: 0.5, z: 0.5}');
+        expect(content).toContain('m_LocalEulerAnglesHint: {x: 0, y: 180, z: 0}');
+    });
+
+    it('should return error for nonexistent transform ID', () => {
+        const editResult = editTransform({
+            file_path: temp_fixture.temp_path,
+            transform_id: 9999999999,
+            position: { x: 1, y: 2, z: 3 }
+        });
+
+        expect(editResult.success).toBe(false);
+        expect(editResult.error).toContain('not found');
+    });
+
+    it('should return error for nonexistent file', () => {
+        const editResult = editTransform({
+            file_path: '/nonexistent/file.unity',
+            transform_id: 123,
+            position: { x: 1, y: 2, z: 3 }
+        });
+
+        expect(editResult.success).toBe(false);
+        expect(editResult.error).toContain('File not found');
+    });
+
+    it('should preserve other transform properties when editing position only', () => {
+        const createResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'PreserveTest'
+        });
+        expect(createResult.success).toBe(true);
+
+        // Edit only position
+        const editResult = editTransform({
+            file_path: temp_fixture.temp_path,
+            transform_id: createResult.transform_id!,
+            position: { x: 100, y: 200, z: 300 }
+        });
+
+        expect(editResult.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const transformPattern = new RegExp(`--- !u!4 &${createResult.transform_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const match = content.match(transformPattern);
+        expect(match).not.toBeNull();
+
+        // Position should be changed
+        expect(match![0]).toContain('m_LocalPosition: {x: 100, y: 200, z: 300}');
+        // Scale should still be default
+        expect(match![0]).toContain('m_LocalScale: {x: 1, y: 1, z: 1}');
+        // Rotation should still be identity
+        expect(match![0]).toContain('m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}');
+    });
+
+    it('should work with existing scene transforms', () => {
+        // Player's transform ID from SampleScene.unity is 1847675924
+        const editResult = editTransform({
+            file_path: temp_fixture.temp_path,
+            transform_id: 1847675924,
+            position: { x: 99, y: 88, z: 77 }
+        });
+
+        expect(editResult.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // Find Player's transform block
+        const transformPattern = /--- !u!4 &1847675924[\s\S]*?(?=--- !u!|$)/;
+        const match = content.match(transformPattern);
+        expect(match).not.toBeNull();
+        expect(match![0]).toContain('m_LocalPosition: {x: 99, y: 88, z: 77}');
     });
 });
 

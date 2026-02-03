@@ -2868,6 +2868,75 @@ function createGameObject(options) {
     transform_id: transformId
   };
 }
+function eulerToQuaternion(euler) {
+  const deg2rad = Math.PI / 180;
+  const x = euler.x * deg2rad;
+  const y = euler.y * deg2rad;
+  const z = euler.z * deg2rad;
+  const cx = Math.cos(x / 2);
+  const sx = Math.sin(x / 2);
+  const cy = Math.cos(y / 2);
+  const sy = Math.sin(y / 2);
+  const cz = Math.cos(z / 2);
+  const sz = Math.sin(z / 2);
+  return {
+    x: sx * cy * cz + cx * sy * sz,
+    y: cx * sy * cz - sx * cy * sz,
+    z: cx * cy * sz - sx * sy * cz,
+    w: cx * cy * cz + sx * sy * sz
+  };
+}
+function editTransform(options) {
+  const { file_path, transform_id, position, rotation, scale } = options;
+  if (!import_fs4.existsSync(file_path)) {
+    return {
+      success: false,
+      file_path,
+      error: `File not found: ${file_path}`
+    };
+  }
+  let content;
+  try {
+    content = import_fs4.readFileSync(file_path, "utf-8");
+  } catch (err) {
+    return {
+      success: false,
+      file_path,
+      error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const blocks = content.split(/(?=--- !u!)/);
+  const transformPattern = new RegExp(`^--- !u!4 &${transform_id}\\b`);
+  let targetBlockIndex = -1;
+  for (let i = 0;i < blocks.length; i++) {
+    if (transformPattern.test(blocks[i])) {
+      targetBlockIndex = i;
+      break;
+    }
+  }
+  if (targetBlockIndex === -1) {
+    return {
+      success: false,
+      file_path,
+      error: `Transform with fileID ${transform_id} not found`
+    };
+  }
+  let block = blocks[targetBlockIndex];
+  if (position) {
+    block = block.replace(/m_LocalPosition:\s*\{[^}]+\}/, `m_LocalPosition: {x: ${position.x}, y: ${position.y}, z: ${position.z}}`);
+  }
+  if (rotation) {
+    const quat = eulerToQuaternion(rotation);
+    block = block.replace(/m_LocalRotation:\s*\{[^}]+\}/, `m_LocalRotation: {x: ${quat.x}, y: ${quat.y}, z: ${quat.z}, w: ${quat.w}}`);
+    block = block.replace(/m_LocalEulerAnglesHint:\s*\{[^}]+\}/, `m_LocalEulerAnglesHint: {x: ${rotation.x}, y: ${rotation.y}, z: ${rotation.z}}`);
+  }
+  if (scale) {
+    block = block.replace(/m_LocalScale:\s*\{[^}]+\}/, `m_LocalScale: {x: ${scale.x}, y: ${scale.y}, z: ${scale.z}}`);
+  }
+  blocks[targetBlockIndex] = block;
+  const finalContent = blocks.join("");
+  return atomicWrite(file_path, finalContent);
+}
 
 // src/cli.ts
 var __dirname = "/Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src";
@@ -2965,6 +3034,24 @@ program.command("create <file> <name>").description("Create a new GameObject in 
   const result = createGameObject({
     file_path: file,
     name
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("edit-transform <file> <transform_id>").description("Edit Transform component properties by fileID").option("-p, --position <x,y,z>", "Set local position").option("-r, --rotation <x,y,z>", "Set local rotation (Euler angles in degrees)").option("-s, --scale <x,y,z>", "Set local scale").option("-j, --json", "Output as JSON").action((file, transform_id, options) => {
+  const parseVector = (str) => {
+    const parts = str.split(",").map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) {
+      console.error("Invalid vector format. Use: x,y,z (e.g., 1,2,3)");
+      process.exit(1);
+    }
+    return { x: parts[0], y: parts[1], z: parts[2] };
+  };
+  const result = editTransform({
+    file_path: file,
+    transform_id: parseInt(transform_id, 10),
+    position: options.position ? parseVector(options.position) : undefined,
+    rotation: options.rotation ? parseVector(options.rotation) : undefined,
+    scale: options.scale ? parseVector(options.scale) : undefined
   });
   console.log(JSON.stringify(result, null, 2));
 });

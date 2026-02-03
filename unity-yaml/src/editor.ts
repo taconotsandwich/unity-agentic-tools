@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
-import type { CreateGameObjectOptions, CreateGameObjectResult } from './types';
+import type { CreateGameObjectOptions, CreateGameObjectResult, EditTransformOptions, Vector3 } from './types';
 
 export interface EditResult {
   success: boolean;
@@ -447,4 +447,116 @@ export function createGameObject(options: CreateGameObjectOptions): CreateGameOb
     game_object_id: gameObjectId,
     transform_id: transformId
   };
+}
+
+/**
+ * Convert Euler angles (degrees) to quaternion.
+ * Unity uses ZXY rotation order.
+ */
+function eulerToQuaternion(euler: Vector3): { x: number; y: number; z: number; w: number } {
+  const deg2rad = Math.PI / 180;
+  const x = euler.x * deg2rad;
+  const y = euler.y * deg2rad;
+  const z = euler.z * deg2rad;
+
+  // Unity uses ZXY rotation order
+  const cx = Math.cos(x / 2);
+  const sx = Math.sin(x / 2);
+  const cy = Math.cos(y / 2);
+  const sy = Math.sin(y / 2);
+  const cz = Math.cos(z / 2);
+  const sz = Math.sin(z / 2);
+
+  return {
+    x: sx * cy * cz + cx * sy * sz,
+    y: cx * sy * cz - sx * cy * sz,
+    z: cx * cy * sz - sx * sy * cz,
+    w: cx * cy * cz + sx * sy * sz
+  };
+}
+
+/**
+ * Edit Transform component properties by fileID.
+ */
+export function editTransform(options: EditTransformOptions): EditResult {
+  const { file_path, transform_id, position, rotation, scale } = options;
+
+  // Check if file exists
+  if (!existsSync(file_path)) {
+    return {
+      success: false,
+      file_path,
+      error: `File not found: ${file_path}`
+    };
+  }
+
+  let content: string;
+  try {
+    content = readFileSync(file_path, 'utf-8');
+  } catch (err) {
+    return {
+      success: false,
+      file_path,
+      error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+
+  // Split into blocks
+  const blocks = content.split(/(?=--- !u!)/);
+
+  // Find the Transform block by fileID (class ID 4)
+  const transformPattern = new RegExp(`^--- !u!4 &${transform_id}\\b`);
+  let targetBlockIndex = -1;
+
+  for (let i = 0; i < blocks.length; i++) {
+    if (transformPattern.test(blocks[i])) {
+      targetBlockIndex = i;
+      break;
+    }
+  }
+
+  if (targetBlockIndex === -1) {
+    return {
+      success: false,
+      file_path,
+      error: `Transform with fileID ${transform_id} not found`
+    };
+  }
+
+  let block = blocks[targetBlockIndex];
+
+  // Update position if provided
+  if (position) {
+    block = block.replace(
+      /m_LocalPosition:\s*\{[^}]+\}/,
+      `m_LocalPosition: {x: ${position.x}, y: ${position.y}, z: ${position.z}}`
+    );
+  }
+
+  // Update rotation if provided (convert Euler to quaternion)
+  if (rotation) {
+    const quat = eulerToQuaternion(rotation);
+    block = block.replace(
+      /m_LocalRotation:\s*\{[^}]+\}/,
+      `m_LocalRotation: {x: ${quat.x}, y: ${quat.y}, z: ${quat.z}, w: ${quat.w}}`
+    );
+    // Also update the Euler hint
+    block = block.replace(
+      /m_LocalEulerAnglesHint:\s*\{[^}]+\}/,
+      `m_LocalEulerAnglesHint: {x: ${rotation.x}, y: ${rotation.y}, z: ${rotation.z}}`
+    );
+  }
+
+  // Update scale if provided
+  if (scale) {
+    block = block.replace(
+      /m_LocalScale:\s*\{[^}]+\}/,
+      `m_LocalScale: {x: ${scale.x}, y: ${scale.y}, z: ${scale.z}}`
+    );
+  }
+
+  blocks[targetBlockIndex] = block;
+  const finalContent = blocks.join('');
+
+  return atomicWrite(file_path, finalContent);
 }
