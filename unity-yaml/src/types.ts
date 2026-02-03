@@ -79,6 +79,29 @@ export interface EditTransformOptions {
   scale?: Vector3;
 }
 
+export type BuiltInComponent =
+  | 'BoxCollider'
+  | 'SphereCollider'
+  | 'CapsuleCollider'
+  | 'MeshCollider'
+  | 'Rigidbody'
+  | 'AudioSource'
+  | 'Light'
+  | 'Camera';
+
+export interface AddComponentOptions {
+  file_path: string;
+  game_object_name: string;
+  component_type: BuiltInComponent;
+}
+
+export interface AddComponentResult {
+  success: boolean;
+  file_path: string;
+  component_id?: number;
+  error?: string;
+}
+
 export interface CreateGameObjectResult {
   success: boolean;
   file_path: string;
