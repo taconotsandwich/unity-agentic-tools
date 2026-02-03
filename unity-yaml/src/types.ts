@@ -57,3 +57,17 @@ export interface InspectOptions {
 export interface ScanOptions {
   verbose?: boolean;
 }
+
+// Creation types
+export interface CreateGameObjectOptions {
+  file_path: string;
+  name: string;
+}
+
+export interface CreateGameObjectResult {
+  success: boolean;
+  file_path: string;
+  game_object_id?: number;
+  transform_id?: number;
+  error?: string;
+}

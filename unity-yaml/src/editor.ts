@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
+import type { CreateGameObjectOptions, CreateGameObjectResult } from './types';
 
 export interface EditResult {
   success: boolean;
@@ -299,4 +300,151 @@ export function replaceGameObjectBlock(
   blocks[targetBlockIndex] = newBlockContent;
   const finalContent = blocks.join('');
   return atomicWrite(filePath, finalContent);
+}
+
+/**
+ * Extract all existing file IDs from a Unity YAML file.
+ */
+function extractExistingFileIds(content: string): Set<number> {
+  const ids = new Set<number>();
+  const matches = content.matchAll(/--- !u!\d+ &(\d+)/g);
+  for (const match of matches) {
+    ids.add(parseInt(match[1], 10));
+  }
+  return ids;
+}
+
+/**
+ * Generate a unique file ID that doesn't conflict with existing IDs.
+ * Uses random approach similar to modern Unity.
+ */
+function generateFileId(existingIds: Set<number>): number {
+  let id: number;
+  do {
+    // Generate a random ID in a range similar to Unity's (large positive integers)
+    // Using 10-digit range to match observed Unity patterns
+    id = Math.floor(Math.random() * 9000000000) + 1000000000;
+  } while (existingIds.has(id) || id === 0);
+  return id;
+}
+
+/**
+ * Create YAML blocks for a new GameObject with Transform.
+ */
+function createGameObjectYAML(
+  gameObjectId: number,
+  transformId: number,
+  name: string
+): string {
+  return `--- !u!1 &${gameObjectId}
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: ${transformId}}
+  m_Layer: 0
+  m_Name: ${name}
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &${transformId}
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+`;
+}
+
+/**
+ * Create a new GameObject in a Unity YAML file.
+ */
+export function createGameObject(options: CreateGameObjectOptions): CreateGameObjectResult {
+  const { file_path, name } = options;
+
+  // Validate inputs
+  if (!name || name.trim() === '') {
+    return {
+      success: false,
+      file_path,
+      error: 'GameObject name cannot be empty'
+    };
+  }
+
+  // Check if file exists
+  if (!existsSync(file_path)) {
+    return {
+      success: false,
+      file_path,
+      error: `File not found: ${file_path}`
+    };
+  }
+
+  let content: string;
+  try {
+    content = readFileSync(file_path, 'utf-8');
+  } catch (err) {
+    return {
+      success: false,
+      file_path,
+      error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+
+  // Validate it's a Unity YAML file
+  if (!content.startsWith('%YAML 1.1')) {
+    return {
+      success: false,
+      file_path,
+      error: 'File is not a valid Unity YAML file (missing header)'
+    };
+  }
+
+  // Extract existing file IDs to avoid collisions
+  const existingIds = extractExistingFileIds(content);
+
+  // Generate unique IDs for the new GameObject and Transform
+  const gameObjectId = generateFileId(existingIds);
+  existingIds.add(gameObjectId);
+  const transformId = generateFileId(existingIds);
+
+  // Create the YAML blocks
+  const newBlocks = createGameObjectYAML(gameObjectId, transformId, name.trim());
+
+  // Append to file (ensure trailing newline before new blocks)
+  const finalContent = content.endsWith('\n')
+    ? content + newBlocks
+    : content + '\n' + newBlocks;
+
+  // Write atomically
+  const writeResult = atomicWrite(file_path, finalContent);
+
+  if (!writeResult.success) {
+    return {
+      success: false,
+      file_path,
+      error: writeResult.error
+    };
+  }
+
+  return {
+    success: true,
+    file_path,
+    game_object_id: gameObjectId,
+    transform_id: transformId
+  };
 }

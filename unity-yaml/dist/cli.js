@@ -2763,6 +2763,111 @@ function atomicWrite(filePath, content) {
     };
   }
 }
+function extractExistingFileIds(content) {
+  const ids = new Set;
+  const matches = content.matchAll(/--- !u!\d+ &(\d+)/g);
+  for (const match of matches) {
+    ids.add(parseInt(match[1], 10));
+  }
+  return ids;
+}
+function generateFileId(existingIds) {
+  let id;
+  do {
+    id = Math.floor(Math.random() * 9000000000) + 1e9;
+  } while (existingIds.has(id) || id === 0);
+  return id;
+}
+function createGameObjectYAML(gameObjectId, transformId, name) {
+  return `--- !u!1 &${gameObjectId}
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: ${transformId}}
+  m_Layer: 0
+  m_Name: ${name}
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &${transformId}
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+`;
+}
+function createGameObject(options) {
+  const { file_path, name } = options;
+  if (!name || name.trim() === "") {
+    return {
+      success: false,
+      file_path,
+      error: "GameObject name cannot be empty"
+    };
+  }
+  if (!import_fs4.existsSync(file_path)) {
+    return {
+      success: false,
+      file_path,
+      error: `File not found: ${file_path}`
+    };
+  }
+  let content;
+  try {
+    content = import_fs4.readFileSync(file_path, "utf-8");
+  } catch (err) {
+    return {
+      success: false,
+      file_path,
+      error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  if (!content.startsWith("%YAML 1.1")) {
+    return {
+      success: false,
+      file_path,
+      error: "File is not a valid Unity YAML file (missing header)"
+    };
+  }
+  const existingIds = extractExistingFileIds(content);
+  const gameObjectId = generateFileId(existingIds);
+  existingIds.add(gameObjectId);
+  const transformId = generateFileId(existingIds);
+  const newBlocks = createGameObjectYAML(gameObjectId, transformId, name.trim());
+  const finalContent = content.endsWith(`
+`) ? content + newBlocks : content + `
+` + newBlocks;
+  const writeResult = atomicWrite(file_path, finalContent);
+  if (!writeResult.success) {
+    return {
+      success: false,
+      file_path,
+      error: writeResult.error
+    };
+  }
+  return {
+    success: true,
+    file_path,
+    game_object_id: gameObjectId,
+    transform_id: transformId
+  };
+}
 
 // src/cli.ts
 var __dirname = "/Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src";
@@ -2853,6 +2958,13 @@ program.command("edit <file> <object_name> <property> <value>").description("Edi
     object_name,
     property,
     new_value: value
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("create <file> <name>").description("Create a new GameObject in a Unity file").option("-j, --json", "Output as JSON").action((file, name, _options) => {
+  const result = createGameObject({
+    file_path: file,
+    name
   });
   console.log(JSON.stringify(result, null, 2));
 });
