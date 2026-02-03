@@ -142,7 +142,7 @@ program.command('inspect-all <file>')
   });
 
 // Edit command
-import { editProperty, createGameObject } from './editor';
+import { editProperty, createGameObject, editTransform } from './editor';
 
 program.command('edit <file> <object_name> <property> <value>')
   .description('Edit GameObject property value safely')
@@ -166,6 +166,34 @@ program.command('create <file> <name>')
     const result = createGameObject({
       file_path: file,
       name: name
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Edit transform command
+program.command('edit-transform <file> <transform_id>')
+  .description('Edit Transform component properties by fileID')
+  .option('-p, --position <x,y,z>', 'Set local position')
+  .option('-r, --rotation <x,y,z>', 'Set local rotation (Euler angles in degrees)')
+  .option('-s, --scale <x,y,z>', 'Set local scale')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, transform_id, options) => {
+    const parseVector = (str: string) => {
+      const parts = str.split(',').map(Number);
+      if (parts.length !== 3 || parts.some(isNaN)) {
+        console.error('Invalid vector format. Use: x,y,z (e.g., 1,2,3)');
+        process.exit(1);
+      }
+      return { x: parts[0], y: parts[1], z: parts[2] };
+    };
+
+    const result = editTransform({
+      file_path: file,
+      transform_id: parseInt(transform_id, 10),
+      position: options.position ? parseVector(options.position) : undefined,
+      rotation: options.rotation ? parseVector(options.rotation) : undefined,
+      scale: options.scale ? parseVector(options.scale) : undefined
     });
 
     console.log(JSON.stringify(result, null, 2));

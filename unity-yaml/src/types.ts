@@ -59,9 +59,23 @@ export interface ScanOptions {
 }
 
 // Creation types
+export interface Vector3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
 export interface CreateGameObjectOptions {
   file_path: string;
   name: string;
+}
+
+export interface EditTransformOptions {
+  file_path: string;
+  transform_id: number;
+  position?: Vector3;
+  rotation?: Vector3;  // Euler angles in degrees
+  scale?: Vector3;
 }
 
 export interface CreateGameObjectResult {
