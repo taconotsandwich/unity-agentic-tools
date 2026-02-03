@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolve } from 'path';
-import { readFileSync } from 'fs';
+import { resolve, join } from 'path';
+import { readFileSync, unlinkSync } from 'fs';
+import { tmpdir } from 'os';
 import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant } from '../src/editor';
-import { unlinkSync } from 'fs';
 import { create_temp_fixture } from './test-utils';
 import type { TempFixture } from './test-utils';
 
@@ -1220,7 +1220,7 @@ describe('addComponent', () => {
 
 describe('createPrefabVariant', () => {
     const sourcePrefab = resolve(__dirname, 'fixtures', 'SamplePrefab.prefab');
-    const outputPath = '/tmp/TestVariant.prefab';
+    const outputPath = join(tmpdir(), 'TestVariant.prefab');
 
     afterEach(() => {
         // Clean up created files
@@ -1333,7 +1333,7 @@ describe('createPrefabVariant', () => {
     it('should fail for non-prefab output path', () => {
         const result = createPrefabVariant({
             source_prefab: sourcePrefab,
-            output_path: '/tmp/output.unity'
+            output_path: join(tmpdir(), 'output.unity')
         });
 
         expect(result.success).toBe(false);
@@ -1342,7 +1342,7 @@ describe('createPrefabVariant', () => {
 
     it('should fail if source has no .meta file', () => {
         // Create a temp prefab without .meta
-        const tempPrefab = '/tmp/NoMeta.prefab';
+        const tempPrefab = join(tmpdir(), 'NoMeta.prefab');
         const fs = require('fs');
         fs.writeFileSync(tempPrefab, readFileSync(sourcePrefab, 'utf-8'));
 
