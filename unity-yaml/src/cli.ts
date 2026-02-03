@@ -142,7 +142,8 @@ program.command('inspect-all <file>')
   });
 
 // Edit command
-import { editProperty } from './editor';
+import { editProperty, createGameObject, editTransform, addComponent, createPrefabVariant } from './editor';
+import type { BuiltInComponent } from './types';
 
 program.command('edit <file> <object_name> <property> <value>')
   .description('Edit GameObject property value safely')
@@ -153,6 +154,96 @@ program.command('edit <file> <object_name> <property> <value>')
       object_name: object_name,
       property: property,
       new_value: value
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Create command
+program.command('create <file> <name>')
+  .description('Create a new GameObject in a Unity file')
+  .option('-p, --parent <name|id>', 'Parent GameObject name or Transform fileID')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, name, options) => {
+    let parent: string | number | undefined;
+    if (options.parent) {
+      // Check if it's a number (Transform fileID)
+      const asNumber = parseInt(options.parent, 10);
+      parent = isNaN(asNumber) ? options.parent : asNumber;
+    }
+
+    const result = createGameObject({
+      file_path: file,
+      name: name,
+      parent: parent
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Edit transform command
+program.command('edit-transform <file> <transform_id>')
+  .description('Edit Transform component properties by fileID')
+  .option('-p, --position <x,y,z>', 'Set local position')
+  .option('-r, --rotation <x,y,z>', 'Set local rotation (Euler angles in degrees)')
+  .option('-s, --scale <x,y,z>', 'Set local scale')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, transform_id, options) => {
+    const parseVector = (str: string) => {
+      const parts = str.split(',').map(Number);
+      if (parts.length !== 3 || parts.some(isNaN)) {
+        console.error('Invalid vector format. Use: x,y,z (e.g., 1,2,3)');
+        process.exit(1);
+      }
+      return { x: parts[0], y: parts[1], z: parts[2] };
+    };
+
+    const result = editTransform({
+      file_path: file,
+      transform_id: parseInt(transform_id, 10),
+      position: options.position ? parseVector(options.position) : undefined,
+      rotation: options.rotation ? parseVector(options.rotation) : undefined,
+      scale: options.scale ? parseVector(options.scale) : undefined
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Add component command
+const VALID_COMPONENTS: BuiltInComponent[] = [
+  'BoxCollider', 'SphereCollider', 'CapsuleCollider', 'MeshCollider',
+  'Rigidbody', 'AudioSource', 'Light', 'Camera'
+];
+
+program.command('add-component <file> <object_name> <component_type>')
+  .description('Add a built-in component to a GameObject')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, object_name, component_type, _options) => {
+    if (!VALID_COMPONENTS.includes(component_type as BuiltInComponent)) {
+      console.error(`Invalid component type: ${component_type}`);
+      console.error(`Valid types: ${VALID_COMPONENTS.join(', ')}`);
+      process.exit(1);
+    }
+
+    const result = addComponent({
+      file_path: file,
+      game_object_name: object_name,
+      component_type: component_type as BuiltInComponent
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Create prefab variant command
+program.command('create-variant <source_prefab> <output_path>')
+  .description('Create a Prefab Variant from a source prefab')
+  .option('-n, --name <name>', 'Override variant name')
+  .option('-j, --json', 'Output as JSON')
+  .action((source_prefab, output_path, options) => {
+    const result = createPrefabVariant({
+      source_prefab,
+      output_path,
+      variant_name: options.name
     });
 
     console.log(JSON.stringify(result, null, 2));

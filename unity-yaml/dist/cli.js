@@ -2763,6 +2763,820 @@ function atomicWrite(filePath, content) {
     };
   }
 }
+function extractExistingFileIds(content) {
+  const ids = new Set;
+  const matches = content.matchAll(/--- !u!\d+ &(\d+)/g);
+  for (const match of matches) {
+    ids.add(parseInt(match[1], 10));
+  }
+  return ids;
+}
+function generateFileId(existingIds) {
+  let id;
+  do {
+    id = Math.floor(Math.random() * 9000000000) + 1e9;
+  } while (existingIds.has(id) || id === 0);
+  return id;
+}
+function createGameObjectYAML(gameObjectId, transformId, name, parentTransformId = 0) {
+  return `--- !u!1 &${gameObjectId}
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: ${transformId}}
+  m_Layer: 0
+  m_Name: ${name}
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &${transformId}
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: ${parentTransformId}}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+`;
+}
+function findTransformIdByName(content, objectName) {
+  const blocks = content.split(/(?=--- !u!)/);
+  const escapedName = objectName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const namePattern = new RegExp(`^\\s*m_Name:\\s*${escapedName}\\s*$`, "m");
+  for (const block of blocks) {
+    if (block.startsWith("--- !u!1 ") && namePattern.test(block)) {
+      const componentMatch = block.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(\d+)\}/);
+      if (componentMatch) {
+        return parseInt(componentMatch[1], 10);
+      }
+    }
+  }
+  return null;
+}
+function addChildToParent(content, parentTransformId, childTransformId) {
+  const blocks = content.split(/(?=--- !u!)/);
+  const transformPattern = new RegExp(`^--- !u!4 &${parentTransformId}\\b`);
+  for (let i = 0;i < blocks.length; i++) {
+    if (transformPattern.test(blocks[i])) {
+      blocks[i] = blocks[i].replace(/m_Children:\s*\[(.*?)\]/, (match, children) => {
+        const trimmed = children.trim();
+        if (trimmed === "") {
+          return `m_Children:
+  - {fileID: ${childTransformId}}`;
+        } else {
+          return match.replace("]", "") + `
+  - {fileID: ${childTransformId}}]`;
+        }
+      });
+      if (blocks[i].includes("m_Children:") && !blocks[i].includes(`fileID: ${childTransformId}`)) {
+        blocks[i] = blocks[i].replace(/(m_Children:\s*\n(?:\s*-\s*\{fileID:\s*\d+\}\s*\n)*)/, `$1  - {fileID: ${childTransformId}}
+`);
+      }
+      break;
+    }
+  }
+  return blocks.join("");
+}
+function createGameObject(options) {
+  const { file_path, name, parent } = options;
+  if (!name || name.trim() === "") {
+    return {
+      success: false,
+      file_path,
+      error: "GameObject name cannot be empty"
+    };
+  }
+  if (!import_fs4.existsSync(file_path)) {
+    return {
+      success: false,
+      file_path,
+      error: `File not found: ${file_path}`
+    };
+  }
+  let content;
+  try {
+    content = import_fs4.readFileSync(file_path, "utf-8");
+  } catch (err) {
+    return {
+      success: false,
+      file_path,
+      error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  if (!content.startsWith("%YAML 1.1")) {
+    return {
+      success: false,
+      file_path,
+      error: "File is not a valid Unity YAML file (missing header)"
+    };
+  }
+  let parentTransformId = 0;
+  if (parent !== undefined) {
+    if (typeof parent === "number") {
+      parentTransformId = parent;
+      const transformPattern = new RegExp(`--- !u!4 &${parentTransformId}\\b`);
+      if (!transformPattern.test(content)) {
+        return {
+          success: false,
+          file_path,
+          error: `Parent Transform with fileID ${parentTransformId} not found`
+        };
+      }
+    } else {
+      const foundId = findTransformIdByName(content, parent);
+      if (foundId === null) {
+        return {
+          success: false,
+          file_path,
+          error: `Parent GameObject "${parent}" not found`
+        };
+      }
+      parentTransformId = foundId;
+    }
+  }
+  const existingIds = extractExistingFileIds(content);
+  const gameObjectId = generateFileId(existingIds);
+  existingIds.add(gameObjectId);
+  const transformId = generateFileId(existingIds);
+  const newBlocks = createGameObjectYAML(gameObjectId, transformId, name.trim(), parentTransformId);
+  let finalContent = content.endsWith(`
+`) ? content + newBlocks : content + `
+` + newBlocks;
+  if (parentTransformId !== 0) {
+    finalContent = addChildToParent(finalContent, parentTransformId, transformId);
+  }
+  const writeResult = atomicWrite(file_path, finalContent);
+  if (!writeResult.success) {
+    return {
+      success: false,
+      file_path,
+      error: writeResult.error
+    };
+  }
+  return {
+    success: true,
+    file_path,
+    game_object_id: gameObjectId,
+    transform_id: transformId
+  };
+}
+function eulerToQuaternion(euler) {
+  const deg2rad = Math.PI / 180;
+  const x = euler.x * deg2rad;
+  const y = euler.y * deg2rad;
+  const z = euler.z * deg2rad;
+  const cx = Math.cos(x / 2);
+  const sx = Math.sin(x / 2);
+  const cy = Math.cos(y / 2);
+  const sy = Math.sin(y / 2);
+  const cz = Math.cos(z / 2);
+  const sz = Math.sin(z / 2);
+  return {
+    x: sx * cy * cz + cx * sy * sz,
+    y: cx * sy * cz - sx * cy * sz,
+    z: cx * cy * sz - sx * sy * cz,
+    w: cx * cy * cz + sx * sy * sz
+  };
+}
+function editTransform(options) {
+  const { file_path, transform_id, position, rotation, scale } = options;
+  if (!import_fs4.existsSync(file_path)) {
+    return {
+      success: false,
+      file_path,
+      error: `File not found: ${file_path}`
+    };
+  }
+  let content;
+  try {
+    content = import_fs4.readFileSync(file_path, "utf-8");
+  } catch (err) {
+    return {
+      success: false,
+      file_path,
+      error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const blocks = content.split(/(?=--- !u!)/);
+  const transformPattern = new RegExp(`^--- !u!4 &${transform_id}\\b`);
+  let targetBlockIndex = -1;
+  for (let i = 0;i < blocks.length; i++) {
+    if (transformPattern.test(blocks[i])) {
+      targetBlockIndex = i;
+      break;
+    }
+  }
+  if (targetBlockIndex === -1) {
+    return {
+      success: false,
+      file_path,
+      error: `Transform with fileID ${transform_id} not found`
+    };
+  }
+  let block = blocks[targetBlockIndex];
+  if (position) {
+    block = block.replace(/m_LocalPosition:\s*\{[^}]+\}/, `m_LocalPosition: {x: ${position.x}, y: ${position.y}, z: ${position.z}}`);
+  }
+  if (rotation) {
+    const quat = eulerToQuaternion(rotation);
+    block = block.replace(/m_LocalRotation:\s*\{[^}]+\}/, `m_LocalRotation: {x: ${quat.x}, y: ${quat.y}, z: ${quat.z}, w: ${quat.w}}`);
+    block = block.replace(/m_LocalEulerAnglesHint:\s*\{[^}]+\}/, `m_LocalEulerAnglesHint: {x: ${rotation.x}, y: ${rotation.y}, z: ${rotation.z}}`);
+  }
+  if (scale) {
+    block = block.replace(/m_LocalScale:\s*\{[^}]+\}/, `m_LocalScale: {x: ${scale.x}, y: ${scale.y}, z: ${scale.z}}`);
+  }
+  blocks[targetBlockIndex] = block;
+  const finalContent = blocks.join("");
+  return atomicWrite(file_path, finalContent);
+}
+var COMPONENT_CLASS_IDS = {
+  BoxCollider: 65,
+  SphereCollider: 135,
+  CapsuleCollider: 136,
+  MeshCollider: 64,
+  Rigidbody: 54,
+  AudioSource: 82,
+  Light: 108,
+  Camera: 20
+};
+function createComponentYAML(componentType, componentId, gameObjectId) {
+  const classId = COMPONENT_CLASS_IDS[componentType];
+  const templates = {
+    BoxCollider: `--- !u!${classId} &${componentId}
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 1, y: 1, z: 1}
+  m_Center: {x: 0, y: 0, z: 0}
+`,
+    SphereCollider: `--- !u!${classId} &${componentId}
+SphereCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Radius: 0.5
+  m_Center: {x: 0, y: 0, z: 0}
+`,
+    CapsuleCollider: `--- !u!${classId} &${componentId}
+CapsuleCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Radius: 0.5
+  m_Height: 2
+  m_Direction: 1
+  m_Center: {x: 0, y: 0, z: 0}
+`,
+    MeshCollider: `--- !u!${classId} &${componentId}
+MeshCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 5
+  m_Convex: 0
+  m_CookingOptions: 30
+  m_Mesh: {fileID: 0}
+`,
+    Rigidbody: `--- !u!${classId} &${componentId}
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  serializedVersion: 4
+  m_Mass: 1
+  m_Drag: 0
+  m_AngularDrag: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 1
+  m_IsKinematic: 0
+  m_Interpolate: 0
+  m_Constraints: 0
+  m_CollisionDetection: 0
+`,
+    AudioSource: `--- !u!${classId} &${componentId}
+AudioSource:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  m_Enabled: 1
+  serializedVersion: 4
+  OutputAudioMixerGroup: {fileID: 0}
+  m_audioClip: {fileID: 0}
+  m_PlayOnAwake: 1
+  m_Volume: 1
+  m_Pitch: 1
+  Loop: 0
+  Mute: 0
+  Spatialize: 0
+  SpatializePostEffects: 0
+  Priority: 128
+  DopplerLevel: 1
+  MinDistance: 1
+  MaxDistance: 500
+  Pan2D: 0
+  rolloffMode: 0
+  BypassEffects: 0
+  BypassListenerEffects: 0
+  BypassReverbZones: 0
+  rolloffCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  panLevelCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  spreadCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  reverbZoneMixCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+`,
+    Light: `--- !u!${classId} &${componentId}
+Light:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  m_Enabled: 1
+  serializedVersion: 10
+  m_Type: 2
+  m_Shape: 0
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Intensity: 1
+  m_Range: 10
+  m_SpotAngle: 30
+  m_InnerSpotAngle: 21.80208
+  m_CookieSize: 10
+  m_Shadows:
+    m_Type: 0
+    m_Resolution: -1
+    m_CustomResolution: -1
+    m_Strength: 1
+    m_Bias: 0.05
+    m_NormalBias: 0.4
+    m_NearPlane: 0.2
+    m_CullingMatrixOverride:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    m_UseCullingMatrixOverride: 0
+  m_Cookie: {fileID: 0}
+  m_DrawHalo: 0
+  m_Flare: {fileID: 0}
+  m_RenderMode: 0
+  m_CullingMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_RenderingLayerMask: 1
+  m_Lightmapping: 4
+  m_LightShadowCasterMode: 0
+  m_AreaSize: {x: 1, y: 1}
+  m_BounceIntensity: 1
+  m_ColorTemperature: 6570
+  m_UseColorTemperature: 0
+  m_BoundingSphereOverride: {x: 0, y: 0, z: 0, w: 0}
+  m_UseBoundingSphereOverride: 0
+  m_UseViewFrustumForShadowCasterCull: 1
+  m_ShadowRadius: 0
+  m_ShadowAngle: 0
+`,
+    Camera: `--- !u!${classId} &${componentId}
+Camera:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  m_Enabled: 1
+  serializedVersion: 2
+  m_ClearFlags: 1
+  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}
+  m_projectionMatrixMode: 1
+  m_GateFitMode: 2
+  m_FOVAxisMode: 0
+  m_SensorSize: {x: 36, y: 24}
+  m_LensShift: {x: 0, y: 0}
+  m_FocalLength: 50
+  m_NormalizedViewPortRect:
+    serializedVersion: 2
+    x: 0
+    y: 0
+    width: 1
+    height: 1
+  near clip plane: 0.3
+  far clip plane: 1000
+  field of view: 60
+  orthographic: 0
+  orthographic size: 5
+  m_Depth: 0
+  m_CullingMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_RenderingPath: -1
+  m_TargetTexture: {fileID: 0}
+  m_TargetDisplay: 0
+  m_TargetEye: 3
+  m_HDR: 1
+  m_AllowMSAA: 1
+  m_AllowDynamicResolution: 0
+  m_ForceIntoRenderTexture: 0
+  m_OcclusionCulling: 1
+  m_StereoConvergence: 10
+  m_StereoSeparation: 0.022
+`
+  };
+  return templates[componentType];
+}
+function findGameObjectIdByName(content, objectName) {
+  const blocks = content.split(/(?=--- !u!)/);
+  const escapedName = objectName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const namePattern = new RegExp(`^\\s*m_Name:\\s*${escapedName}\\s*$`, "m");
+  for (const block of blocks) {
+    if (block.startsWith("--- !u!1 ") && namePattern.test(block)) {
+      const idMatch = block.match(/^--- !u!1 &(\d+)/);
+      if (idMatch) {
+        return parseInt(idMatch[1], 10);
+      }
+    }
+  }
+  return null;
+}
+function addComponentToGameObject(content, gameObjectId, componentId) {
+  const blocks = content.split(/(?=--- !u!)/);
+  const goPattern = new RegExp(`^--- !u!1 &${gameObjectId}\\b`);
+  for (let i = 0;i < blocks.length; i++) {
+    if (goPattern.test(blocks[i])) {
+      blocks[i] = blocks[i].replace(/(m_Component:\s*\n(?:\s*-\s*component:\s*\{fileID:\s*\d+\}\s*\n)*)/, `$1  - component: {fileID: ${componentId}}
+`);
+      break;
+    }
+  }
+  return blocks.join("");
+}
+function addComponent(options) {
+  const { file_path, game_object_name, component_type } = options;
+  if (!import_fs4.existsSync(file_path)) {
+    return {
+      success: false,
+      file_path,
+      error: `File not found: ${file_path}`
+    };
+  }
+  let content;
+  try {
+    content = import_fs4.readFileSync(file_path, "utf-8");
+  } catch (err) {
+    return {
+      success: false,
+      file_path,
+      error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const gameObjectId = findGameObjectIdByName(content, game_object_name);
+  if (gameObjectId === null) {
+    return {
+      success: false,
+      file_path,
+      error: `GameObject "${game_object_name}" not found`
+    };
+  }
+  const existingIds = extractExistingFileIds(content);
+  const componentId = generateFileId(existingIds);
+  const componentYAML = createComponentYAML(component_type, componentId, gameObjectId);
+  content = addComponentToGameObject(content, gameObjectId, componentId);
+  const finalContent = content.endsWith(`
+`) ? content + componentYAML : content + `
+` + componentYAML;
+  const writeResult = atomicWrite(file_path, finalContent);
+  if (!writeResult.success) {
+    return {
+      success: false,
+      file_path,
+      error: writeResult.error
+    };
+  }
+  return {
+    success: true,
+    file_path,
+    component_id: componentId
+  };
+}
+function extractGuidFromMeta(metaPath) {
+  if (!import_fs4.existsSync(metaPath)) {
+    return null;
+  }
+  try {
+    const content = import_fs4.readFileSync(metaPath, "utf-8");
+    const match = content.match(/guid:\s*([a-f0-9]{32})/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+function findPrefabRootInfo(content) {
+  const blocks = content.split(/(?=--- !u!)/);
+  for (const block of blocks) {
+    if (block.startsWith("--- !u!4 ") && /m_Father:\s*\{fileID:\s*0\}/.test(block)) {
+      const transformIdMatch = block.match(/^--- !u!4 &(\d+)/);
+      const gameObjectIdMatch = block.match(/m_GameObject:\s*\{fileID:\s*(\d+)\}/);
+      if (transformIdMatch && gameObjectIdMatch) {
+        const transformId = parseInt(transformIdMatch[1], 10);
+        const gameObjectId = parseInt(gameObjectIdMatch[1], 10);
+        for (const goBlock of blocks) {
+          if (goBlock.startsWith(`--- !u!1 &${gameObjectId}`)) {
+            const nameMatch = goBlock.match(/m_Name:\s*(.+)/);
+            const name = nameMatch ? nameMatch[1].trim() : "Prefab";
+            return { gameObjectId, transformId, name };
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+function generateGuid() {
+  const hex = "0123456789abcdef";
+  let guid = "";
+  for (let i = 0;i < 32; i++) {
+    guid += hex[Math.floor(Math.random() * 16)];
+  }
+  return guid;
+}
+function createPrefabVariant(options) {
+  const { source_prefab, output_path, variant_name } = options;
+  if (!import_fs4.existsSync(source_prefab)) {
+    return {
+      success: false,
+      output_path,
+      error: `Source prefab not found: ${source_prefab}`
+    };
+  }
+  if (!source_prefab.endsWith(".prefab")) {
+    return {
+      success: false,
+      output_path,
+      error: "Source file must be a .prefab file"
+    };
+  }
+  if (!output_path.endsWith(".prefab")) {
+    return {
+      success: false,
+      output_path,
+      error: "Output path must have .prefab extension"
+    };
+  }
+  const metaPath = source_prefab + ".meta";
+  const sourceGuid = extractGuidFromMeta(metaPath);
+  if (!sourceGuid) {
+    return {
+      success: false,
+      output_path,
+      error: `Could not find or read .meta file for source prefab: ${metaPath}`
+    };
+  }
+  let sourceContent;
+  try {
+    sourceContent = import_fs4.readFileSync(source_prefab, "utf-8");
+  } catch (err) {
+    return {
+      success: false,
+      output_path,
+      error: `Failed to read source prefab: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const rootInfo = findPrefabRootInfo(sourceContent);
+  if (!rootInfo) {
+    return {
+      success: false,
+      output_path,
+      error: "Could not find root GameObject in source prefab"
+    };
+  }
+  const prefabInstanceId = generateFileId(new Set);
+  const strippedGoId = generateFileId(new Set([prefabInstanceId]));
+  const strippedTransformId = generateFileId(new Set([prefabInstanceId, strippedGoId]));
+  const finalName = variant_name || `${rootInfo.name} Variant`;
+  const variantYaml = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &${strippedGoId} stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: ${rootInfo.gameObjectId}, guid: ${sourceGuid}, type: 3}
+  m_PrefabInstance: {fileID: ${prefabInstanceId}}
+  m_PrefabAsset: {fileID: 0}
+--- !u!4 &${strippedTransformId} stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: ${rootInfo.transformId}, guid: ${sourceGuid}, type: 3}
+  m_PrefabInstance: {fileID: ${prefabInstanceId}}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1001 &${prefabInstanceId}
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: ${rootInfo.gameObjectId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_Name
+      value: ${finalName}
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: ${sourceGuid}, type: 3}
+`;
+  try {
+    import_fs4.writeFileSync(output_path, variantYaml, "utf-8");
+  } catch (err) {
+    return {
+      success: false,
+      output_path,
+      error: `Failed to write variant prefab: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const variantGuid = generateGuid();
+  const variantMetaContent = `fileFormatVersion: 2
+guid: ${variantGuid}
+PrefabImporter:
+  externalObjects: {}
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+`;
+  try {
+    import_fs4.writeFileSync(output_path + ".meta", variantMetaContent, "utf-8");
+  } catch (err) {
+    try {
+      const fs = require("fs");
+      fs.unlinkSync(output_path);
+    } catch {}
+    return {
+      success: false,
+      output_path,
+      error: `Failed to write .meta file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  return {
+    success: true,
+    output_path,
+    source_guid: sourceGuid,
+    prefab_instance_id: prefabInstanceId
+  };
+}
 
 // src/cli.ts
 var __dirname = "/Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src";
@@ -2853,6 +3667,68 @@ program.command("edit <file> <object_name> <property> <value>").description("Edi
     object_name,
     property,
     new_value: value
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("create <file> <name>").description("Create a new GameObject in a Unity file").option("-p, --parent <name|id>", "Parent GameObject name or Transform fileID").option("-j, --json", "Output as JSON").action((file, name, options) => {
+  let parent;
+  if (options.parent) {
+    const asNumber = parseInt(options.parent, 10);
+    parent = isNaN(asNumber) ? options.parent : asNumber;
+  }
+  const result = createGameObject({
+    file_path: file,
+    name,
+    parent
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("edit-transform <file> <transform_id>").description("Edit Transform component properties by fileID").option("-p, --position <x,y,z>", "Set local position").option("-r, --rotation <x,y,z>", "Set local rotation (Euler angles in degrees)").option("-s, --scale <x,y,z>", "Set local scale").option("-j, --json", "Output as JSON").action((file, transform_id, options) => {
+  const parseVector = (str) => {
+    const parts = str.split(",").map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) {
+      console.error("Invalid vector format. Use: x,y,z (e.g., 1,2,3)");
+      process.exit(1);
+    }
+    return { x: parts[0], y: parts[1], z: parts[2] };
+  };
+  const result = editTransform({
+    file_path: file,
+    transform_id: parseInt(transform_id, 10),
+    position: options.position ? parseVector(options.position) : undefined,
+    rotation: options.rotation ? parseVector(options.rotation) : undefined,
+    scale: options.scale ? parseVector(options.scale) : undefined
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+var VALID_COMPONENTS = [
+  "BoxCollider",
+  "SphereCollider",
+  "CapsuleCollider",
+  "MeshCollider",
+  "Rigidbody",
+  "AudioSource",
+  "Light",
+  "Camera"
+];
+program.command("add-component <file> <object_name> <component_type>").description("Add a built-in component to a GameObject").option("-j, --json", "Output as JSON").action((file, object_name, component_type, _options) => {
+  if (!VALID_COMPONENTS.includes(component_type)) {
+    console.error(`Invalid component type: ${component_type}`);
+    console.error(`Valid types: ${VALID_COMPONENTS.join(", ")}`);
+    process.exit(1);
+  }
+  const result = addComponent({
+    file_path: file,
+    game_object_name: object_name,
+    component_type
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("create-variant <source_prefab> <output_path>").description("Create a Prefab Variant from a source prefab").option("-n, --name <name>", "Override variant name").option("-j, --json", "Output as JSON").action((source_prefab, output_path, options) => {
+  const result = createPrefabVariant({
+    source_prefab,
+    output_path,
+    variant_name: options.name
   });
   console.log(JSON.stringify(result, null, 2));
 });

@@ -57,3 +57,69 @@ export interface InspectOptions {
 export interface ScanOptions {
   verbose?: boolean;
 }
+
+// Creation types
+export interface Vector3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface CreateGameObjectOptions {
+  file_path: string;
+  name: string;
+  parent?: string | number;  // Parent name or Transform fileID
+}
+
+export interface EditTransformOptions {
+  file_path: string;
+  transform_id: number;
+  position?: Vector3;
+  rotation?: Vector3;  // Euler angles in degrees
+  scale?: Vector3;
+}
+
+export type BuiltInComponent =
+  | 'BoxCollider'
+  | 'SphereCollider'
+  | 'CapsuleCollider'
+  | 'MeshCollider'
+  | 'Rigidbody'
+  | 'AudioSource'
+  | 'Light'
+  | 'Camera';
+
+export interface AddComponentOptions {
+  file_path: string;
+  game_object_name: string;
+  component_type: BuiltInComponent;
+}
+
+export interface AddComponentResult {
+  success: boolean;
+  file_path: string;
+  component_id?: number;
+  error?: string;
+}
+
+export interface CreatePrefabVariantOptions {
+  source_prefab: string;      // Path to source .prefab file
+  output_path: string;        // Path for the new variant .prefab file
+  variant_name?: string;      // Optional name override (defaults to source name + " Variant")
+}
+
+export interface CreatePrefabVariantResult {
+  success: boolean;
+  output_path: string;
+  source_guid?: string;
+  prefab_instance_id?: number;
+  error?: string;
+}
+
+export interface CreateGameObjectResult {
+  success: boolean;
+  file_path: string;
+  game_object_id?: number;
+  transform_id?: number;
+  error?: string;
+}
