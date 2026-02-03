@@ -142,7 +142,7 @@ program.command('inspect-all <file>')
   });
 
 // Edit command
-import { editProperty } from './editor';
+import { editProperty, createGameObject } from './editor';
 
 program.command('edit <file> <object_name> <property> <value>')
   .description('Edit GameObject property value safely')
@@ -153,6 +153,19 @@ program.command('edit <file> <object_name> <property> <value>')
       object_name: object_name,
       property: property,
       new_value: value
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Create command
+program.command('create <file> <name>')
+  .description('Create a new GameObject in a Unity file')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, name, _options) => {
+    const result = createGameObject({
+      file_path: file,
+      name: name
     });
 
     console.log(JSON.stringify(result, null, 2));

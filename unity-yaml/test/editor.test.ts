@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve } from 'path';
 import { readFileSync } from 'fs';
-import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties } from '../src/editor';
+import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject } from '../src/editor';
 import { create_temp_fixture } from './test-utils';
 import type { TempFixture } from './test-utils';
 
@@ -593,6 +593,204 @@ describe('UnityEditor error handling', () => {
         } finally {
             temp_fixture.cleanup_fn();
         }
+    });
+});
+
+describe('createGameObject', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should create a new GameObject with Transform', () => {
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'NewTestObject'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.game_object_id).toBeDefined();
+        expect(result.transform_id).toBeDefined();
+        expect(typeof result.game_object_id).toBe('number');
+        expect(typeof result.transform_id).toBe('number');
+
+        // Verify the content was actually written
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('m_Name: NewTestObject');
+        expect(content).toContain(`--- !u!1 &${result.game_object_id}`);
+        expect(content).toContain(`--- !u!4 &${result.transform_id}`);
+    });
+
+    it('should create GameObject with unique file IDs', () => {
+        const result1 = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Object1'
+        });
+
+        const result2 = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Object2'
+        });
+
+        expect(result1.success).toBe(true);
+        expect(result2.success).toBe(true);
+
+        // All IDs should be unique
+        const allIds = [
+            result1.game_object_id,
+            result1.transform_id,
+            result2.game_object_id,
+            result2.transform_id
+        ];
+        const uniqueIds = new Set(allIds);
+        expect(uniqueIds.size).toBe(4);
+    });
+
+    it('should preserve existing content when creating', () => {
+        const originalContent = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const originalBlockCount = (originalContent.match(/--- !u!/g) || []).length;
+
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'NewObject'
+        });
+
+        expect(result.success).toBe(true);
+
+        const newContent = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const newBlockCount = (newContent.match(/--- !u!/g) || []).length;
+
+        // Should have 2 more blocks (GameObject + Transform)
+        expect(newBlockCount).toBe(originalBlockCount + 2);
+
+        // Original objects should still exist
+        expect(newContent).toContain('m_Name: Main Camera');
+        expect(newContent).toContain('m_Name: Player');
+        expect(newContent).toContain('m_Name: Directional Light');
+    });
+
+    it('should create valid Unity YAML structure', () => {
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'ValidObject'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+
+        // Find the new GameObject block
+        const goPattern = new RegExp(`--- !u!1 &${result.game_object_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const goMatch = content.match(goPattern);
+        expect(goMatch).not.toBeNull();
+
+        // Check required fields in GameObject
+        const goBlock = goMatch![0];
+        expect(goBlock).toContain('m_ObjectHideFlags: 0');
+        expect(goBlock).toContain('serializedVersion: 6');
+        expect(goBlock).toContain(`component: {fileID: ${result.transform_id}}`);
+        expect(goBlock).toContain('m_Name: ValidObject');
+        expect(goBlock).toContain('m_TagString: Untagged');
+        expect(goBlock).toContain('m_IsActive: 1');
+
+        // Find the Transform block
+        const transformPattern = new RegExp(`--- !u!4 &${result.transform_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const transformMatch = content.match(transformPattern);
+        expect(transformMatch).not.toBeNull();
+
+        // Check required fields in Transform
+        const transformBlock = transformMatch![0];
+        expect(transformBlock).toContain(`m_GameObject: {fileID: ${result.game_object_id}}`);
+        expect(transformBlock).toContain('m_LocalPosition: {x: 0, y: 0, z: 0}');
+        expect(transformBlock).toContain('m_LocalScale: {x: 1, y: 1, z: 1}');
+        expect(transformBlock).toContain('m_Father: {fileID: 0}');
+    });
+
+    it('should reject empty name', () => {
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: ''
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('empty');
+    });
+
+    it('should reject whitespace-only name', () => {
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: '   '
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('empty');
+    });
+
+    it('should handle names with spaces', () => {
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'My New Object'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('m_Name: My New Object');
+    });
+
+    it('should handle names with special characters', () => {
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Object (Clone) [1]'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('m_Name: Object (Clone) [1]');
+    });
+
+    it('should return error for nonexistent file', () => {
+        const result = createGameObject({
+            file_path: '/nonexistent/path/file.unity',
+            name: 'Test'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('File not found');
+    });
+
+    it('should allow editing newly created object', () => {
+        const createResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'EditableObject'
+        });
+
+        expect(createResult.success).toBe(true);
+
+        // Now edit the new object
+        const editResult = editProperty({
+            file_path: temp_fixture.temp_path,
+            object_name: 'EditableObject',
+            property: 'm_Layer',
+            new_value: '5'
+        });
+
+        expect(editResult.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // Find the EditableObject section
+        const objectPattern = new RegExp(`--- !u!1 &${createResult.game_object_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const objectMatch = content.match(objectPattern);
+        expect(objectMatch).not.toBeNull();
+        expect(objectMatch![0]).toContain('m_Layer: 5');
     });
 });
 
