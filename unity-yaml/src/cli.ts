@@ -142,7 +142,7 @@ program.command('inspect-all <file>')
   });
 
 // Edit command
-import { editProperty, createGameObject, editTransform, addComponent } from './editor';
+import { editProperty, createGameObject, editTransform, addComponent, createPrefabVariant } from './editor';
 import type { BuiltInComponent } from './types';
 
 program.command('edit <file> <object_name> <property> <value>')
@@ -229,6 +229,21 @@ program.command('add-component <file> <object_name> <component_type>')
       file_path: file,
       game_object_name: object_name,
       component_type: component_type as BuiltInComponent
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Create prefab variant command
+program.command('create-variant <source_prefab> <output_path>')
+  .description('Create a Prefab Variant from a source prefab')
+  .option('-n, --name <name>', 'Override variant name')
+  .option('-j, --json', 'Output as JSON')
+  .action((source_prefab, output_path, options) => {
+    const result = createPrefabVariant({
+      source_prefab,
+      output_path,
+      variant_name: options.name
     });
 
     console.log(JSON.stringify(result, null, 2));

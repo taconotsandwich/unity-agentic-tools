@@ -102,6 +102,20 @@ export interface AddComponentResult {
   error?: string;
 }
 
+export interface CreatePrefabVariantOptions {
+  source_prefab: string;      // Path to source .prefab file
+  output_path: string;        // Path for the new variant .prefab file
+  variant_name?: string;      // Optional name override (defaults to source name + " Variant")
+}
+
+export interface CreatePrefabVariantResult {
+  success: boolean;
+  output_path: string;
+  source_guid?: string;
+  prefab_instance_id?: number;
+  error?: string;
+}
+
 export interface CreateGameObjectResult {
   success: boolean;
   file_path: string;

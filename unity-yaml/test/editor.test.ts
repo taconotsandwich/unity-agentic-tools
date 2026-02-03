@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve } from 'path';
 import { readFileSync } from 'fs';
-import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent } from '../src/editor';
+import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant } from '../src/editor';
+import { unlinkSync } from 'fs';
 import { create_temp_fixture } from './test-utils';
 import type { TempFixture } from './test-utils';
 
@@ -1214,6 +1215,148 @@ describe('addComponent', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('File not found');
+    });
+});
+
+describe('createPrefabVariant', () => {
+    const sourcePrefab = resolve(__dirname, 'fixtures', 'SamplePrefab.prefab');
+    const outputPath = '/tmp/TestVariant.prefab';
+
+    afterEach(() => {
+        // Clean up created files
+        try {
+            unlinkSync(outputPath);
+            unlinkSync(outputPath + '.meta');
+        } catch {
+            // Ignore if files don't exist
+        }
+    });
+
+    it('should create a prefab variant from source prefab', () => {
+        const result = createPrefabVariant({
+            source_prefab: sourcePrefab,
+            output_path: outputPath
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.source_guid).toBe('a1b2c3d4e5f6789012345678abcdef12');
+        expect(result.prefab_instance_id).toBeDefined();
+
+        // Verify the variant file was created
+        const content = readFileSync(outputPath, 'utf-8');
+        expect(content).toContain('%YAML 1.1');
+        expect(content).toContain('PrefabInstance:');
+        expect(content).toContain('stripped');
+        expect(content).toContain('m_SourcePrefab:');
+        expect(content).toContain('guid: a1b2c3d4e5f6789012345678abcdef12');
+
+        // Verify default name is "EnemyPrefab Variant"
+        expect(content).toContain('value: EnemyPrefab Variant');
+    });
+
+    it('should create variant with custom name', () => {
+        const result = createPrefabVariant({
+            source_prefab: sourcePrefab,
+            output_path: outputPath,
+            variant_name: 'BossEnemy'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(outputPath, 'utf-8');
+        expect(content).toContain('value: BossEnemy');
+    });
+
+    it('should create .meta file for variant', () => {
+        const result = createPrefabVariant({
+            source_prefab: sourcePrefab,
+            output_path: outputPath
+        });
+
+        expect(result.success).toBe(true);
+
+        // Verify meta file exists and has valid GUID
+        const metaContent = readFileSync(outputPath + '.meta', 'utf-8');
+        expect(metaContent).toContain('fileFormatVersion: 2');
+        expect(metaContent).toContain('guid:');
+        expect(metaContent).toContain('PrefabImporter:');
+
+        // GUID should be 32 hex characters
+        const guidMatch = metaContent.match(/guid:\s*([a-f0-9]+)/);
+        expect(guidMatch).not.toBeNull();
+        expect(guidMatch![1]).toHaveLength(32);
+    });
+
+    it('should have proper PrefabInstance structure', () => {
+        const result = createPrefabVariant({
+            source_prefab: sourcePrefab,
+            output_path: outputPath
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(outputPath, 'utf-8');
+
+        // Check stripped GameObject references source
+        expect(content).toMatch(/--- !u!1 &\d+ stripped/);
+        expect(content).toContain('m_CorrespondingSourceObject: {fileID: 100000');
+
+        // Check stripped Transform references source
+        expect(content).toMatch(/--- !u!4 &\d+ stripped/);
+        expect(content).toContain('m_CorrespondingSourceObject: {fileID: 400000');
+
+        // Check PrefabInstance block
+        expect(content).toMatch(/--- !u!1001 &\d+/);
+        expect(content).toContain('m_SourcePrefab: {fileID: 100100000');
+    });
+
+    it('should fail for nonexistent source prefab', () => {
+        const result = createPrefabVariant({
+            source_prefab: '/nonexistent/source.prefab',
+            output_path: outputPath
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+
+    it('should fail for non-prefab source file', () => {
+        const result = createPrefabVariant({
+            source_prefab: resolve(__dirname, 'fixtures', 'SampleScene.unity'),
+            output_path: outputPath
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('.prefab');
+    });
+
+    it('should fail for non-prefab output path', () => {
+        const result = createPrefabVariant({
+            source_prefab: sourcePrefab,
+            output_path: '/tmp/output.unity'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('.prefab');
+    });
+
+    it('should fail if source has no .meta file', () => {
+        // Create a temp prefab without .meta
+        const tempPrefab = '/tmp/NoMeta.prefab';
+        const fs = require('fs');
+        fs.writeFileSync(tempPrefab, readFileSync(sourcePrefab, 'utf-8'));
+
+        try {
+            const result = createPrefabVariant({
+                source_prefab: tempPrefab,
+                output_path: outputPath
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('.meta');
+        } finally {
+            try { fs.unlinkSync(tempPrefab); } catch { /* ignore */ }
+        }
     });
 });
 
