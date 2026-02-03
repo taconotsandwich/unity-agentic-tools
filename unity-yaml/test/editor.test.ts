@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve } from 'path';
 import { readFileSync } from 'fs';
-import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform } from '../src/editor';
+import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent } from '../src/editor';
 import { create_temp_fixture } from './test-utils';
 import type { TempFixture } from './test-utils';
 
@@ -1060,6 +1060,160 @@ describe('editTransform', () => {
         const match = content.match(transformPattern);
         expect(match).not.toBeNull();
         expect(match![0]).toContain('m_LocalPosition: {x: 99, y: 88, z: 77}');
+    });
+});
+
+describe('addComponent', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should add BoxCollider to existing GameObject', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'BoxCollider'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.component_id).toBeDefined();
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // Check component block exists
+        expect(content).toContain(`--- !u!65 &${result.component_id}`);
+        expect(content).toContain('BoxCollider:');
+        expect(content).toContain('m_Size: {x: 1, y: 1, z: 1}');
+
+        // Check GameObject has component reference
+        const playerGoPattern = /--- !u!1 &1847675923[\s\S]*?(?=--- !u!|$)/;
+        const playerMatch = content.match(playerGoPattern);
+        expect(playerMatch).not.toBeNull();
+        expect(playerMatch![0]).toContain(`component: {fileID: ${result.component_id}}`);
+    });
+
+    it('should add SphereCollider', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'SphereCollider'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain(`--- !u!135 &${result.component_id}`);
+        expect(content).toContain('SphereCollider:');
+        expect(content).toContain('m_Radius: 0.5');
+    });
+
+    it('should add Rigidbody', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'Rigidbody'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain(`--- !u!54 &${result.component_id}`);
+        expect(content).toContain('Rigidbody:');
+        expect(content).toContain('m_Mass: 1');
+        expect(content).toContain('m_UseGravity: 1');
+    });
+
+    it('should add Light', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'Light'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain(`--- !u!108 &${result.component_id}`);
+        expect(content).toContain('Light:');
+    });
+
+    it('should add multiple components to same GameObject', () => {
+        const result1 = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'BoxCollider'
+        });
+
+        const result2 = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'Rigidbody'
+        });
+
+        expect(result1.success).toBe(true);
+        expect(result2.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+
+        // Both components should exist
+        expect(content).toContain('BoxCollider:');
+        expect(content).toContain('Rigidbody:');
+
+        // Both should be referenced in Player's m_Component
+        const playerGoPattern = /--- !u!1 &1847675923[\s\S]*?(?=--- !u!|$)/;
+        const playerMatch = content.match(playerGoPattern);
+        expect(playerMatch).not.toBeNull();
+        expect(playerMatch![0]).toContain(`component: {fileID: ${result1.component_id}}`);
+        expect(playerMatch![0]).toContain(`component: {fileID: ${result2.component_id}}`);
+    });
+
+    it('should add component to newly created GameObject', () => {
+        const createResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'NewObject'
+        });
+        expect(createResult.success).toBe(true);
+
+        const componentResult = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'NewObject',
+            component_type: 'CapsuleCollider'
+        });
+
+        expect(componentResult.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('CapsuleCollider:');
+        expect(content).toContain('m_Height: 2');
+    });
+
+    it('should fail for nonexistent GameObject', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'NonExistent',
+            component_type: 'BoxCollider'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+
+    it('should fail for nonexistent file', () => {
+        const result = addComponent({
+            file_path: '/nonexistent/file.unity',
+            game_object_name: 'Player',
+            component_type: 'BoxCollider'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('File not found');
     });
 });
 

@@ -142,7 +142,8 @@ program.command('inspect-all <file>')
   });
 
 // Edit command
-import { editProperty, createGameObject, editTransform } from './editor';
+import { editProperty, createGameObject, editTransform, addComponent } from './editor';
+import type { BuiltInComponent } from './types';
 
 program.command('edit <file> <object_name> <property> <value>')
   .description('Edit GameObject property value safely')
@@ -203,6 +204,31 @@ program.command('edit-transform <file> <transform_id>')
       position: options.position ? parseVector(options.position) : undefined,
       rotation: options.rotation ? parseVector(options.rotation) : undefined,
       scale: options.scale ? parseVector(options.scale) : undefined
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Add component command
+const VALID_COMPONENTS: BuiltInComponent[] = [
+  'BoxCollider', 'SphereCollider', 'CapsuleCollider', 'MeshCollider',
+  'Rigidbody', 'AudioSource', 'Light', 'Camera'
+];
+
+program.command('add-component <file> <object_name> <component_type>')
+  .description('Add a built-in component to a GameObject')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, object_name, component_type, _options) => {
+    if (!VALID_COMPONENTS.includes(component_type as BuiltInComponent)) {
+      console.error(`Invalid component type: ${component_type}`);
+      console.error(`Valid types: ${VALID_COMPONENTS.join(', ')}`);
+      process.exit(1);
+    }
+
+    const result = addComponent({
+      file_path: file,
+      game_object_name: object_name,
+      component_type: component_type as BuiltInComponent
     });
 
     console.log(JSON.stringify(result, null, 2));
