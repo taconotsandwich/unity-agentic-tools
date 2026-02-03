@@ -3415,6 +3415,168 @@ function addComponent(options) {
     component_id: componentId
   };
 }
+function extractGuidFromMeta(metaPath) {
+  if (!import_fs4.existsSync(metaPath)) {
+    return null;
+  }
+  try {
+    const content = import_fs4.readFileSync(metaPath, "utf-8");
+    const match = content.match(/guid:\s*([a-f0-9]{32})/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+function findPrefabRootInfo(content) {
+  const blocks = content.split(/(?=--- !u!)/);
+  for (const block of blocks) {
+    if (block.startsWith("--- !u!4 ") && /m_Father:\s*\{fileID:\s*0\}/.test(block)) {
+      const transformIdMatch = block.match(/^--- !u!4 &(\d+)/);
+      const gameObjectIdMatch = block.match(/m_GameObject:\s*\{fileID:\s*(\d+)\}/);
+      if (transformIdMatch && gameObjectIdMatch) {
+        const transformId = parseInt(transformIdMatch[1], 10);
+        const gameObjectId = parseInt(gameObjectIdMatch[1], 10);
+        for (const goBlock of blocks) {
+          if (goBlock.startsWith(`--- !u!1 &${gameObjectId}`)) {
+            const nameMatch = goBlock.match(/m_Name:\s*(.+)/);
+            const name = nameMatch ? nameMatch[1].trim() : "Prefab";
+            return { gameObjectId, transformId, name };
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+function generateGuid() {
+  const hex = "0123456789abcdef";
+  let guid = "";
+  for (let i = 0;i < 32; i++) {
+    guid += hex[Math.floor(Math.random() * 16)];
+  }
+  return guid;
+}
+function createPrefabVariant(options) {
+  const { source_prefab, output_path, variant_name } = options;
+  if (!import_fs4.existsSync(source_prefab)) {
+    return {
+      success: false,
+      output_path,
+      error: `Source prefab not found: ${source_prefab}`
+    };
+  }
+  if (!source_prefab.endsWith(".prefab")) {
+    return {
+      success: false,
+      output_path,
+      error: "Source file must be a .prefab file"
+    };
+  }
+  if (!output_path.endsWith(".prefab")) {
+    return {
+      success: false,
+      output_path,
+      error: "Output path must have .prefab extension"
+    };
+  }
+  const metaPath = source_prefab + ".meta";
+  const sourceGuid = extractGuidFromMeta(metaPath);
+  if (!sourceGuid) {
+    return {
+      success: false,
+      output_path,
+      error: `Could not find or read .meta file for source prefab: ${metaPath}`
+    };
+  }
+  let sourceContent;
+  try {
+    sourceContent = import_fs4.readFileSync(source_prefab, "utf-8");
+  } catch (err) {
+    return {
+      success: false,
+      output_path,
+      error: `Failed to read source prefab: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const rootInfo = findPrefabRootInfo(sourceContent);
+  if (!rootInfo) {
+    return {
+      success: false,
+      output_path,
+      error: "Could not find root GameObject in source prefab"
+    };
+  }
+  const prefabInstanceId = generateFileId(new Set);
+  const strippedGoId = generateFileId(new Set([prefabInstanceId]));
+  const strippedTransformId = generateFileId(new Set([prefabInstanceId, strippedGoId]));
+  const finalName = variant_name || `${rootInfo.name} Variant`;
+  const variantYaml = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &${strippedGoId} stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: ${rootInfo.gameObjectId}, guid: ${sourceGuid}, type: 3}
+  m_PrefabInstance: {fileID: ${prefabInstanceId}}
+  m_PrefabAsset: {fileID: 0}
+--- !u!4 &${strippedTransformId} stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: ${rootInfo.transformId}, guid: ${sourceGuid}, type: 3}
+  m_PrefabInstance: {fileID: ${prefabInstanceId}}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1001 &${prefabInstanceId}
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: ${rootInfo.gameObjectId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_Name
+      value: ${finalName}
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: ${sourceGuid}, type: 3}
+`;
+  try {
+    import_fs4.writeFileSync(output_path, variantYaml, "utf-8");
+  } catch (err) {
+    return {
+      success: false,
+      output_path,
+      error: `Failed to write variant prefab: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const variantGuid = generateGuid();
+  const variantMetaContent = `fileFormatVersion: 2
+guid: ${variantGuid}
+PrefabImporter:
+  externalObjects: {}
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+`;
+  try {
+    import_fs4.writeFileSync(output_path + ".meta", variantMetaContent, "utf-8");
+  } catch (err) {
+    try {
+      const fs = require("fs");
+      fs.unlinkSync(output_path);
+    } catch {}
+    return {
+      success: false,
+      output_path,
+      error: `Failed to write .meta file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  return {
+    success: true,
+    output_path,
+    source_guid: sourceGuid,
+    prefab_instance_id: prefabInstanceId
+  };
+}
 
 // src/cli.ts
 var __dirname = "/Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src";
@@ -3559,6 +3721,14 @@ program.command("add-component <file> <object_name> <component_type>").descripti
     file_path: file,
     game_object_name: object_name,
     component_type
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("create-variant <source_prefab> <output_path>").description("Create a Prefab Variant from a source prefab").option("-n, --name <name>", "Override variant name").option("-j, --json", "Output as JSON").action((source_prefab, output_path, options) => {
+  const result = createPrefabVariant({
+    source_prefab,
+    output_path,
+    variant_name: options.name
   });
   console.log(JSON.stringify(result, null, 2));
 });
