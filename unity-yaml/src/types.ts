@@ -68,6 +68,7 @@ export interface Vector3 {
 export interface CreateGameObjectOptions {
   file_path: string;
   name: string;
+  parent?: string | number;  // Parent name or Transform fileID
 }
 
 export interface EditTransformOptions {

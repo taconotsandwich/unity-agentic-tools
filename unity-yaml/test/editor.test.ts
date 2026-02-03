@@ -792,6 +792,104 @@ describe('createGameObject', () => {
         expect(objectMatch).not.toBeNull();
         expect(objectMatch![0]).toContain('m_Layer: 5');
     });
+
+    it('should create child object with parent by name', () => {
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'ChildObject',
+            parent: 'Player'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+
+        // Child's transform should have m_Father pointing to Player's transform (1847675924)
+        const childTransformPattern = new RegExp(`--- !u!4 &${result.transform_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const childMatch = content.match(childTransformPattern);
+        expect(childMatch).not.toBeNull();
+        expect(childMatch![0]).toContain('m_Father: {fileID: 1847675924}');
+
+        // Player's transform should have the child in m_Children
+        const parentTransformPattern = /--- !u!4 &1847675924[\s\S]*?(?=--- !u!|$)/;
+        const parentMatch = content.match(parentTransformPattern);
+        expect(parentMatch).not.toBeNull();
+        expect(parentMatch![0]).toContain(`fileID: ${result.transform_id}`);
+    });
+
+    it('should create child object with parent by Transform fileID', () => {
+        // Use Player's transform ID directly
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'ChildById',
+            parent: 1847675924
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+
+        // Child's transform should have m_Father
+        const childTransformPattern = new RegExp(`--- !u!4 &${result.transform_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const childMatch = content.match(childTransformPattern);
+        expect(childMatch).not.toBeNull();
+        expect(childMatch![0]).toContain('m_Father: {fileID: 1847675924}');
+    });
+
+    it('should fail with nonexistent parent name', () => {
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Orphan',
+            parent: 'NonExistentParent'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+
+    it('should fail with nonexistent parent Transform ID', () => {
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Orphan',
+            parent: 9999999999
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+
+    it('should create nested hierarchy', () => {
+        // Create parent
+        const parentResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Parent'
+        });
+        expect(parentResult.success).toBe(true);
+
+        // Create child
+        const childResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Child',
+            parent: 'Parent'
+        });
+        expect(childResult.success).toBe(true);
+
+        // Create grandchild
+        const grandchildResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Grandchild',
+            parent: 'Child'
+        });
+        expect(grandchildResult.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+
+        // Verify grandchild has Child as parent
+        const grandchildPattern = new RegExp(`--- !u!4 &${grandchildResult.transform_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const grandchildMatch = content.match(grandchildPattern);
+        expect(grandchildMatch).not.toBeNull();
+        expect(grandchildMatch![0]).toContain(`m_Father: {fileID: ${childResult.transform_id}}`);
+    });
 });
 
 describe('editTransform', () => {
