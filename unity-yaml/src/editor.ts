@@ -334,7 +334,8 @@ function generateFileId(existingIds: Set<number>): number {
 function createGameObjectYAML(
   gameObjectId: number,
   transformId: number,
-  name: string
+  name: string,
+  parentTransformId: number = 0
 ): string {
   return `--- !u!1 &${gameObjectId}
 GameObject:
@@ -365,16 +366,77 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 0}
+  m_Father: {fileID: ${parentTransformId}}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 `;
+}
+
+/**
+ * Find a GameObject's Transform fileID by name.
+ */
+function findTransformIdByName(content: string, objectName: string): number | null {
+  const blocks = content.split(/(?=--- !u!)/);
+
+  // Find the GameObject block with matching name
+  const escapedName = objectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const namePattern = new RegExp(`^\\s*m_Name:\\s*${escapedName}\\s*$`, 'm');
+
+  for (const block of blocks) {
+    if (block.startsWith('--- !u!1 ') && namePattern.test(block)) {
+      // Extract the first component fileID (Transform is always first)
+      const componentMatch = block.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(\d+)\}/);
+      if (componentMatch) {
+        return parseInt(componentMatch[1], 10);
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Add a child Transform to a parent's m_Children array.
+ */
+function addChildToParent(content: string, parentTransformId: number, childTransformId: number): string {
+  const blocks = content.split(/(?=--- !u!)/);
+  const transformPattern = new RegExp(`^--- !u!4 &${parentTransformId}\\b`);
+
+  for (let i = 0; i < blocks.length; i++) {
+    if (transformPattern.test(blocks[i])) {
+      // Update m_Children array
+      blocks[i] = blocks[i].replace(
+        /m_Children:\s*\[(.*?)\]/,
+        (match, children) => {
+          const trimmed = children.trim();
+          if (trimmed === '') {
+            return `m_Children:\n  - {fileID: ${childTransformId}}`;
+          } else {
+            // Existing children - add to the array
+            return match.replace(']', '') + `\n  - {fileID: ${childTransformId}}]`;
+          }
+        }
+      );
+
+      // Handle multiline m_Children format
+      if (blocks[i].includes('m_Children:') && !blocks[i].includes(`fileID: ${childTransformId}`)) {
+        blocks[i] = blocks[i].replace(
+          /(m_Children:\s*\n(?:\s*-\s*\{fileID:\s*\d+\}\s*\n)*)/,
+          `$1  - {fileID: ${childTransformId}}\n`
+        );
+      }
+
+      break;
+    }
+  }
+
+  return blocks.join('');
 }
 
 /**
  * Create a new GameObject in a Unity YAML file.
  */
 export function createGameObject(options: CreateGameObjectOptions): CreateGameObjectResult {
-  const { file_path, name } = options;
+  const { file_path, name, parent } = options;
 
   // Validate inputs
   if (!name || name.trim() === '') {
@@ -414,6 +476,35 @@ export function createGameObject(options: CreateGameObjectOptions): CreateGameOb
     };
   }
 
+  // Resolve parent Transform ID if specified
+  let parentTransformId = 0;
+  if (parent !== undefined) {
+    if (typeof parent === 'number') {
+      // Direct Transform fileID
+      parentTransformId = parent;
+      // Verify it exists
+      const transformPattern = new RegExp(`--- !u!4 &${parentTransformId}\\b`);
+      if (!transformPattern.test(content)) {
+        return {
+          success: false,
+          file_path,
+          error: `Parent Transform with fileID ${parentTransformId} not found`
+        };
+      }
+    } else {
+      // Parent name - find its Transform
+      const foundId = findTransformIdByName(content, parent);
+      if (foundId === null) {
+        return {
+          success: false,
+          file_path,
+          error: `Parent GameObject "${parent}" not found`
+        };
+      }
+      parentTransformId = foundId;
+    }
+  }
+
   // Extract existing file IDs to avoid collisions
   const existingIds = extractExistingFileIds(content);
 
@@ -423,12 +514,17 @@ export function createGameObject(options: CreateGameObjectOptions): CreateGameOb
   const transformId = generateFileId(existingIds);
 
   // Create the YAML blocks
-  const newBlocks = createGameObjectYAML(gameObjectId, transformId, name.trim());
+  const newBlocks = createGameObjectYAML(gameObjectId, transformId, name.trim(), parentTransformId);
 
   // Append to file (ensure trailing newline before new blocks)
-  const finalContent = content.endsWith('\n')
+  let finalContent = content.endsWith('\n')
     ? content + newBlocks
     : content + '\n' + newBlocks;
+
+  // If parented, add child to parent's m_Children array
+  if (parentTransformId !== 0) {
+    finalContent = addChildToParent(finalContent, parentTransformId, transformId);
+  }
 
   // Write atomically
   const writeResult = atomicWrite(file_path, finalContent);

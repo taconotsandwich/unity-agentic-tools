@@ -161,11 +161,20 @@ program.command('edit <file> <object_name> <property> <value>')
 // Create command
 program.command('create <file> <name>')
   .description('Create a new GameObject in a Unity file')
+  .option('-p, --parent <name|id>', 'Parent GameObject name or Transform fileID')
   .option('-j, --json', 'Output as JSON')
-  .action((file, name, _options) => {
+  .action((file, name, options) => {
+    let parent: string | number | undefined;
+    if (options.parent) {
+      // Check if it's a number (Transform fileID)
+      const asNumber = parseInt(options.parent, 10);
+      parent = isNaN(asNumber) ? options.parent : asNumber;
+    }
+
     const result = createGameObject({
       file_path: file,
-      name: name
+      name: name,
+      parent: parent
     });
 
     console.log(JSON.stringify(result, null, 2));

@@ -2778,7 +2778,7 @@ function generateFileId(existingIds) {
   } while (existingIds.has(id) || id === 0);
   return id;
 }
-function createGameObjectYAML(gameObjectId, transformId, name) {
+function createGameObjectYAML(gameObjectId, transformId, name, parentTransformId = 0) {
   return `--- !u!1 &${gameObjectId}
 GameObject:
   m_ObjectHideFlags: 0
@@ -2808,12 +2808,50 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 0}
+  m_Father: {fileID: ${parentTransformId}}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 `;
 }
+function findTransformIdByName(content, objectName) {
+  const blocks = content.split(/(?=--- !u!)/);
+  const escapedName = objectName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const namePattern = new RegExp(`^\\s*m_Name:\\s*${escapedName}\\s*$`, "m");
+  for (const block of blocks) {
+    if (block.startsWith("--- !u!1 ") && namePattern.test(block)) {
+      const componentMatch = block.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(\d+)\}/);
+      if (componentMatch) {
+        return parseInt(componentMatch[1], 10);
+      }
+    }
+  }
+  return null;
+}
+function addChildToParent(content, parentTransformId, childTransformId) {
+  const blocks = content.split(/(?=--- !u!)/);
+  const transformPattern = new RegExp(`^--- !u!4 &${parentTransformId}\\b`);
+  for (let i = 0;i < blocks.length; i++) {
+    if (transformPattern.test(blocks[i])) {
+      blocks[i] = blocks[i].replace(/m_Children:\s*\[(.*?)\]/, (match, children) => {
+        const trimmed = children.trim();
+        if (trimmed === "") {
+          return `m_Children:
+  - {fileID: ${childTransformId}}`;
+        } else {
+          return match.replace("]", "") + `
+  - {fileID: ${childTransformId}}]`;
+        }
+      });
+      if (blocks[i].includes("m_Children:") && !blocks[i].includes(`fileID: ${childTransformId}`)) {
+        blocks[i] = blocks[i].replace(/(m_Children:\s*\n(?:\s*-\s*\{fileID:\s*\d+\}\s*\n)*)/, `$1  - {fileID: ${childTransformId}}
+`);
+      }
+      break;
+    }
+  }
+  return blocks.join("");
+}
 function createGameObject(options) {
-  const { file_path, name } = options;
+  const { file_path, name, parent } = options;
   if (!name || name.trim() === "") {
     return {
       success: false,
@@ -2845,14 +2883,41 @@ function createGameObject(options) {
       error: "File is not a valid Unity YAML file (missing header)"
     };
   }
+  let parentTransformId = 0;
+  if (parent !== undefined) {
+    if (typeof parent === "number") {
+      parentTransformId = parent;
+      const transformPattern = new RegExp(`--- !u!4 &${parentTransformId}\\b`);
+      if (!transformPattern.test(content)) {
+        return {
+          success: false,
+          file_path,
+          error: `Parent Transform with fileID ${parentTransformId} not found`
+        };
+      }
+    } else {
+      const foundId = findTransformIdByName(content, parent);
+      if (foundId === null) {
+        return {
+          success: false,
+          file_path,
+          error: `Parent GameObject "${parent}" not found`
+        };
+      }
+      parentTransformId = foundId;
+    }
+  }
   const existingIds = extractExistingFileIds(content);
   const gameObjectId = generateFileId(existingIds);
   existingIds.add(gameObjectId);
   const transformId = generateFileId(existingIds);
-  const newBlocks = createGameObjectYAML(gameObjectId, transformId, name.trim());
-  const finalContent = content.endsWith(`
+  const newBlocks = createGameObjectYAML(gameObjectId, transformId, name.trim(), parentTransformId);
+  let finalContent = content.endsWith(`
 `) ? content + newBlocks : content + `
 ` + newBlocks;
+  if (parentTransformId !== 0) {
+    finalContent = addChildToParent(finalContent, parentTransformId, transformId);
+  }
   const writeResult = atomicWrite(file_path, finalContent);
   if (!writeResult.success) {
     return {
@@ -3030,10 +3095,16 @@ program.command("edit <file> <object_name> <property> <value>").description("Edi
   });
   console.log(JSON.stringify(result, null, 2));
 });
-program.command("create <file> <name>").description("Create a new GameObject in a Unity file").option("-j, --json", "Output as JSON").action((file, name, _options) => {
+program.command("create <file> <name>").description("Create a new GameObject in a Unity file").option("-p, --parent <name|id>", "Parent GameObject name or Transform fileID").option("-j, --json", "Output as JSON").action((file, name, options) => {
+  let parent;
+  if (options.parent) {
+    const asNumber = parseInt(options.parent, 10);
+    parent = isNaN(asNumber) ? options.parent : asNumber;
+  }
   const result = createGameObject({
     file_path: file,
-    name
+    name,
+    parent
   });
   console.log(JSON.stringify(result, null, 2));
 });
