@@ -210,7 +210,7 @@ program.command('edit-transform <file> <transform_id>')
 
 // Add component command
 program.command('add-component <file> <object_name> <component>')
-  .description('Add a component to a GameObject (built-in or custom script)')
+  .description('Add any Unity component (e.g., MeshRenderer, Animator, Rigidbody) or custom script')
   .option('-p, --project <path>', 'Unity project path (for script GUID lookup)')
   .option('-j, --json', 'Output as JSON')
   .action((file, object_name, component, options) => {
