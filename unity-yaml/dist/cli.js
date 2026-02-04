@@ -2668,10 +2668,11 @@ function removeDirectoryRecursive(dir) {
 }
 
 // src/cli.ts
-var path = __toESM(require("path"));
+var path2 = __toESM(require("path"));
 
 // src/editor.ts
 var import_fs4 = require("fs");
+var path = __toESM(require("path"));
 function safeUnityYAMLEdit(filePath, objectName, propertyName, newValue) {
   if (!import_fs4.existsSync(filePath)) {
     return {
@@ -3367,8 +3368,79 @@ function addComponentToGameObject(content, gameObjectId, componentId) {
   }
   return blocks.join("");
 }
+var BUILTIN_COMPONENTS = [
+  "BoxCollider",
+  "SphereCollider",
+  "CapsuleCollider",
+  "MeshCollider",
+  "Rigidbody",
+  "AudioSource",
+  "Light",
+  "Camera"
+];
+function resolveScriptGuid(script, projectPath) {
+  if (/^[a-f0-9]{32}$/i.test(script)) {
+    return { guid: script.toLowerCase(), path: null };
+  }
+  if (script.endsWith(".cs")) {
+    const metaPath = script + ".meta";
+    if (import_fs4.existsSync(metaPath)) {
+      const guid = extractGuidFromMeta(metaPath);
+      if (guid) {
+        return { guid, path: script };
+      }
+    }
+    if (projectPath) {
+      const fullPath = path.join(projectPath, script);
+      const fullMetaPath = fullPath + ".meta";
+      if (import_fs4.existsSync(fullMetaPath)) {
+        const guid = extractGuidFromMeta(fullMetaPath);
+        if (guid) {
+          return { guid, path: script };
+        }
+      }
+    }
+  }
+  if (projectPath) {
+    const cachePath = path.join(projectPath, ".unity-agentic", "guid-cache.json");
+    if (import_fs4.existsSync(cachePath)) {
+      try {
+        const cache = JSON.parse(import_fs4.readFileSync(cachePath, "utf-8"));
+        const scriptNameLower = script.toLowerCase().replace(/\.cs$/, "");
+        for (const [guid, assetPath] of Object.entries(cache)) {
+          if (!assetPath.endsWith(".cs"))
+            continue;
+          const fileName = path.basename(assetPath, ".cs").toLowerCase();
+          const pathLower = assetPath.toLowerCase();
+          if (fileName === scriptNameLower) {
+            return { guid, path: assetPath };
+          }
+          if (pathLower.includes(scriptNameLower)) {
+            return { guid, path: assetPath };
+          }
+        }
+      } catch {}
+    }
+  }
+  return null;
+}
+function createMonoBehaviourYAML(componentId, gameObjectId, scriptGuid) {
+  return `--- !u!114 &${componentId}
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ${scriptGuid}, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+`;
+}
 function addComponent(options) {
-  const { file_path, game_object_name, component_type } = options;
+  const { file_path, game_object_name, component_type, project_path } = options;
   if (!import_fs4.existsSync(file_path)) {
     return {
       success: false,
@@ -3396,7 +3468,24 @@ function addComponent(options) {
   }
   const existingIds = extractExistingFileIds(content);
   const componentId = generateFileId(existingIds);
-  const componentYAML = createComponentYAML(component_type, componentId, gameObjectId);
+  let componentYAML;
+  let scriptGuid;
+  let scriptPath;
+  if (BUILTIN_COMPONENTS.includes(component_type)) {
+    componentYAML = createComponentYAML(component_type, componentId, gameObjectId);
+  } else {
+    const resolved = resolveScriptGuid(component_type, project_path);
+    if (!resolved) {
+      return {
+        success: false,
+        file_path,
+        error: `Script not found: "${component_type}". Provide a script name, path (Assets/Scripts/Foo.cs), or GUID. Run 'setup' first to build the GUID cache.`
+      };
+    }
+    componentYAML = createMonoBehaviourYAML(componentId, gameObjectId, resolved.guid);
+    scriptGuid = resolved.guid;
+    scriptPath = resolved.path || undefined;
+  }
   content = addComponentToGameObject(content, gameObjectId, componentId);
   const finalContent = content.endsWith(`
 `) ? content + componentYAML : content + `
@@ -3412,7 +3501,9 @@ function addComponent(options) {
   return {
     success: true,
     file_path,
-    component_id: componentId
+    component_id: componentId,
+    script_guid: scriptGuid,
+    script_path: scriptPath
   };
 }
 function extractGuidFromMeta(metaPath) {
@@ -3701,26 +3792,12 @@ program.command("edit-transform <file> <transform_id>").description("Edit Transf
   });
   console.log(JSON.stringify(result, null, 2));
 });
-var VALID_COMPONENTS = [
-  "BoxCollider",
-  "SphereCollider",
-  "CapsuleCollider",
-  "MeshCollider",
-  "Rigidbody",
-  "AudioSource",
-  "Light",
-  "Camera"
-];
-program.command("add-component <file> <object_name> <component_type>").description("Add a built-in component to a GameObject").option("-j, --json", "Output as JSON").action((file, object_name, component_type, _options) => {
-  if (!VALID_COMPONENTS.includes(component_type)) {
-    console.error(`Invalid component type: ${component_type}`);
-    console.error(`Valid types: ${VALID_COMPONENTS.join(", ")}`);
-    process.exit(1);
-  }
+program.command("add-component <file> <object_name> <component>").description("Add a component to a GameObject (built-in or custom script)").option("-p, --project <path>", "Unity project path (for script GUID lookup)").option("-j, --json", "Output as JSON").action((file, object_name, component, options) => {
   const result = addComponent({
     file_path: file,
     game_object_name: object_name,
-    component_type
+    component_type: component,
+    project_path: options.project
   });
   console.log(JSON.stringify(result, null, 2));
 });
@@ -3733,7 +3810,7 @@ program.command("create-variant <source_prefab> <output_path>").description("Cre
   console.log(JSON.stringify(result, null, 2));
 });
 program.command("search-docs <query>").description("Search Unity documentation").option("--summarize", "-s", "Summarize results").option("--compress", "-c", "Compress results").option("-j, --json", "Output as JSON").action((query, options) => {
-  const docIndexerPath = path.join(__dirname, "..", "..", "doc-indexer", "dist", "cli.js");
+  const docIndexerPath = path2.join(__dirname, "..", "..", "doc-indexer", "dist", "cli.js");
   const args = [docIndexerPath, "search", query];
   if (options.summarize)
     args.push("-s");
@@ -3750,7 +3827,7 @@ program.command("search-docs <query>").description("Search Unity documentation")
   });
 });
 program.command("index-docs <path>").description("Index Unity documentation").action((pathArg) => {
-  const docIndexerPath = path.join(__dirname, "..", "..", "doc-indexer", "dist", "cli.js");
+  const docIndexerPath = path2.join(__dirname, "..", "..", "doc-indexer", "dist", "cli.js");
   const args = [docIndexerPath, "index", pathArg];
   exec(`bun ${args.join(" ")}`, (error, stdout, _stderr) => {
     if (error) {
@@ -3778,9 +3855,9 @@ program.command("cleanup").description("Clean up unity-agentic files from a Unit
   console.log(JSON.stringify(result, null, 2));
 });
 program.command("status").description("Show current configuration and status").option("-p, --project <path>", "Path to Unity project (defaults to current directory)").action((options) => {
-  const projectPath = path.resolve(options.project || process.cwd());
-  const configPath = path.join(projectPath, ".unity-agentic");
-  const configFile = path.join(configPath, "config.json");
+  const projectPath = path2.resolve(options.project || process.cwd());
+  const configPath = path2.join(projectPath, ".unity-agentic");
+  const configFile = path2.join(configPath, "config.json");
   let config = null;
   let guidCacheCount = 0;
   try {
@@ -3788,7 +3865,7 @@ program.command("status").description("Show current configuration and status").o
     if (existsSync5(configFile)) {
       config = JSON.parse(readFileSync3(configFile, "utf-8"));
     }
-    const guidCachePath = path.join(configPath, "guid-cache.json");
+    const guidCachePath = path2.join(configPath, "guid-cache.json");
     if (existsSync5(guidCachePath)) {
       const guidCache = JSON.parse(readFileSync3(guidCachePath, "utf-8"));
       guidCacheCount = Object.keys(guidCache).length;

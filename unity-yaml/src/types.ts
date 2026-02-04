@@ -92,13 +92,16 @@ export type BuiltInComponent =
 export interface AddComponentOptions {
   file_path: string;
   game_object_name: string;
-  component_type: BuiltInComponent;
+  component_type: BuiltInComponent | string;  // Built-in type or script name/path/GUID
+  project_path?: string;  // Unity project root (for script GUID cache lookup)
 }
 
 export interface AddComponentResult {
   success: boolean;
   file_path: string;
   component_id?: number;
+  script_guid?: string;  // Set when adding a script
+  script_path?: string;  // Set when adding a script
   error?: string;
 }
 

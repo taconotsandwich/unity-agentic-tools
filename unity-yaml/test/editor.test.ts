@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve, join } from 'path';
-import { readFileSync, unlinkSync } from 'fs';
+import { readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant } from '../src/editor';
 import { create_temp_fixture } from './test-utils';
@@ -1215,6 +1215,96 @@ describe('addComponent', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('File not found');
+    });
+
+    // Custom script tests
+    it('should add custom script by GUID', () => {
+        const testGuid = 'a1b2c3d4e5f67890a1b2c3d4e5f67890';
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: testGuid
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.component_id).toBeDefined();
+        expect(result.script_guid).toBe(testGuid);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // Check MonoBehaviour block exists with class ID 114
+        expect(content).toContain(`--- !u!114 &${result.component_id}`);
+        expect(content).toContain('MonoBehaviour:');
+        expect(content).toContain(`guid: ${testGuid}`);
+        expect(content).toContain('fileID: 11500000');
+    });
+
+    it('should add script by path with .meta file', () => {
+        // Create a temporary script with .meta file
+        const scriptDir = join(tmpdir(), 'test-unity-project', 'Assets', 'Scripts');
+        const scriptPath = join(scriptDir, 'TestScript.cs');
+        const metaPath = scriptPath + '.meta';
+        const testGuid = 'deadbeef12345678deadbeef12345678';
+
+        mkdirSync(scriptDir, { recursive: true });
+        writeFileSync(scriptPath, 'public class TestScript : MonoBehaviour {}');
+        writeFileSync(metaPath, `fileFormatVersion: 2\nguid: ${testGuid}\n`);
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: scriptPath
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.script_guid).toBe(testGuid);
+            expect(result.script_path).toBe(scriptPath);
+
+            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+            expect(content).toContain('MonoBehaviour:');
+            expect(content).toContain(`guid: ${testGuid}`);
+        } finally {
+            rmSync(join(tmpdir(), 'test-unity-project'), { recursive: true, force: true });
+        }
+    });
+
+    it('should add script by name from GUID cache', () => {
+        // Create a mock Unity project with GUID cache
+        const projectDir = join(tmpdir(), 'test-unity-cache-project');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const cachePath = join(cacheDir, 'guid-cache.json');
+        const testGuid = 'cafebabe12345678cafebabe12345678';
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(cachePath, JSON.stringify({
+            [testGuid]: 'Assets/Scripts/PlayerController.cs'
+        }));
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'PlayerController',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.script_guid).toBe(testGuid);
+            expect(result.script_path).toBe('Assets/Scripts/PlayerController.cs');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
+    it('should fail for unknown script without project path', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'SomeUnknownScript'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Script not found');
     });
 });
 

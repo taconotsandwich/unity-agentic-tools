@@ -1053,10 +1053,110 @@ function addComponentToGameObject(content: string, gameObjectId: number, compone
 }
 
 /**
- * Add a built-in component to an existing GameObject.
+ * List of built-in component types.
+ */
+const BUILTIN_COMPONENTS: readonly string[] = [
+  'BoxCollider', 'SphereCollider', 'CapsuleCollider', 'MeshCollider',
+  'Rigidbody', 'AudioSource', 'Light', 'Camera'
+];
+
+/**
+ * Look up a script GUID by name, path, or raw GUID.
+ * Returns { guid, path } or null if not found.
+ */
+function resolveScriptGuid(
+  script: string,
+  projectPath?: string
+): { guid: string; path: string | null } | null {
+  // Check if it's already a valid GUID (32 hex chars)
+  if (/^[a-f0-9]{32}$/i.test(script)) {
+    return { guid: script.toLowerCase(), path: null };
+  }
+
+  // Check if it's a direct path to a .cs file
+  if (script.endsWith('.cs')) {
+    const metaPath = script + '.meta';
+    if (existsSync(metaPath)) {
+      const guid = extractGuidFromMeta(metaPath);
+      if (guid) {
+        return { guid, path: script };
+      }
+    }
+    // Try with project path prefix
+    if (projectPath) {
+      const fullPath = path.join(projectPath, script);
+      const fullMetaPath = fullPath + '.meta';
+      if (existsSync(fullMetaPath)) {
+        const guid = extractGuidFromMeta(fullMetaPath);
+        if (guid) {
+          return { guid, path: script };
+        }
+      }
+    }
+  }
+
+  // Try to find in GUID cache by name
+  if (projectPath) {
+    const cachePath = path.join(projectPath, '.unity-agentic', 'guid-cache.json');
+    if (existsSync(cachePath)) {
+      try {
+        const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
+        const scriptNameLower = script.toLowerCase().replace(/\.cs$/, '');
+
+        // Search for matching script
+        for (const [guid, assetPath] of Object.entries(cache)) {
+          if (!assetPath.endsWith('.cs')) continue;
+
+          const fileName = path.basename(assetPath, '.cs').toLowerCase();
+          const pathLower = assetPath.toLowerCase();
+
+          // Exact name match
+          if (fileName === scriptNameLower) {
+            return { guid, path: assetPath };
+          }
+          // Path contains the script name
+          if (pathLower.includes(scriptNameLower)) {
+            return { guid, path: assetPath };
+          }
+        }
+      } catch {
+        // Cache read failed
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Create MonoBehaviour YAML for a custom script.
+ */
+function createMonoBehaviourYAML(
+  componentId: number,
+  gameObjectId: number,
+  scriptGuid: string
+): string {
+  return `--- !u!114 &${componentId}
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ${scriptGuid}, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+`;
+}
+
+/**
+ * Add a component to an existing GameObject.
+ * Supports built-in components (BoxCollider, Rigidbody, etc.) and custom scripts.
  */
 export function addComponent(options: AddComponentOptions): AddComponentResult {
-  const { file_path, game_object_name, component_type } = options;
+  const { file_path, game_object_name, component_type, project_path } = options;
 
   // Check if file exists
   if (!existsSync(file_path)) {
@@ -1092,8 +1192,27 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
   const existingIds = extractExistingFileIds(content);
   const componentId = generateFileId(existingIds);
 
-  // Create component YAML
-  const componentYAML = createComponentYAML(component_type, componentId, gameObjectId);
+  let componentYAML: string;
+  let scriptGuid: string | undefined;
+  let scriptPath: string | undefined;
+
+  // Check if it's a built-in component
+  if (BUILTIN_COMPONENTS.includes(component_type)) {
+    componentYAML = createComponentYAML(component_type as BuiltInComponent, componentId, gameObjectId);
+  } else {
+    // Treat as custom script
+    const resolved = resolveScriptGuid(component_type, project_path);
+    if (!resolved) {
+      return {
+        success: false,
+        file_path,
+        error: `Script not found: "${component_type}". Provide a script name, path (Assets/Scripts/Foo.cs), or GUID. Run 'setup' first to build the GUID cache.`
+      };
+    }
+    componentYAML = createMonoBehaviourYAML(componentId, gameObjectId, resolved.guid);
+    scriptGuid = resolved.guid;
+    scriptPath = resolved.path || undefined;
+  }
 
   // Add component reference to GameObject
   content = addComponentToGameObject(content, gameObjectId, componentId);
@@ -1117,7 +1236,9 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
   return {
     success: true,
     file_path,
-    component_id: componentId
+    component_id: componentId,
+    script_guid: scriptGuid,
+    script_path: scriptPath
   };
 }
 
