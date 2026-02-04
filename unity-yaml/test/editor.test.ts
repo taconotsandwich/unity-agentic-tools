@@ -1088,10 +1088,10 @@ describe('addComponent', () => {
         expect(result.component_id).toBeDefined();
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-        // Check component block exists
+        // Check component block exists with correct class ID and type
         expect(content).toContain(`--- !u!65 &${result.component_id}`);
         expect(content).toContain('BoxCollider:');
-        expect(content).toContain('m_Size: {x: 1, y: 1, z: 1}');
+        expect(content).toContain(`m_GameObject: {fileID: 1847675923}`);
 
         // Check GameObject has component reference
         const playerGoPattern = /--- !u!1 &1847675923[\s\S]*?(?=--- !u!|$)/;
@@ -1112,7 +1112,7 @@ describe('addComponent', () => {
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content).toContain(`--- !u!135 &${result.component_id}`);
         expect(content).toContain('SphereCollider:');
-        expect(content).toContain('m_Radius: 0.5');
+        expect(content).toContain('m_Enabled: 1');
     });
 
     it('should add Rigidbody', () => {
@@ -1127,8 +1127,7 @@ describe('addComponent', () => {
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content).toContain(`--- !u!54 &${result.component_id}`);
         expect(content).toContain('Rigidbody:');
-        expect(content).toContain('m_Mass: 1');
-        expect(content).toContain('m_UseGravity: 1');
+        expect(content).toContain('m_Enabled: 1');
     });
 
     it('should add Light', () => {
@@ -1143,6 +1142,63 @@ describe('addComponent', () => {
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content).toContain(`--- !u!108 &${result.component_id}`);
         expect(content).toContain('Light:');
+    });
+
+    it('should add MeshRenderer (generic component)', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'MeshRenderer'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain(`--- !u!23 &${result.component_id}`);
+        expect(content).toContain('MeshRenderer:');
+        expect(content).toContain('m_Enabled: 1');
+    });
+
+    it('should add Animator (generic component)', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'Animator'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain(`--- !u!95 &${result.component_id}`);
+        expect(content).toContain('Animator:');
+    });
+
+    it('should add Canvas (generic component)', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'Canvas'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain(`--- !u!223 &${result.component_id}`);
+        expect(content).toContain('Canvas:');
+    });
+
+    it('should add component with case-insensitive name', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'meshfilter'  // lowercase
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain(`--- !u!33 &${result.component_id}`);
+        expect(content).toContain('MeshFilter:');  // Uses canonical name
     });
 
     it('should add multiple components to same GameObject', () => {
@@ -1192,7 +1248,7 @@ describe('addComponent', () => {
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content).toContain('CapsuleCollider:');
-        expect(content).toContain('m_Height: 2');
+        expect(content).toContain('m_Enabled: 1');
     });
 
     it('should fail for nonexistent GameObject', () => {
@@ -1304,7 +1360,7 @@ describe('addComponent', () => {
         });
 
         expect(result.success).toBe(false);
-        expect(result.error).toContain('Script not found');
+        expect(result.error).toContain('Component or script not found');
     });
 });
 

@@ -79,21 +79,11 @@ export interface EditTransformOptions {
   scale?: Vector3;
 }
 
-export type BuiltInComponent =
-  | 'BoxCollider'
-  | 'SphereCollider'
-  | 'CapsuleCollider'
-  | 'MeshCollider'
-  | 'Rigidbody'
-  | 'AudioSource'
-  | 'Light'
-  | 'Camera';
-
 export interface AddComponentOptions {
   file_path: string;
   game_object_name: string;
-  component_type: BuiltInComponent | string;  // Built-in type or script name/path/GUID
-  project_path?: string;  // Unity project root (for script GUID cache lookup)
+  component_type: string;  // Any Unity component name (e.g., "MeshRenderer", "Animator") or script name/path/GUID
+  project_path?: string;   // Unity project root (for script GUID cache lookup)
 }
 
 export interface AddComponentResult {
