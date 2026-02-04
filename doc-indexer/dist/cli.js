@@ -2139,6 +2139,7 @@ function estimateTokens(text) {
 }
 
 // src/indexer.ts
+var MAX_CHUNK_TOKENS = 1024;
 function extractCodeBlocks(content, filePath = "") {
   const codeBlockPattern = /```(?:csharp|javascript|typescript|cs)\n([\s\S]+?)```/gs;
   const codeBlocks = Array.from(content.matchAll(codeBlockPattern));
@@ -2192,7 +2193,7 @@ function chunkProse(content, filePath) {
   }
   for (const section of sections) {
     const tokens = estimateTokens(section.text);
-    if (tokens <= 1024) {
+    if (tokens <= MAX_CHUNK_TOKENS) {
       chunks.push({
         id: generateId(),
         content: section.text.trim(),
@@ -2209,7 +2210,7 @@ function chunkProse(content, filePath) {
       let currentTokens = 0;
       for (const sentence of sentences) {
         const sentenceTokens = estimateTokens(sentence);
-        if (currentTokens + sentenceTokens > 1024) {
+        if (currentTokens + sentenceTokens > MAX_CHUNK_TOKENS) {
           if (currentChunk.trim()) {
             chunks.push({
               id: generateId(),

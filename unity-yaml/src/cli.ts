@@ -142,7 +142,7 @@ program.command('inspect-all <file>')
   });
 
 // Edit command
-import { editProperty, createGameObject, editTransform, addComponent, createPrefabVariant } from './editor';
+import { editProperty, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId } from './editor';
 
 program.command('edit <file> <object_name> <property> <value>')
   .description('Edit GameObject property value safely')
@@ -219,6 +219,21 @@ program.command('add-component <file> <object_name> <component>')
       game_object_name: object_name,
       component_type: component,
       project_path: options.project
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Edit component by file ID command
+program.command('edit-component <file> <file_id> <property> <value>')
+  .description('Edit any component property by file ID (works with any Unity class type)')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, file_id, property, value, _options) => {
+    const result = editComponentByFileId({
+      file_path: file,
+      file_id: file_id,
+      property: property,
+      new_value: value
     });
 
     console.log(JSON.stringify(result, null, 2));

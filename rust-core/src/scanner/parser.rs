@@ -1,5 +1,6 @@
 use regex::Regex;
 use crate::common::GameObject;
+use super::config::ComponentConfig;
 
 /// Unity YAML parser for extracting blocks and data
 pub struct UnityYamlParser;
@@ -7,10 +8,17 @@ pub struct UnityYamlParser;
 impl UnityYamlParser {
     /// Extract all GameObjects from Unity YAML content
     pub fn extract_gameobjects(content: &str) -> Vec<GameObject> {
+        Self::extract_gameobjects_with_config(content, &ComponentConfig::default())
+    }
+
+    /// Extract all GameObjects from Unity YAML content with custom config
+    pub fn extract_gameobjects_with_config(content: &str, config: &ComponentConfig) -> Vec<GameObject> {
         // Use (?s) for DOTALL mode to match across newlines
-        let pattern = Regex::new(
-            r"(?s)--- !u!1 &(\d+)\s*\nGameObject:\s*\n.*?m_Name:\s*([^\n]+).*?m_IsActive:\s*(\d)"
-        ).expect("Invalid regex pattern");
+        let pattern_str = format!(
+            r"(?s)--- !u!{} &(\d+)\s*\nGameObject:\s*\n.*?m_Name:\s*([^\n]+).*?m_IsActive:\s*(\d)",
+            config.gameobject_class_id
+        );
+        let pattern = Regex::new(&pattern_str).expect("Invalid regex pattern");
 
         pattern
             .captures_iter(content)

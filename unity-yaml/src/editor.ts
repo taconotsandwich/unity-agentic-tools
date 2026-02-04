@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
 import * as path from 'path';
-import type { CreateGameObjectOptions, CreateGameObjectResult, EditTransformOptions, Vector3, AddComponentOptions, AddComponentResult, CreatePrefabVariantOptions, CreatePrefabVariantResult, Quaternion, PropertyEdit } from './types';
+import type { CreateGameObjectOptions, CreateGameObjectResult, EditTransformOptions, Vector3, AddComponentOptions, AddComponentResult, CreatePrefabVariantOptions, CreatePrefabVariantResult, Quaternion, PropertyEdit, EditComponentByFileIdOptions, EditComponentResult } from './types';
 import { get_class_id, UNITY_CLASS_IDS } from './class-ids';
 
 export interface EditResult {
@@ -119,6 +119,124 @@ export function editProperty(options: PropertyEditOptions): EditResult {
   }
 
   return result;
+}
+
+/**
+ * Edit any component property by file ID.
+ * Works with any Unity class type (Transform, MeshRenderer, MonoBehaviour, etc.)
+ */
+export function editComponentByFileId(options: EditComponentByFileIdOptions): EditComponentResult {
+  const { file_path, file_id, property, new_value } = options;
+
+  // Check if file exists
+  if (!existsSync(file_path)) {
+    return {
+      success: false,
+      file_path,
+      error: `File not found: ${file_path}`
+    };
+  }
+
+  let content: string;
+  try {
+    content = readFileSync(file_path, 'utf-8');
+  } catch (err) {
+    return {
+      success: false,
+      file_path,
+      error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+
+  // Normalize property name: strip m_ prefix if provided, we'll add it back
+  const normalizedProperty = property.startsWith('m_')
+    ? property.slice(2)
+    : property;
+
+  // Find the block with this file ID (any class type)
+  const blockPattern = new RegExp(`--- !u!(\\d+) &${file_id}\\b`);
+  const blockMatch = content.match(blockPattern);
+
+  if (!blockMatch) {
+    return {
+      success: false,
+      file_path,
+      error: `Component with file ID ${file_id} not found`
+    };
+  }
+
+  const classId = parseInt(blockMatch[1], 10);
+
+  // Split the file into Unity YAML blocks
+  const blocks = content.split(/(?=--- !u!)/);
+
+  // Find the target block
+  const targetBlockPattern = new RegExp(`^--- !u!${classId} &${file_id}\\b`);
+  let targetBlockIndex = -1;
+
+  for (let i = 0; i < blocks.length; i++) {
+    if (targetBlockPattern.test(blocks[i])) {
+      targetBlockIndex = i;
+      break;
+    }
+  }
+
+  if (targetBlockIndex === -1) {
+    return {
+      success: false,
+      file_path,
+      error: `Component block with file ID ${file_id} not found`
+    };
+  }
+
+  // Edit the property in the target block
+  const targetBlock = blocks[targetBlockIndex];
+  const propertyPattern = new RegExp(
+    `(^\\s*m_${normalizedProperty}:\\s*)([^\\n]*)`,
+    'm'
+  );
+
+  let updatedBlock: string;
+  if (propertyPattern.test(targetBlock)) {
+    // Replace existing property
+    updatedBlock = targetBlock.replace(propertyPattern, `$1${new_value}`);
+  } else {
+    // Property doesn't exist - try without m_ prefix (some properties don't have it)
+    const altPropertyPattern = new RegExp(
+      `(^\\s*${normalizedProperty}:\\s*)([^\\n]*)`,
+      'm'
+    );
+    if (altPropertyPattern.test(targetBlock)) {
+      updatedBlock = targetBlock.replace(altPropertyPattern, `$1${new_value}`);
+    } else {
+      // Add the property (with m_ prefix by default)
+      updatedBlock = targetBlock.replace(
+        /(\n)(--- !u!|$)/,
+        `\n  m_${normalizedProperty}: ${new_value}$1$2`
+      );
+    }
+  }
+
+  blocks[targetBlockIndex] = updatedBlock;
+  const finalContent = blocks.join('');
+
+  const writeResult = atomicWrite(file_path, finalContent);
+
+  if (!writeResult.success) {
+    return {
+      success: false,
+      file_path,
+      error: writeResult.error
+    };
+  }
+
+  return {
+    success: true,
+    file_path,
+    file_id,
+    class_id: classId,
+    bytes_written: writeResult.bytes_written
+  };
 }
 
 /**
