@@ -1,4 +1,5 @@
 import { DocStorage } from './storage';
+import type { EmbeddingVector, OpenAIEmbeddingResponse } from './types';
 
 export interface SearchOptions {
   query: string;
@@ -16,7 +17,7 @@ export interface SearchResults {
     id: string;
     content: string;
     score: number;
-    metadata: any;
+    metadata: Record<string, unknown>;
   }>;
   semantic_count: number;
   keyword_count: number;
@@ -36,7 +37,7 @@ export class DocSearch {
     const semanticWeight = options.semantic_weight ?? 0.6;
     const keywordWeight = options.keyword_weight ?? 0.4;
 
-    let queryEmbedding: number[] | null = null;
+    let queryEmbedding: EmbeddingVector | null = null;
 
     if (options.query.length > 0) {
       queryEmbedding = await this.generateEmbedding(options.query);
@@ -71,7 +72,7 @@ export class DocSearch {
     };
   }
 
-  async generateEmbedding(text: string): Promise<number[]> {
+  async generateEmbedding(text: string): Promise<EmbeddingVector> {
     const response = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
       headers: {
@@ -89,7 +90,7 @@ export class DocSearch {
       throw new Error(`OpenAI API error: ${response.statusText}`);
     }
 
-    const data: any = await response.json();
+    const data = await response.json() as OpenAIEmbeddingResponse;
     return data.data[0].embedding;
   }
 }

@@ -2,6 +2,9 @@ import { readFileSync, readdirSync, statSync } from 'fs';
 import { resolve } from 'path';
 import { estimateTokens } from './tokenizer';
 
+/** Maximum tokens per chunk before splitting */
+const MAX_CHUNK_TOKENS = 1024;
+
 export interface Chunk {
   id: string;
   content: string;
@@ -139,7 +142,7 @@ function chunkProse(content: string, filePath: string): Chunk[] {
   for (const section of sections) {
     const tokens = estimateTokens(section.text);
 
-    if (tokens <= 1024) {
+    if (tokens <= MAX_CHUNK_TOKENS) {
       chunks.push({
         id: generateId(),
         content: section.text.trim(),
@@ -158,7 +161,7 @@ function chunkProse(content: string, filePath: string): Chunk[] {
       for (const sentence of sentences) {
         const sentenceTokens = estimateTokens(sentence);
 
-        if (currentTokens + sentenceTokens > 1024) {
+        if (currentTokens + sentenceTokens > MAX_CHUNK_TOKENS) {
           if (currentChunk.trim()) {
             chunks.push({
               id: generateId(),
