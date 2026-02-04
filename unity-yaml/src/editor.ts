@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
 import * as path from 'path';
-import type { CreateGameObjectOptions, CreateGameObjectResult, EditTransformOptions, Vector3, AddComponentOptions, AddComponentResult, CreatePrefabVariantOptions, CreatePrefabVariantResult } from './types';
+import type { CreateGameObjectOptions, CreateGameObjectResult, EditTransformOptions, Vector3, AddComponentOptions, AddComponentResult, CreatePrefabVariantOptions, CreatePrefabVariantResult, Quaternion, PropertyEdit } from './types';
 import { get_class_id, UNITY_CLASS_IDS } from './class-ids';
 
 export interface EditResult {
@@ -199,7 +199,7 @@ function atomicWrite(filePath: string, content: string): EditResult {
  */
 export function batchEditProperties(
   filePath: string,
-  edits: Array<{ object_name: string; property: string; new_value: string }>
+  edits: PropertyEdit[]
 ): EditResult {
   let updatedContent = '';
 
@@ -551,7 +551,7 @@ export function createGameObject(options: CreateGameObjectOptions): CreateGameOb
  * Convert Euler angles (degrees) to quaternion.
  * Unity uses ZXY rotation order.
  */
-function eulerToQuaternion(euler: Vector3): { x: number; y: number; z: number; w: number } {
+function eulerToQuaternion(euler: Vector3): Quaternion {
   const deg2rad = Math.PI / 180;
   const x = euler.x * deg2rad;
   const y = euler.y * deg2rad;

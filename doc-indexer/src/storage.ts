@@ -1,18 +1,19 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
+import type { EmbeddingVector } from './types';
 
 export interface StoredChunk {
   id: string;
   content: string;
-  metadata: any;
-  embedding?: number[];
+  metadata: Record<string, unknown>;
+  embedding?: EmbeddingVector;
 }
 
 export interface SearchResult {
   id: string;
   content: string;
   score: number;
-  metadata: any;
+  metadata: Record<string, unknown>;
 }
 
 const STORAGE_PATH = resolve(process.cwd(), '.unity-docs-index.json');
@@ -56,7 +57,7 @@ export class DocStorage {
     writeFileSync(STORAGE_PATH, JSON.stringify(data, null, 2));
   }
 
-  async semanticSearch(queryEmbedding: number[]): Promise<SearchResult[]> {
+  async semanticSearch(queryEmbedding: EmbeddingVector): Promise<SearchResult[]> {
     await this.init();
 
     const results: SearchResult[] = [];
@@ -106,7 +107,7 @@ export class DocStorage {
   }
 
   async hybridSearch(
-    queryEmbedding: number[],
+    queryEmbedding: EmbeddingVector,
     queryText: string
   ): Promise<{ semantic: SearchResult[]; keyword: SearchResult[] }> {
     const [semantic, keyword] = await Promise.all([
@@ -117,7 +118,7 @@ export class DocStorage {
     return { semantic, keyword };
   }
 
-  private cosineSimilarity(vec1: number[], vec2: number[]): number {
+  private cosineSimilarity(vec1: EmbeddingVector, vec2: EmbeddingVector): number {
     if (!vec1 || !vec2 || vec1.length !== vec2.length) return 0;
 
     let dotProduct = 0;
