@@ -1,4 +1,5 @@
 use regex::Regex;
+use super::config::ComponentConfig;
 
 /// Extract a block from content by header
 fn extract_block<'a>(content: &'a str, header: &str) -> Option<&'a str> {
@@ -16,7 +17,12 @@ fn extract_block<'a>(content: &'a str, header: &str) -> Option<&'a str> {
 
 /// Extract metadata from a GameObject block
 pub fn extract_metadata(content: &str, file_id: &str) -> (String, u32, Option<String>, Vec<String>) {
-    let header = format!("--- !u!1 &{}", file_id);
+    extract_metadata_with_config(content, file_id, &ComponentConfig::default())
+}
+
+/// Extract metadata from a GameObject block with custom config
+pub fn extract_metadata_with_config(content: &str, file_id: &str, config: &ComponentConfig) -> (String, u32, Option<String>, Vec<String>) {
+    let header = format!("--- !u!{} &{}", config.gameobject_class_id, file_id);
     let go_block = match extract_block(content, &header) {
         Some(block) => block,
         None => return ("Untagged".to_string(), 0, None, Vec::new()),
@@ -24,7 +30,7 @@ pub fn extract_metadata(content: &str, file_id: &str) -> (String, u32, Option<St
 
     let tag = extract_tag(go_block);
     let layer = extract_layer(go_block);
-    let (parent_id, children) = extract_hierarchy(content, file_id);
+    let (parent_id, children) = extract_hierarchy_with_config(content, file_id, config);
 
     (tag, layer, parent_id, children)
 }
@@ -50,8 +56,12 @@ fn extract_layer(block: &str) -> u32 {
 }
 
 fn extract_hierarchy(content: &str, file_id: &str) -> (Option<String>, Vec<String>) {
+    extract_hierarchy_with_config(content, file_id, &ComponentConfig::default())
+}
+
+fn extract_hierarchy_with_config(content: &str, file_id: &str, config: &ComponentConfig) -> (Option<String>, Vec<String>) {
     // Find the GameObject block
-    let go_header = format!("--- !u!1 &{}", file_id);
+    let go_header = format!("--- !u!{} &{}", config.gameobject_class_id, file_id);
     let go_block = match extract_block(content, &go_header) {
         Some(block) => block,
         None => return (None, Vec::new()),
@@ -64,22 +74,16 @@ fn extract_hierarchy(content: &str, file_id: &str) -> (Option<String>, Vec<Strin
         .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
         .collect();
 
-    // Find Transform component (class ID 4) among the component refs
+    // Find hierarchy provider components (Transform-like) among the component refs
     for ref_id in &comp_refs {
-        let transform_header = format!("--- !u!4 &{}", ref_id);
-        if let Some(transform_block) = extract_block(content, &transform_header) {
-            // Extract parent and children from this transform
-            let parent_id = extract_parent_from_transform(transform_block);
-            let children = extract_children_from_transform(transform_block);
-            return (parent_id, children);
-        }
-
-        // Also check for RectTransform (class ID 224)
-        let rect_header = format!("--- !u!224 &{}", ref_id);
-        if let Some(rect_block) = extract_block(content, &rect_header) {
-            let parent_id = extract_parent_from_transform(rect_block);
-            let children = extract_children_from_transform(rect_block);
-            return (parent_id, children);
+        for &class_id in &config.hierarchy_providers {
+            let header = format!("--- !u!{} &{}", class_id, ref_id);
+            if let Some(block) = extract_block(content, &header) {
+                // Extract parent and children from this hierarchy component
+                let parent_id = extract_parent_from_transform(block);
+                let children = extract_children_from_transform(block);
+                return (parent_id, children);
+            }
         }
     }
 

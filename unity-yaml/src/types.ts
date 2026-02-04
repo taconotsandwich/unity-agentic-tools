@@ -150,3 +150,20 @@ export interface PropertyEdit {
   property: string;
   new_value: string;
 }
+
+// Generic component edit options
+export interface EditComponentByFileIdOptions {
+  file_path: string;
+  file_id: string;  // The file ID of the component to edit (from --- !u!<class_id> &<file_id>)
+  property: string;  // Property name (with or without m_ prefix)
+  new_value: string;
+}
+
+export interface EditComponentResult {
+  success: boolean;
+  file_path: string;
+  file_id?: string;
+  class_id?: number;
+  bytes_written?: number;
+  error?: string;
+}

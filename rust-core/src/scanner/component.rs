@@ -2,6 +2,7 @@ use regex::Regex;
 use std::collections::HashMap;
 
 use crate::common::Component;
+use super::config::ComponentConfig;
 
 /// Extract a block from content by header
 fn extract_block<'a>(content: &'a str, header: &str) -> Option<&'a str> {
@@ -22,8 +23,18 @@ pub fn extract_components(
     gameobject_file_id: &str,
     guid_cache: &HashMap<String, String>,
 ) -> Vec<Component> {
+    extract_components_with_config(content, gameobject_file_id, guid_cache, &ComponentConfig::default())
+}
+
+/// Extract all components for a GameObject with custom config
+pub fn extract_components_with_config(
+    content: &str,
+    gameobject_file_id: &str,
+    guid_cache: &HashMap<String, String>,
+    config: &ComponentConfig,
+) -> Vec<Component> {
     // Find the GameObject block
-    let go_header = format!("--- !u!1 &{}", gameobject_file_id);
+    let go_header = format!("--- !u!{} &{}", config.gameobject_class_id, gameobject_file_id);
     let go_block = match extract_block(content, &go_header) {
         Some(block) => block,
         None => return Vec::new(),
@@ -39,7 +50,7 @@ pub fn extract_components(
     // Extract each component
     comp_refs
         .iter()
-        .filter_map(|ref_id| extract_single_component(content, ref_id, guid_cache))
+        .filter_map(|ref_id| extract_single_component_with_config(content, ref_id, guid_cache, config))
         .collect()
 }
 
@@ -47,6 +58,15 @@ fn extract_single_component(
     content: &str,
     file_id: &str,
     guid_cache: &HashMap<String, String>,
+) -> Option<Component> {
+    extract_single_component_with_config(content, file_id, guid_cache, &ComponentConfig::default())
+}
+
+fn extract_single_component_with_config(
+    content: &str,
+    file_id: &str,
+    guid_cache: &HashMap<String, String>,
+    config: &ComponentConfig,
 ) -> Option<Component> {
     // Find the component block header
     let header_pattern = format!(r"--- !u!(\d+) &{}\s*\n.*?([A-Za-z][A-Za-z0-9_]*):", file_id);
@@ -66,11 +86,13 @@ fn extract_single_component(
         properties: None,
     };
 
-    // For MonoBehaviour (114), try to extract script GUID
-    if class_id == 114 {
+    // For script containers (MonoBehaviour-like), try to extract script GUID
+    if config.is_script_container(class_id) {
         let script_pattern = format!(
-            r"--- !u!114 &{}[\s\S]*?m_Script:\s*\{{fileID:\s*\d+,\s*guid:\s*([a-f0-9]{{32}})",
-            file_id
+            r"--- !u!{} &{}[\s\S]*?{}:\s*\{{fileID:\s*\d+,\s*guid:\s*([a-f0-9]{{32}})",
+            class_id,
+            file_id,
+            regex::escape(&config.script_field)
         );
         if let Ok(script_re) = Regex::new(&script_pattern) {
             if let Some(script_caps) = script_re.captures(content) {
