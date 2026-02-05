@@ -1,11 +1,11 @@
 ---
 name: unity-yaml
-description: Specialized skill for analyzing and editing Unity YAML files (.unity, .prefab, .asset) using the unity-yaml CLI.
+description: "Parse, inspect, and edit Unity YAML files (.unity, .prefab, .asset) using the unity-yaml CLI with a native Rust backend. Use this skill instead of reading Unity files directly with the Read tool — it returns structured data (hierarchies, component values) instead of raw YAML, reducing token usage by 10-50x. Do NOT use for C# scripts, shader files, or non-Unity YAML. Requires the native binary to be installed via /initial-install."
 ---
 
 # Unity YAML Skill
 
-Use this skill to interact with Unity files. All operations must be performed using the `unity-yaml` CLI via `bun`.
+Use this skill to interact with Unity files (.unity, .prefab, .asset). All operations must be performed using the `unity-yaml` CLI via `bun`. Prefer this over reading Unity files directly — raw Unity YAML is verbose and wastes tokens.
 
 ## CLI Usage
 

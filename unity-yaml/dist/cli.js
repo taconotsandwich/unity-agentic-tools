@@ -2113,7 +2113,7 @@ var require_commander = __commonJS((exports2) => {
 
 // ../rust-core/unity-agentic-core.darwin-arm64.node
 var require_unity_agentic_core_darwin_arm64 = __commonJS((exports2, module2) => {
-  module2.exports = require("./unity-agentic-core.darwin-arm64-x8b2vckr.node");
+  module2.exports = require("./unity-agentic-core.darwin-arm64-3n85rert.node");
 });
 
 // ../rust-core/index.js
@@ -2668,10 +2668,227 @@ function removeDirectoryRecursive(dir) {
 }
 
 // src/cli.ts
-var path = __toESM(require("path"));
+var path2 = __toESM(require("path"));
 
 // src/editor.ts
 var import_fs4 = require("fs");
+var path = __toESM(require("path"));
+
+// src/class-ids.ts
+var UNITY_CLASS_IDS = {
+  1: "GameObject",
+  2: "Component",
+  3: "LevelGameManager",
+  4: "Transform",
+  5: "TimeManager",
+  6: "GlobalGameManager",
+  8: "Behaviour",
+  9: "GameManager",
+  11: "AudioManager",
+  13: "InputManager",
+  18: "EditorExtension",
+  19: "Physics2DSettings",
+  20: "Camera",
+  21: "Material",
+  23: "MeshRenderer",
+  25: "Renderer",
+  27: "Texture",
+  28: "Texture2D",
+  29: "OcclusionCullingSettings",
+  30: "GraphicsSettings",
+  33: "MeshFilter",
+  41: "OcclusionPortal",
+  43: "Mesh",
+  45: "Skybox",
+  47: "QualitySettings",
+  48: "Shader",
+  49: "TextAsset",
+  50: "Rigidbody2D",
+  53: "Collider2D",
+  54: "Rigidbody",
+  55: "PhysicsManager",
+  56: "Collider",
+  57: "Joint",
+  58: "CircleCollider2D",
+  59: "HingeJoint",
+  60: "PolygonCollider2D",
+  61: "BoxCollider2D",
+  62: "PhysicsMaterial2D",
+  64: "MeshCollider",
+  65: "BoxCollider",
+  66: "CompositeCollider2D",
+  68: "EdgeCollider2D",
+  70: "CapsuleCollider2D",
+  72: "ComputeShader",
+  74: "AnimationClip",
+  75: "ConstantForce",
+  78: "TagManager",
+  81: "AudioListener",
+  82: "AudioSource",
+  83: "AudioClip",
+  84: "RenderTexture",
+  86: "CustomRenderTexture",
+  89: "Cubemap",
+  90: "Avatar",
+  91: "AnimatorController",
+  93: "RuntimeAnimatorController",
+  94: "ScriptMapper",
+  95: "Animator",
+  96: "TrailRenderer",
+  98: "DelayedCallManager",
+  102: "TextMesh",
+  104: "RenderSettings",
+  108: "Light",
+  109: "CGProgram",
+  110: "BaseAnimationTrack",
+  111: "Animation",
+  114: "MonoBehaviour",
+  115: "MonoScript",
+  117: "Texture3D",
+  119: "NewAnimationTrack",
+  120: "Projector",
+  121: "LineRenderer",
+  122: "Flare",
+  123: "Halo",
+  124: "LensFlare",
+  125: "FlareLayer",
+  126: "HaloLayer",
+  127: "NavMeshProjectSettings",
+  128: "Font",
+  129: "PlayerSettings",
+  130: "NamedObject",
+  134: "PhysicMaterial",
+  135: "SphereCollider",
+  136: "CapsuleCollider",
+  137: "SkinnedMeshRenderer",
+  138: "FixedJoint",
+  141: "BuildSettings",
+  142: "AssetBundle",
+  143: "CharacterController",
+  144: "CharacterJoint",
+  145: "SpringJoint",
+  146: "WheelCollider",
+  147: "ResourceManager",
+  150: "PreloadData",
+  153: "ConfigurableJoint",
+  154: "TerrainCollider",
+  156: "TerrainData",
+  157: "LightmapSettings",
+  158: "WebCamTexture",
+  159: "EditorSettings",
+  162: "EditorUserSettings",
+  164: "AudioReverbFilter",
+  165: "AudioHighPassFilter",
+  166: "AudioChorusFilter",
+  167: "AudioReverbZone",
+  168: "AudioEchoFilter",
+  169: "AudioLowPassFilter",
+  170: "AudioDistortionFilter",
+  171: "SparseTexture",
+  180: "AudioBehaviour",
+  181: "AudioFilter",
+  182: "WindZone",
+  183: "Cloth",
+  184: "SubstanceArchive",
+  185: "ProceduralMaterial",
+  186: "ProceduralTexture",
+  187: "Texture2DArray",
+  188: "CubemapArray",
+  191: "OffMeshLink",
+  192: "OcclusionArea",
+  193: "Tree",
+  195: "NavMeshAgent",
+  196: "NavMeshSettings",
+  198: "ParticleSystem",
+  199: "ParticleSystemRenderer",
+  200: "ShaderVariantCollection",
+  205: "LODGroup",
+  206: "BlendTree",
+  207: "Motion",
+  208: "NavMeshObstacle",
+  210: "SortingGroup",
+  212: "SpriteRenderer",
+  213: "Sprite",
+  214: "CachedSpriteAtlas",
+  215: "ReflectionProbe",
+  218: "Terrain",
+  220: "LightProbeGroup",
+  221: "AnimatorOverrideController",
+  222: "CanvasRenderer",
+  223: "Canvas",
+  224: "RectTransform",
+  225: "CanvasGroup",
+  226: "BillboardAsset",
+  227: "BillboardRenderer",
+  228: "SpeedTreeWindAsset",
+  229: "AnchoredJoint2D",
+  230: "Joint2D",
+  231: "SpringJoint2D",
+  232: "DistanceJoint2D",
+  233: "HingeJoint2D",
+  234: "SliderJoint2D",
+  235: "WheelJoint2D",
+  236: "ClusterInputManager",
+  237: "BaseVideoTexture",
+  238: "NavMeshData",
+  240: "AudioMixer",
+  241: "AudioMixerController",
+  243: "AudioMixerGroupController",
+  244: "AudioMixerEffectController",
+  245: "AudioMixerSnapshotController",
+  246: "PhysicsUpdateBehaviour2D",
+  247: "ConstantForce2D",
+  248: "Effector2D",
+  249: "AreaEffector2D",
+  250: "PointEffector2D",
+  251: "PlatformEffector2D",
+  252: "SurfaceEffector2D",
+  253: "BuoyancyEffector2D",
+  254: "RelativeJoint2D",
+  255: "FixedJoint2D",
+  256: "FrictionJoint2D",
+  257: "TargetJoint2D",
+  258: "LightProbes",
+  259: "LightProbeProxyVolume",
+  260: "SampleClip",
+  261: "AudioMixerSnapshot",
+  262: "AudioMixerGroup",
+  265: "NScreenBridge",
+  271: "AssetBundleManifest",
+  272: "UnityAdsManager",
+  273: "RuntimeInitializeOnLoadManager",
+  280: "UnityConnectSettings",
+  281: "AvatarMask",
+  290: "PlayableDirector",
+  292: "VideoPlayer",
+  293: "VideoClip",
+  294: "ParticleSystemForceField",
+  298: "SpriteMask",
+  300: "WorldAnchor",
+  301: "OcclusionCullingData",
+  310: "PrefabInstance",
+  319: "TextureImporter",
+  363: "Preset",
+  687078895: "SpriteAtlas",
+  1839735485: "Tilemap",
+  1839735486: "TilemapCollider2D",
+  1839735487: "TilemapRenderer"
+};
+var UNITY_CLASS_NAMES = Object.fromEntries(Object.entries(UNITY_CLASS_IDS).map(([id, name]) => [name, parseInt(id, 10)]));
+function get_class_id(component_name) {
+  if (UNITY_CLASS_NAMES[component_name] !== undefined) {
+    return UNITY_CLASS_NAMES[component_name];
+  }
+  const lowerName = component_name.toLowerCase();
+  for (const [name, id] of Object.entries(UNITY_CLASS_NAMES)) {
+    if (name.toLowerCase() === lowerName) {
+      return id;
+    }
+  }
+  return null;
+}
+
+// src/editor.ts
 function safeUnityYAMLEdit(filePath, objectName, propertyName, newValue) {
   if (!import_fs4.existsSync(filePath)) {
     return {
@@ -2728,6 +2945,84 @@ function editProperty(options) {
     return result;
   }
   return result;
+}
+function editComponentByFileId(options) {
+  const { file_path, file_id, property, new_value } = options;
+  if (!import_fs4.existsSync(file_path)) {
+    return {
+      success: false,
+      file_path,
+      error: `File not found: ${file_path}`
+    };
+  }
+  let content;
+  try {
+    content = import_fs4.readFileSync(file_path, "utf-8");
+  } catch (err) {
+    return {
+      success: false,
+      file_path,
+      error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const normalizedProperty = property.startsWith("m_") ? property.slice(2) : property;
+  const blockPattern = new RegExp(`--- !u!(\\d+) &${file_id}\\b`);
+  const blockMatch = content.match(blockPattern);
+  if (!blockMatch) {
+    return {
+      success: false,
+      file_path,
+      error: `Component with file ID ${file_id} not found`
+    };
+  }
+  const classId = parseInt(blockMatch[1], 10);
+  const blocks = content.split(/(?=--- !u!)/);
+  const targetBlockPattern = new RegExp(`^--- !u!${classId} &${file_id}\\b`);
+  let targetBlockIndex = -1;
+  for (let i = 0;i < blocks.length; i++) {
+    if (targetBlockPattern.test(blocks[i])) {
+      targetBlockIndex = i;
+      break;
+    }
+  }
+  if (targetBlockIndex === -1) {
+    return {
+      success: false,
+      file_path,
+      error: `Component block with file ID ${file_id} not found`
+    };
+  }
+  const targetBlock = blocks[targetBlockIndex];
+  const propertyPattern = new RegExp(`(^\\s*m_${normalizedProperty}:\\s*)([^\\n]*)`, "m");
+  let updatedBlock;
+  if (propertyPattern.test(targetBlock)) {
+    updatedBlock = targetBlock.replace(propertyPattern, `$1${new_value}`);
+  } else {
+    const altPropertyPattern = new RegExp(`(^\\s*${normalizedProperty}:\\s*)([^\\n]*)`, "m");
+    if (altPropertyPattern.test(targetBlock)) {
+      updatedBlock = targetBlock.replace(altPropertyPattern, `$1${new_value}`);
+    } else {
+      updatedBlock = targetBlock.replace(/(\n)(--- !u!|$)/, `
+  m_${normalizedProperty}: ${new_value}$1$2`);
+    }
+  }
+  blocks[targetBlockIndex] = updatedBlock;
+  const finalContent = blocks.join("");
+  const writeResult = atomicWrite(file_path, finalContent);
+  if (!writeResult.success) {
+    return {
+      success: false,
+      file_path,
+      error: writeResult.error
+    };
+  }
+  return {
+    success: true,
+    file_path,
+    file_id,
+    class_id: classId,
+    bytes_written: writeResult.bytes_written
+  };
 }
 function atomicWrite(filePath, content) {
   const tmpPath = `${filePath}.tmp`;
@@ -3002,344 +3297,16 @@ function editTransform(options) {
   const finalContent = blocks.join("");
   return atomicWrite(file_path, finalContent);
 }
-var COMPONENT_CLASS_IDS = {
-  BoxCollider: 65,
-  SphereCollider: 135,
-  CapsuleCollider: 136,
-  MeshCollider: 64,
-  Rigidbody: 54,
-  AudioSource: 82,
-  Light: 108,
-  Camera: 20
-};
-function createComponentYAML(componentType, componentId, gameObjectId) {
-  const classId = COMPONENT_CLASS_IDS[componentType];
-  const templates = {
-    BoxCollider: `--- !u!${classId} &${componentId}
-BoxCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: ${gameObjectId}}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Size: {x: 1, y: 1, z: 1}
-  m_Center: {x: 0, y: 0, z: 0}
-`,
-    SphereCollider: `--- !u!${classId} &${componentId}
-SphereCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: ${gameObjectId}}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Radius: 0.5
-  m_Center: {x: 0, y: 0, z: 0}
-`,
-    CapsuleCollider: `--- !u!${classId} &${componentId}
-CapsuleCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: ${gameObjectId}}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Radius: 0.5
-  m_Height: 2
-  m_Direction: 1
-  m_Center: {x: 0, y: 0, z: 0}
-`,
-    MeshCollider: `--- !u!${classId} &${componentId}
-MeshCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: ${gameObjectId}}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 5
-  m_Convex: 0
-  m_CookingOptions: 30
-  m_Mesh: {fileID: 0}
-`,
-    Rigidbody: `--- !u!${classId} &${componentId}
-Rigidbody:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: ${gameObjectId}}
-  serializedVersion: 4
-  m_Mass: 1
-  m_Drag: 0
-  m_AngularDrag: 0.05
-  m_CenterOfMass: {x: 0, y: 0, z: 0}
-  m_InertiaTensor: {x: 1, y: 1, z: 1}
-  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ImplicitCom: 1
-  m_ImplicitTensor: 1
-  m_UseGravity: 1
-  m_IsKinematic: 0
-  m_Interpolate: 0
-  m_Constraints: 0
-  m_CollisionDetection: 0
-`,
-    AudioSource: `--- !u!${classId} &${componentId}
-AudioSource:
+function createGenericComponentYAML(componentName, classId, componentId, gameObjectId) {
+  return `--- !u!${classId} &${componentId}
+${componentName}:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: ${gameObjectId}}
   m_Enabled: 1
-  serializedVersion: 4
-  OutputAudioMixerGroup: {fileID: 0}
-  m_audioClip: {fileID: 0}
-  m_PlayOnAwake: 1
-  m_Volume: 1
-  m_Pitch: 1
-  Loop: 0
-  Mute: 0
-  Spatialize: 0
-  SpatializePostEffects: 0
-  Priority: 128
-  DopplerLevel: 1
-  MinDistance: 1
-  MaxDistance: 500
-  Pan2D: 0
-  rolloffMode: 0
-  BypassEffects: 0
-  BypassListenerEffects: 0
-  BypassReverbZones: 0
-  rolloffCustomCurve:
-    serializedVersion: 2
-    m_Curve:
-    - serializedVersion: 3
-      time: 0
-      value: 1
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.33333334
-    - serializedVersion: 3
-      time: 1
-      value: 0
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.33333334
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
-  panLevelCustomCurve:
-    serializedVersion: 2
-    m_Curve:
-    - serializedVersion: 3
-      time: 0
-      value: 1
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.33333334
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
-  spreadCustomCurve:
-    serializedVersion: 2
-    m_Curve:
-    - serializedVersion: 3
-      time: 0
-      value: 0
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.33333334
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
-  reverbZoneMixCustomCurve:
-    serializedVersion: 2
-    m_Curve:
-    - serializedVersion: 3
-      time: 0
-      value: 1
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.33333334
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
-`,
-    Light: `--- !u!${classId} &${componentId}
-Light:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: ${gameObjectId}}
-  m_Enabled: 1
-  serializedVersion: 10
-  m_Type: 2
-  m_Shape: 0
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
-  m_Intensity: 1
-  m_Range: 10
-  m_SpotAngle: 30
-  m_InnerSpotAngle: 21.80208
-  m_CookieSize: 10
-  m_Shadows:
-    m_Type: 0
-    m_Resolution: -1
-    m_CustomResolution: -1
-    m_Strength: 1
-    m_Bias: 0.05
-    m_NormalBias: 0.4
-    m_NearPlane: 0.2
-    m_CullingMatrixOverride:
-      e00: 1
-      e01: 0
-      e02: 0
-      e03: 0
-      e10: 0
-      e11: 1
-      e12: 0
-      e13: 0
-      e20: 0
-      e21: 0
-      e22: 1
-      e23: 0
-      e30: 0
-      e31: 0
-      e32: 0
-      e33: 1
-    m_UseCullingMatrixOverride: 0
-  m_Cookie: {fileID: 0}
-  m_DrawHalo: 0
-  m_Flare: {fileID: 0}
-  m_RenderMode: 0
-  m_CullingMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_RenderingLayerMask: 1
-  m_Lightmapping: 4
-  m_LightShadowCasterMode: 0
-  m_AreaSize: {x: 1, y: 1}
-  m_BounceIntensity: 1
-  m_ColorTemperature: 6570
-  m_UseColorTemperature: 0
-  m_BoundingSphereOverride: {x: 0, y: 0, z: 0, w: 0}
-  m_UseBoundingSphereOverride: 0
-  m_UseViewFrustumForShadowCasterCull: 1
-  m_ShadowRadius: 0
-  m_ShadowAngle: 0
-`,
-    Camera: `--- !u!${classId} &${componentId}
-Camera:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: ${gameObjectId}}
-  m_Enabled: 1
-  serializedVersion: 2
-  m_ClearFlags: 1
-  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}
-  m_projectionMatrixMode: 1
-  m_GateFitMode: 2
-  m_FOVAxisMode: 0
-  m_SensorSize: {x: 36, y: 24}
-  m_LensShift: {x: 0, y: 0}
-  m_FocalLength: 50
-  m_NormalizedViewPortRect:
-    serializedVersion: 2
-    x: 0
-    y: 0
-    width: 1
-    height: 1
-  near clip plane: 0.3
-  far clip plane: 1000
-  field of view: 60
-  orthographic: 0
-  orthographic size: 5
-  m_Depth: 0
-  m_CullingMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_RenderingPath: -1
-  m_TargetTexture: {fileID: 0}
-  m_TargetDisplay: 0
-  m_TargetEye: 3
-  m_HDR: 1
-  m_AllowMSAA: 1
-  m_AllowDynamicResolution: 0
-  m_ForceIntoRenderTexture: 0
-  m_OcclusionCulling: 1
-  m_StereoConvergence: 10
-  m_StereoSeparation: 0.022
-`
-  };
-  return templates[componentType];
+`;
 }
 function findGameObjectIdByName(content, objectName) {
   const blocks = content.split(/(?=--- !u!)/);
@@ -3367,8 +3334,69 @@ function addComponentToGameObject(content, gameObjectId, componentId) {
   }
   return blocks.join("");
 }
+function resolveScriptGuid(script, projectPath) {
+  if (/^[a-f0-9]{32}$/i.test(script)) {
+    return { guid: script.toLowerCase(), path: null };
+  }
+  if (script.endsWith(".cs")) {
+    const metaPath = script + ".meta";
+    if (import_fs4.existsSync(metaPath)) {
+      const guid = extractGuidFromMeta(metaPath);
+      if (guid) {
+        return { guid, path: script };
+      }
+    }
+    if (projectPath) {
+      const fullPath = path.join(projectPath, script);
+      const fullMetaPath = fullPath + ".meta";
+      if (import_fs4.existsSync(fullMetaPath)) {
+        const guid = extractGuidFromMeta(fullMetaPath);
+        if (guid) {
+          return { guid, path: script };
+        }
+      }
+    }
+  }
+  if (projectPath) {
+    const cachePath = path.join(projectPath, ".unity-agentic", "guid-cache.json");
+    if (import_fs4.existsSync(cachePath)) {
+      try {
+        const cache = JSON.parse(import_fs4.readFileSync(cachePath, "utf-8"));
+        const scriptNameLower = script.toLowerCase().replace(/\.cs$/, "");
+        for (const [guid, assetPath] of Object.entries(cache)) {
+          if (!assetPath.endsWith(".cs"))
+            continue;
+          const fileName = path.basename(assetPath, ".cs").toLowerCase();
+          const pathLower = assetPath.toLowerCase();
+          if (fileName === scriptNameLower) {
+            return { guid, path: assetPath };
+          }
+          if (pathLower.includes(scriptNameLower)) {
+            return { guid, path: assetPath };
+          }
+        }
+      } catch {}
+    }
+  }
+  return null;
+}
+function createMonoBehaviourYAML(componentId, gameObjectId, scriptGuid) {
+  return `--- !u!114 &${componentId}
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ${scriptGuid}, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+`;
+}
 function addComponent(options) {
-  const { file_path, game_object_name, component_type } = options;
+  const { file_path, game_object_name, component_type, project_path } = options;
   if (!import_fs4.existsSync(file_path)) {
     return {
       success: false,
@@ -3396,7 +3424,26 @@ function addComponent(options) {
   }
   const existingIds = extractExistingFileIds(content);
   const componentId = generateFileId(existingIds);
-  const componentYAML = createComponentYAML(component_type, componentId, gameObjectId);
+  let componentYAML;
+  let scriptGuid;
+  let scriptPath;
+  const classId = get_class_id(component_type);
+  if (classId !== null) {
+    const componentName = UNITY_CLASS_IDS[classId] || component_type;
+    componentYAML = createGenericComponentYAML(componentName, classId, componentId, gameObjectId);
+  } else {
+    const resolved = resolveScriptGuid(component_type, project_path);
+    if (!resolved) {
+      return {
+        success: false,
+        file_path,
+        error: `Component or script not found: "${component_type}". Use a Unity component name (e.g., "MeshRenderer", "Animator") or provide a script name, path (Assets/Scripts/Foo.cs), or GUID.`
+      };
+    }
+    componentYAML = createMonoBehaviourYAML(componentId, gameObjectId, resolved.guid);
+    scriptGuid = resolved.guid;
+    scriptPath = resolved.path || undefined;
+  }
   content = addComponentToGameObject(content, gameObjectId, componentId);
   const finalContent = content.endsWith(`
 `) ? content + componentYAML : content + `
@@ -3412,7 +3459,9 @@ function addComponent(options) {
   return {
     success: true,
     file_path,
-    component_id: componentId
+    component_id: componentId,
+    script_guid: scriptGuid,
+    script_path: scriptPath
   };
 }
 function extractGuidFromMeta(metaPath) {
@@ -3701,26 +3750,21 @@ program.command("edit-transform <file> <transform_id>").description("Edit Transf
   });
   console.log(JSON.stringify(result, null, 2));
 });
-var VALID_COMPONENTS = [
-  "BoxCollider",
-  "SphereCollider",
-  "CapsuleCollider",
-  "MeshCollider",
-  "Rigidbody",
-  "AudioSource",
-  "Light",
-  "Camera"
-];
-program.command("add-component <file> <object_name> <component_type>").description("Add a built-in component to a GameObject").option("-j, --json", "Output as JSON").action((file, object_name, component_type, _options) => {
-  if (!VALID_COMPONENTS.includes(component_type)) {
-    console.error(`Invalid component type: ${component_type}`);
-    console.error(`Valid types: ${VALID_COMPONENTS.join(", ")}`);
-    process.exit(1);
-  }
+program.command("add-component <file> <object_name> <component>").description("Add any Unity component (e.g., MeshRenderer, Animator, Rigidbody) or custom script").option("-p, --project <path>", "Unity project path (for script GUID lookup)").option("-j, --json", "Output as JSON").action((file, object_name, component, options) => {
   const result = addComponent({
     file_path: file,
     game_object_name: object_name,
-    component_type
+    component_type: component,
+    project_path: options.project
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("edit-component <file> <file_id> <property> <value>").description("Edit any component property by file ID (works with any Unity class type)").option("-j, --json", "Output as JSON").action((file, file_id, property, value, _options) => {
+  const result = editComponentByFileId({
+    file_path: file,
+    file_id,
+    property,
+    new_value: value
   });
   console.log(JSON.stringify(result, null, 2));
 });
@@ -3733,7 +3777,7 @@ program.command("create-variant <source_prefab> <output_path>").description("Cre
   console.log(JSON.stringify(result, null, 2));
 });
 program.command("search-docs <query>").description("Search Unity documentation").option("--summarize", "-s", "Summarize results").option("--compress", "-c", "Compress results").option("-j, --json", "Output as JSON").action((query, options) => {
-  const docIndexerPath = path.join(__dirname, "..", "..", "doc-indexer", "dist", "cli.js");
+  const docIndexerPath = path2.join(__dirname, "..", "..", "doc-indexer", "dist", "cli.js");
   const args = [docIndexerPath, "search", query];
   if (options.summarize)
     args.push("-s");
@@ -3750,7 +3794,7 @@ program.command("search-docs <query>").description("Search Unity documentation")
   });
 });
 program.command("index-docs <path>").description("Index Unity documentation").action((pathArg) => {
-  const docIndexerPath = path.join(__dirname, "..", "..", "doc-indexer", "dist", "cli.js");
+  const docIndexerPath = path2.join(__dirname, "..", "..", "doc-indexer", "dist", "cli.js");
   const args = [docIndexerPath, "index", pathArg];
   exec(`bun ${args.join(" ")}`, (error, stdout, _stderr) => {
     if (error) {
@@ -3778,9 +3822,9 @@ program.command("cleanup").description("Clean up unity-agentic files from a Unit
   console.log(JSON.stringify(result, null, 2));
 });
 program.command("status").description("Show current configuration and status").option("-p, --project <path>", "Path to Unity project (defaults to current directory)").action((options) => {
-  const projectPath = path.resolve(options.project || process.cwd());
-  const configPath = path.join(projectPath, ".unity-agentic");
-  const configFile = path.join(configPath, "config.json");
+  const projectPath = path2.resolve(options.project || process.cwd());
+  const configPath = path2.join(projectPath, ".unity-agentic");
+  const configFile = path2.join(configPath, "config.json");
   let config = null;
   let guidCacheCount = 0;
   try {
@@ -3788,7 +3832,7 @@ program.command("status").description("Show current configuration and status").o
     if (existsSync5(configFile)) {
       config = JSON.parse(readFileSync3(configFile, "utf-8"));
     }
-    const guidCachePath = path.join(configPath, "guid-cache.json");
+    const guidCachePath = path2.join(configPath, "guid-cache.json");
     if (existsSync5(guidCachePath)) {
       const guidCache = JSON.parse(readFileSync3(guidCachePath, "utf-8"));
       guidCacheCount = Object.keys(guidCache).length;

@@ -1,7 +1,12 @@
 #!/usr/bin/env bun
 /**
- * Hook: PostToolUse (Claude Code)
- * Purpose: Verify GameObject integrity after Edit operations
+ * Hook: PostToolUse (Edit)
+ * Runs after every Edit tool call that modified a Unity file (.unity, .prefab, .asset).
+ * Checks the edited file for structural corruption: missing YAML header, missing Unity
+ * tag directive, duplicate document IDs, and broken component references (fileID pointing
+ * to non-existent documents). Appends warnings to the tool result if issues are found
+ * but does not block — the edit has already been applied.
+ * Skipped if the Edit tool itself returned an error or the file is not a Unity file.
  */
 
 const readline = require('readline');

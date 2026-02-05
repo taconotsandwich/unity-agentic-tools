@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
 import * as path from 'path';
-import type { CreateGameObjectOptions, CreateGameObjectResult, EditTransformOptions, Vector3, AddComponentOptions, AddComponentResult, BuiltInComponent, CreatePrefabVariantOptions, CreatePrefabVariantResult } from './types';
+import type { CreateGameObjectOptions, CreateGameObjectResult, EditTransformOptions, Vector3, AddComponentOptions, AddComponentResult, CreatePrefabVariantOptions, CreatePrefabVariantResult, Quaternion, PropertyEdit, EditComponentByFileIdOptions, EditComponentResult } from './types';
+import { get_class_id, UNITY_CLASS_IDS } from './class-ids';
 
 export interface EditResult {
   success: boolean;
@@ -121,6 +122,124 @@ export function editProperty(options: PropertyEditOptions): EditResult {
 }
 
 /**
+ * Edit any component property by file ID.
+ * Works with any Unity class type (Transform, MeshRenderer, MonoBehaviour, etc.)
+ */
+export function editComponentByFileId(options: EditComponentByFileIdOptions): EditComponentResult {
+  const { file_path, file_id, property, new_value } = options;
+
+  // Check if file exists
+  if (!existsSync(file_path)) {
+    return {
+      success: false,
+      file_path,
+      error: `File not found: ${file_path}`
+    };
+  }
+
+  let content: string;
+  try {
+    content = readFileSync(file_path, 'utf-8');
+  } catch (err) {
+    return {
+      success: false,
+      file_path,
+      error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+
+  // Normalize property name: strip m_ prefix if provided, we'll add it back
+  const normalizedProperty = property.startsWith('m_')
+    ? property.slice(2)
+    : property;
+
+  // Find the block with this file ID (any class type)
+  const blockPattern = new RegExp(`--- !u!(\\d+) &${file_id}\\b`);
+  const blockMatch = content.match(blockPattern);
+
+  if (!blockMatch) {
+    return {
+      success: false,
+      file_path,
+      error: `Component with file ID ${file_id} not found`
+    };
+  }
+
+  const classId = parseInt(blockMatch[1], 10);
+
+  // Split the file into Unity YAML blocks
+  const blocks = content.split(/(?=--- !u!)/);
+
+  // Find the target block
+  const targetBlockPattern = new RegExp(`^--- !u!${classId} &${file_id}\\b`);
+  let targetBlockIndex = -1;
+
+  for (let i = 0; i < blocks.length; i++) {
+    if (targetBlockPattern.test(blocks[i])) {
+      targetBlockIndex = i;
+      break;
+    }
+  }
+
+  if (targetBlockIndex === -1) {
+    return {
+      success: false,
+      file_path,
+      error: `Component block with file ID ${file_id} not found`
+    };
+  }
+
+  // Edit the property in the target block
+  const targetBlock = blocks[targetBlockIndex];
+  const propertyPattern = new RegExp(
+    `(^\\s*m_${normalizedProperty}:\\s*)([^\\n]*)`,
+    'm'
+  );
+
+  let updatedBlock: string;
+  if (propertyPattern.test(targetBlock)) {
+    // Replace existing property
+    updatedBlock = targetBlock.replace(propertyPattern, `$1${new_value}`);
+  } else {
+    // Property doesn't exist - try without m_ prefix (some properties don't have it)
+    const altPropertyPattern = new RegExp(
+      `(^\\s*${normalizedProperty}:\\s*)([^\\n]*)`,
+      'm'
+    );
+    if (altPropertyPattern.test(targetBlock)) {
+      updatedBlock = targetBlock.replace(altPropertyPattern, `$1${new_value}`);
+    } else {
+      // Add the property (with m_ prefix by default)
+      updatedBlock = targetBlock.replace(
+        /(\n)(--- !u!|$)/,
+        `\n  m_${normalizedProperty}: ${new_value}$1$2`
+      );
+    }
+  }
+
+  blocks[targetBlockIndex] = updatedBlock;
+  const finalContent = blocks.join('');
+
+  const writeResult = atomicWrite(file_path, finalContent);
+
+  if (!writeResult.success) {
+    return {
+      success: false,
+      file_path,
+      error: writeResult.error
+    };
+  }
+
+  return {
+    success: true,
+    file_path,
+    file_id,
+    class_id: classId,
+    bytes_written: writeResult.bytes_written
+  };
+}
+
+/**
  * Validate Unity YAML file integrity.
  */
 export function validateUnityYAML(content: string): boolean {
@@ -198,7 +317,7 @@ function atomicWrite(filePath: string, content: string): EditResult {
  */
 export function batchEditProperties(
   filePath: string,
-  edits: Array<{ object_name: string; property: string; new_value: string }>
+  edits: PropertyEdit[]
 ): EditResult {
   let updatedContent = '';
 
@@ -550,7 +669,7 @@ export function createGameObject(options: CreateGameObjectOptions): CreateGameOb
  * Convert Euler angles (degrees) to quaternion.
  * Unity uses ZXY rotation order.
  */
-function eulerToQuaternion(euler: Vector3): { x: number; y: number; z: number; w: number } {
+function eulerToQuaternion(euler: Vector3): Quaternion {
   const deg2rad = Math.PI / 180;
   const x = euler.x * deg2rad;
   const y = euler.y * deg2rad;
@@ -659,356 +778,24 @@ export function editTransform(options: EditTransformOptions): EditResult {
 }
 
 /**
- * Unity class IDs for built-in components.
+ * Generate generic YAML for any Unity component.
+ * Unity will fill in default values when the scene/prefab is loaded.
  */
-const COMPONENT_CLASS_IDS: Record<BuiltInComponent, number> = {
-  BoxCollider: 65,
-  SphereCollider: 135,
-  CapsuleCollider: 136,
-  MeshCollider: 64,
-  Rigidbody: 54,
-  AudioSource: 82,
-  Light: 108,
-  Camera: 20
-};
-
-/**
- * Generate YAML for a built-in component.
- */
-function createComponentYAML(
-  componentType: BuiltInComponent,
+function createGenericComponentYAML(
+  componentName: string,
+  classId: number,
   componentId: number,
   gameObjectId: number
 ): string {
-  const classId = COMPONENT_CLASS_IDS[componentType];
-
-  const templates: Record<BuiltInComponent, string> = {
-    BoxCollider: `--- !u!${classId} &${componentId}
-BoxCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: ${gameObjectId}}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Size: {x: 1, y: 1, z: 1}
-  m_Center: {x: 0, y: 0, z: 0}
-`,
-    SphereCollider: `--- !u!${classId} &${componentId}
-SphereCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: ${gameObjectId}}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Radius: 0.5
-  m_Center: {x: 0, y: 0, z: 0}
-`,
-    CapsuleCollider: `--- !u!${classId} &${componentId}
-CapsuleCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: ${gameObjectId}}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Radius: 0.5
-  m_Height: 2
-  m_Direction: 1
-  m_Center: {x: 0, y: 0, z: 0}
-`,
-    MeshCollider: `--- !u!${classId} &${componentId}
-MeshCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: ${gameObjectId}}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 5
-  m_Convex: 0
-  m_CookingOptions: 30
-  m_Mesh: {fileID: 0}
-`,
-    Rigidbody: `--- !u!${classId} &${componentId}
-Rigidbody:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: ${gameObjectId}}
-  serializedVersion: 4
-  m_Mass: 1
-  m_Drag: 0
-  m_AngularDrag: 0.05
-  m_CenterOfMass: {x: 0, y: 0, z: 0}
-  m_InertiaTensor: {x: 1, y: 1, z: 1}
-  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ImplicitCom: 1
-  m_ImplicitTensor: 1
-  m_UseGravity: 1
-  m_IsKinematic: 0
-  m_Interpolate: 0
-  m_Constraints: 0
-  m_CollisionDetection: 0
-`,
-    AudioSource: `--- !u!${classId} &${componentId}
-AudioSource:
+  return `--- !u!${classId} &${componentId}
+${componentName}:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: ${gameObjectId}}
   m_Enabled: 1
-  serializedVersion: 4
-  OutputAudioMixerGroup: {fileID: 0}
-  m_audioClip: {fileID: 0}
-  m_PlayOnAwake: 1
-  m_Volume: 1
-  m_Pitch: 1
-  Loop: 0
-  Mute: 0
-  Spatialize: 0
-  SpatializePostEffects: 0
-  Priority: 128
-  DopplerLevel: 1
-  MinDistance: 1
-  MaxDistance: 500
-  Pan2D: 0
-  rolloffMode: 0
-  BypassEffects: 0
-  BypassListenerEffects: 0
-  BypassReverbZones: 0
-  rolloffCustomCurve:
-    serializedVersion: 2
-    m_Curve:
-    - serializedVersion: 3
-      time: 0
-      value: 1
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.33333334
-    - serializedVersion: 3
-      time: 1
-      value: 0
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.33333334
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
-  panLevelCustomCurve:
-    serializedVersion: 2
-    m_Curve:
-    - serializedVersion: 3
-      time: 0
-      value: 1
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.33333334
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
-  spreadCustomCurve:
-    serializedVersion: 2
-    m_Curve:
-    - serializedVersion: 3
-      time: 0
-      value: 0
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.33333334
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
-  reverbZoneMixCustomCurve:
-    serializedVersion: 2
-    m_Curve:
-    - serializedVersion: 3
-      time: 0
-      value: 1
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0.33333334
-      outWeight: 0.33333334
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
-`,
-    Light: `--- !u!${classId} &${componentId}
-Light:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: ${gameObjectId}}
-  m_Enabled: 1
-  serializedVersion: 10
-  m_Type: 2
-  m_Shape: 0
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
-  m_Intensity: 1
-  m_Range: 10
-  m_SpotAngle: 30
-  m_InnerSpotAngle: 21.80208
-  m_CookieSize: 10
-  m_Shadows:
-    m_Type: 0
-    m_Resolution: -1
-    m_CustomResolution: -1
-    m_Strength: 1
-    m_Bias: 0.05
-    m_NormalBias: 0.4
-    m_NearPlane: 0.2
-    m_CullingMatrixOverride:
-      e00: 1
-      e01: 0
-      e02: 0
-      e03: 0
-      e10: 0
-      e11: 1
-      e12: 0
-      e13: 0
-      e20: 0
-      e21: 0
-      e22: 1
-      e23: 0
-      e30: 0
-      e31: 0
-      e32: 0
-      e33: 1
-    m_UseCullingMatrixOverride: 0
-  m_Cookie: {fileID: 0}
-  m_DrawHalo: 0
-  m_Flare: {fileID: 0}
-  m_RenderMode: 0
-  m_CullingMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_RenderingLayerMask: 1
-  m_Lightmapping: 4
-  m_LightShadowCasterMode: 0
-  m_AreaSize: {x: 1, y: 1}
-  m_BounceIntensity: 1
-  m_ColorTemperature: 6570
-  m_UseColorTemperature: 0
-  m_BoundingSphereOverride: {x: 0, y: 0, z: 0, w: 0}
-  m_UseBoundingSphereOverride: 0
-  m_UseViewFrustumForShadowCasterCull: 1
-  m_ShadowRadius: 0
-  m_ShadowAngle: 0
-`,
-    Camera: `--- !u!${classId} &${componentId}
-Camera:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: ${gameObjectId}}
-  m_Enabled: 1
-  serializedVersion: 2
-  m_ClearFlags: 1
-  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}
-  m_projectionMatrixMode: 1
-  m_GateFitMode: 2
-  m_FOVAxisMode: 0
-  m_SensorSize: {x: 36, y: 24}
-  m_LensShift: {x: 0, y: 0}
-  m_FocalLength: 50
-  m_NormalizedViewPortRect:
-    serializedVersion: 2
-    x: 0
-    y: 0
-    width: 1
-    height: 1
-  near clip plane: 0.3
-  far clip plane: 1000
-  field of view: 60
-  orthographic: 0
-  orthographic size: 5
-  m_Depth: 0
-  m_CullingMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  m_RenderingPath: -1
-  m_TargetTexture: {fileID: 0}
-  m_TargetDisplay: 0
-  m_TargetEye: 3
-  m_HDR: 1
-  m_AllowMSAA: 1
-  m_AllowDynamicResolution: 0
-  m_ForceIntoRenderTexture: 0
-  m_OcclusionCulling: 1
-  m_StereoConvergence: 10
-  m_StereoSeparation: 0.022
-`
-  };
-
-  return templates[componentType];
+`;
 }
 
 /**
@@ -1053,10 +840,103 @@ function addComponentToGameObject(content: string, gameObjectId: number, compone
 }
 
 /**
- * Add a built-in component to an existing GameObject.
+ * Look up a script GUID by name, path, or raw GUID.
+ * Returns { guid, path } or null if not found.
+ */
+function resolveScriptGuid(
+  script: string,
+  projectPath?: string
+): { guid: string; path: string | null } | null {
+  // Check if it's already a valid GUID (32 hex chars)
+  if (/^[a-f0-9]{32}$/i.test(script)) {
+    return { guid: script.toLowerCase(), path: null };
+  }
+
+  // Check if it's a direct path to a .cs file
+  if (script.endsWith('.cs')) {
+    const metaPath = script + '.meta';
+    if (existsSync(metaPath)) {
+      const guid = extractGuidFromMeta(metaPath);
+      if (guid) {
+        return { guid, path: script };
+      }
+    }
+    // Try with project path prefix
+    if (projectPath) {
+      const fullPath = path.join(projectPath, script);
+      const fullMetaPath = fullPath + '.meta';
+      if (existsSync(fullMetaPath)) {
+        const guid = extractGuidFromMeta(fullMetaPath);
+        if (guid) {
+          return { guid, path: script };
+        }
+      }
+    }
+  }
+
+  // Try to find in GUID cache by name
+  if (projectPath) {
+    const cachePath = path.join(projectPath, '.unity-agentic', 'guid-cache.json');
+    if (existsSync(cachePath)) {
+      try {
+        const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
+        const scriptNameLower = script.toLowerCase().replace(/\.cs$/, '');
+
+        // Search for matching script
+        for (const [guid, assetPath] of Object.entries(cache)) {
+          if (!assetPath.endsWith('.cs')) continue;
+
+          const fileName = path.basename(assetPath, '.cs').toLowerCase();
+          const pathLower = assetPath.toLowerCase();
+
+          // Exact name match
+          if (fileName === scriptNameLower) {
+            return { guid, path: assetPath };
+          }
+          // Path contains the script name
+          if (pathLower.includes(scriptNameLower)) {
+            return { guid, path: assetPath };
+          }
+        }
+      } catch {
+        // Cache read failed
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Create MonoBehaviour YAML for a custom script.
+ */
+function createMonoBehaviourYAML(
+  componentId: number,
+  gameObjectId: number,
+  scriptGuid: string
+): string {
+  return `--- !u!114 &${componentId}
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: ${gameObjectId}}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ${scriptGuid}, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+`;
+}
+
+/**
+ * Add a component to an existing GameObject.
+ * Supports any Unity built-in component by name (e.g., "MeshRenderer", "Animator", "Canvas")
+ * and custom scripts by name, path, or GUID.
  */
 export function addComponent(options: AddComponentOptions): AddComponentResult {
-  const { file_path, game_object_name, component_type } = options;
+  const { file_path, game_object_name, component_type, project_path } = options;
 
   // Check if file exists
   if (!existsSync(file_path)) {
@@ -1092,8 +972,30 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
   const existingIds = extractExistingFileIds(content);
   const componentId = generateFileId(existingIds);
 
-  // Create component YAML
-  const componentYAML = createComponentYAML(component_type, componentId, gameObjectId);
+  let componentYAML: string;
+  let scriptGuid: string | undefined;
+  let scriptPath: string | undefined;
+
+  // Check if it's a known Unity built-in component
+  const classId = get_class_id(component_type);
+  if (classId !== null) {
+    // Get the canonical component name from the class ID mapping
+    const componentName = UNITY_CLASS_IDS[classId] || component_type;
+    componentYAML = createGenericComponentYAML(componentName, classId, componentId, gameObjectId);
+  } else {
+    // Treat as custom script
+    const resolved = resolveScriptGuid(component_type, project_path);
+    if (!resolved) {
+      return {
+        success: false,
+        file_path,
+        error: `Component or script not found: "${component_type}". Use a Unity component name (e.g., "MeshRenderer", "Animator") or provide a script name, path (Assets/Scripts/Foo.cs), or GUID.`
+      };
+    }
+    componentYAML = createMonoBehaviourYAML(componentId, gameObjectId, resolved.guid);
+    scriptGuid = resolved.guid;
+    scriptPath = resolved.path || undefined;
+  }
 
   // Add component reference to GameObject
   content = addComponentToGameObject(content, gameObjectId, componentId);
@@ -1117,7 +1019,9 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
   return {
     success: true,
     file_path,
-    component_id: componentId
+    component_id: componentId,
+    script_guid: scriptGuid,
+    script_path: scriptPath
   };
 }
 

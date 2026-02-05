@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
 /**
- * Hook: UserPromptSubmit (Claude Code)
- * Purpose: Detect Unity files in user prompt and inject tool context
+ * Hook: UserPromptSubmit
+ * Fires on every user prompt. Scans the prompt text for Unity file references
+ * (.unity, .prefab, .asset) and, when found, injects a context tip suggesting
+ * the unity-yaml CLI commands (list, find, edit) instead of reading files raw.
+ * Does nothing if no Unity file paths are detected in the prompt.
  */
 
 const readline = require('readline');

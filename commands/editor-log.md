@@ -1,5 +1,5 @@
 ---
-description: Read the Unity Editor log file to diagnose errors, warnings, and build issues.
+description: "Read the Unity Editor log file to diagnose compilation errors, runtime exceptions, and build failures. Use after seeing errors in the Unity console or when a build fails. Do NOT use for Player/runtime logs — this reads only the Editor log. The log resets when Unity restarts; check Editor-prev.log for older entries."
 ---
 
 # Read Unity Editor Log
