@@ -1,7 +1,11 @@
 #!/usr/bin/env bun
 /**
- * Hook: SessionStart (Claude Code)
- * Purpose: Index Unity documentation if available
+ * Hook: SessionStart
+ * Runs once when a Claude Code session starts. Checks if the working directory
+ * is a Unity project (by looking for ProjectSettings/ProjectVersion.txt) and whether
+ * Unity documentation is linked at docs/unity/ or cached at .cache/unity_search/.
+ * If docs are symlinked, injects the detected Unity version into session context.
+ * Does nothing if no Unity project or docs are found — no errors, no output.
  */
 
 const readline = require('readline');

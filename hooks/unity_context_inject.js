@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
 /**
- * Hook: PreToolUse (Claude Code)
- * Purpose: Inject Unity tool suggestions for Read operations
+ * Hook: PreToolUse (Read)
+ * Runs before any Read tool call targeting a Unity file (.unity, .prefab, .asset).
+ * Injects a context tip suggesting the unity-yaml CLI commands (list, find, get, edit)
+ * as alternatives to reading the raw YAML, which is verbose and wastes tokens.
+ * Does nothing for non-Unity files. Does not block the Read — only adds suggestions.
  */
 
 const readline = require('readline');

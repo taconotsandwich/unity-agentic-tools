@@ -6,13 +6,13 @@
   "plugins": [
     {
       "name": "unity-agentic-tools",
-      "description": "Token-efficient Unity file access with intelligent selective loading for scenes, prefabs, and assets",
+      "description": "Parse, inspect, and edit Unity YAML files (.unity, .prefab, .asset) with a native Rust parser. Returns structured hierarchies and component data instead of raw YAML, reducing token usage by 10-50x compared to reading files directly.",
       "version": "1.0.0",
       "source": "./"
     },
     {
       "name": "unity-build-settings",
-      "description": "Read and analyze Unity project build settings, version detection, and build profiles",
+      "description": "Read and analyze Unity ProjectSettings/ files including EditorBuildSettings, PlayerSettings, and build profiles. Use when checking build targets, version info, or project configuration. Do NOT use for scene/prefab content — use unity-agentic-tools instead.",
       "version": "1.0.0",
       "source": "./unity-build-settings"
     }
