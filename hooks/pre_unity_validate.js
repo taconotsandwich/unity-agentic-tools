@@ -1,7 +1,11 @@
 #!/usr/bin/env bun
 /**
- * Hook: PreToolUse (Claude Code)
- * Purpose: Validate Unity YAML before Edit/Write operations
+ * Hook: PreToolUse (Edit | Write)
+ * Runs before any Edit or Write tool call targeting a Unity file (.unity, .prefab, .asset).
+ * Validates the file has a valid Unity YAML header (%YAML), Unity tag directive
+ * (%TAG !u! tag:unity3d.com), document markers (--- !u!), and well-formed GUIDs.
+ * Blocks the tool call with an error message if validation fails.
+ * Passes through silently for non-Unity files or if the file doesn't exist yet.
  */
 
 const readline = require('readline');

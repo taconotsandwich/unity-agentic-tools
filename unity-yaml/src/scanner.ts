@@ -1,10 +1,10 @@
 import { createRequire } from 'module';
 import { existsSync } from 'fs';
-import { GameObject, GameObjectDetail, SceneInspection, InspectOptions, ScanOptions } from './types';
+import { GameObject, GameObjectDetail, GameObjectWithComponents, SceneInspection, InspectOptions, ScanOptions, NativeScanner, NativeScannerInstance } from './types';
 import { getBinaryPath, getBinaryDir } from './binary-path';
 
 // Load the native Rust module from host machine
-let RustScanner: any = null;
+let RustScanner: NativeScanner | null = null;
 let nativeModuleError: string | null = null;
 
 try {
@@ -46,7 +46,7 @@ export function getNativeModuleError(): string | null {
  * Unity scene/prefab scanner powered by Rust
  */
 export class UnityScanner {
-  private scanner: any;
+  private scanner: NativeScannerInstance;
 
   constructor() {
     if (!RustScanner) {
@@ -72,7 +72,7 @@ export class UnityScanner {
   /**
    * Scan scene with component information
    */
-  scan_scene_with_components(file: string, options?: ScanOptions): any[] {
+  scan_scene_with_components(file: string, options?: ScanOptions): GameObjectWithComponents[] {
     return this.scanner.scanSceneWithComponents(file, options);
   }
 
@@ -86,7 +86,7 @@ export class UnityScanner {
   /**
    * Inspect a specific GameObject
    */
-  inspect(options: InspectOptions): any | null {
+  inspect(options: InspectOptions): GameObjectDetail | null {
     return this.scanner.inspect({
       file: options.file,
       identifier: options.identifier,

@@ -2,7 +2,7 @@ name: Test
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, dev ]
   pull_request:
     branches: [ main, dev ]
 
@@ -69,15 +69,18 @@ jobs:
         shell: bash
         run: |
           mkdir -p ~/.claude/unity-agentic-tools/bin
-          # Find and copy the built .node file
           find rust-core -name "*.node" -exec cp {} ~/.claude/unity-agentic-tools/bin/ \;
           echo "Copied binary to host location:"
           ls -la ~/.claude/unity-agentic-tools/bin/
 
-      - name: Build packages
+      - name: Build TypeScript packages
         run: bun run build
 
-      - name: Run tests
+      - name: Run Rust tests
+        working-directory: ./rust-core
+        run: cargo test
+
+      - name: Run unit tests
         run: bun run test
 
       - name: Run CLI integration tests (Unix)
@@ -101,7 +104,6 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           echo "Validating plugin structure..."
-          # Check if claude recognizes the plugin directory
           if claude plugin validate . 2>/dev/null; then
             echo "Plugin validation passed"
           else
@@ -109,10 +111,9 @@ jobs:
             cat .claude-plugin/plugin.json | jq .
           fi
 
-      - name: Test plugin installation (Unix)
+      - name: Test CLI with native module from host location (Unix)
         if: runner.os != 'Windows'
         run: |
-          # Verify the CLI works with the native module from host location
           echo "Testing CLI with native module from host location..."
           bun unity-yaml/dist/cli.js status
           echo "Native module loaded successfully from ~/.claude/unity-agentic-tools/bin/"

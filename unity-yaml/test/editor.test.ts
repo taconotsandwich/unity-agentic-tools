@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve, join } from 'path';
-import { readFileSync, unlinkSync } from 'fs';
+import { readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant } from '../src/editor';
 import { create_temp_fixture } from './test-utils';
@@ -1088,10 +1088,10 @@ describe('addComponent', () => {
         expect(result.component_id).toBeDefined();
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-        // Check component block exists
+        // Check component block exists with correct class ID and type
         expect(content).toContain(`--- !u!65 &${result.component_id}`);
         expect(content).toContain('BoxCollider:');
-        expect(content).toContain('m_Size: {x: 1, y: 1, z: 1}');
+        expect(content).toContain(`m_GameObject: {fileID: 1847675923}`);
 
         // Check GameObject has component reference
         const playerGoPattern = /--- !u!1 &1847675923[\s\S]*?(?=--- !u!|$)/;
@@ -1112,7 +1112,7 @@ describe('addComponent', () => {
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content).toContain(`--- !u!135 &${result.component_id}`);
         expect(content).toContain('SphereCollider:');
-        expect(content).toContain('m_Radius: 0.5');
+        expect(content).toContain('m_Enabled: 1');
     });
 
     it('should add Rigidbody', () => {
@@ -1127,8 +1127,7 @@ describe('addComponent', () => {
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content).toContain(`--- !u!54 &${result.component_id}`);
         expect(content).toContain('Rigidbody:');
-        expect(content).toContain('m_Mass: 1');
-        expect(content).toContain('m_UseGravity: 1');
+        expect(content).toContain('m_Enabled: 1');
     });
 
     it('should add Light', () => {
@@ -1143,6 +1142,63 @@ describe('addComponent', () => {
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content).toContain(`--- !u!108 &${result.component_id}`);
         expect(content).toContain('Light:');
+    });
+
+    it('should add MeshRenderer (generic component)', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'MeshRenderer'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain(`--- !u!23 &${result.component_id}`);
+        expect(content).toContain('MeshRenderer:');
+        expect(content).toContain('m_Enabled: 1');
+    });
+
+    it('should add Animator (generic component)', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'Animator'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain(`--- !u!95 &${result.component_id}`);
+        expect(content).toContain('Animator:');
+    });
+
+    it('should add Canvas (generic component)', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'Canvas'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain(`--- !u!223 &${result.component_id}`);
+        expect(content).toContain('Canvas:');
+    });
+
+    it('should add component with case-insensitive name', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'meshfilter'  // lowercase
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain(`--- !u!33 &${result.component_id}`);
+        expect(content).toContain('MeshFilter:');  // Uses canonical name
     });
 
     it('should add multiple components to same GameObject', () => {
@@ -1192,7 +1248,7 @@ describe('addComponent', () => {
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content).toContain('CapsuleCollider:');
-        expect(content).toContain('m_Height: 2');
+        expect(content).toContain('m_Enabled: 1');
     });
 
     it('should fail for nonexistent GameObject', () => {
@@ -1215,6 +1271,96 @@ describe('addComponent', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('File not found');
+    });
+
+    // Custom script tests
+    it('should add custom script by GUID', () => {
+        const testGuid = 'a1b2c3d4e5f67890a1b2c3d4e5f67890';
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: testGuid
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.component_id).toBeDefined();
+        expect(result.script_guid).toBe(testGuid);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // Check MonoBehaviour block exists with class ID 114
+        expect(content).toContain(`--- !u!114 &${result.component_id}`);
+        expect(content).toContain('MonoBehaviour:');
+        expect(content).toContain(`guid: ${testGuid}`);
+        expect(content).toContain('fileID: 11500000');
+    });
+
+    it('should add script by path with .meta file', () => {
+        // Create a temporary script with .meta file
+        const scriptDir = join(tmpdir(), 'test-unity-project', 'Assets', 'Scripts');
+        const scriptPath = join(scriptDir, 'TestScript.cs');
+        const metaPath = scriptPath + '.meta';
+        const testGuid = 'deadbeef12345678deadbeef12345678';
+
+        mkdirSync(scriptDir, { recursive: true });
+        writeFileSync(scriptPath, 'public class TestScript : MonoBehaviour {}');
+        writeFileSync(metaPath, `fileFormatVersion: 2\nguid: ${testGuid}\n`);
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: scriptPath
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.script_guid).toBe(testGuid);
+            expect(result.script_path).toBe(scriptPath);
+
+            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+            expect(content).toContain('MonoBehaviour:');
+            expect(content).toContain(`guid: ${testGuid}`);
+        } finally {
+            rmSync(join(tmpdir(), 'test-unity-project'), { recursive: true, force: true });
+        }
+    });
+
+    it('should add script by name from GUID cache', () => {
+        // Create a mock Unity project with GUID cache
+        const projectDir = join(tmpdir(), 'test-unity-cache-project');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const cachePath = join(cacheDir, 'guid-cache.json');
+        const testGuid = 'cafebabe12345678cafebabe12345678';
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(cachePath, JSON.stringify({
+            [testGuid]: 'Assets/Scripts/PlayerController.cs'
+        }));
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'PlayerController',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.script_guid).toBe(testGuid);
+            expect(result.script_path).toBe('Assets/Scripts/PlayerController.cs');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
+    it('should fail for unknown script without project path', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'SomeUnknownScript'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Component or script not found');
     });
 });
 

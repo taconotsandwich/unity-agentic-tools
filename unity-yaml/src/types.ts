@@ -5,7 +5,7 @@ export interface GameObject {
   tag?: string;
   layer?: number;
   component_count?: number;
-  components?: any[];
+  components?: Component[];
   match_score?: number;
 }
 
@@ -79,26 +79,19 @@ export interface EditTransformOptions {
   scale?: Vector3;
 }
 
-export type BuiltInComponent =
-  | 'BoxCollider'
-  | 'SphereCollider'
-  | 'CapsuleCollider'
-  | 'MeshCollider'
-  | 'Rigidbody'
-  | 'AudioSource'
-  | 'Light'
-  | 'Camera';
-
 export interface AddComponentOptions {
   file_path: string;
   game_object_name: string;
-  component_type: BuiltInComponent;
+  component_type: string;  // Any Unity component name (e.g., "MeshRenderer", "Animator") or script name/path/GUID
+  project_path?: string;   // Unity project root (for script GUID cache lookup)
 }
 
 export interface AddComponentResult {
   success: boolean;
   file_path: string;
   component_id?: number;
+  script_guid?: string;  // Set when adding a script
+  script_path?: string;  // Set when adding a script
   error?: string;
 }
 
@@ -121,5 +114,56 @@ export interface CreateGameObjectResult {
   file_path: string;
   game_object_id?: number;
   transform_id?: number;
+  error?: string;
+}
+
+// Quaternion for rotation representation
+export interface Quaternion {
+  x: number;
+  y: number;
+  z: number;
+  w: number;
+}
+
+// Native Rust module types
+export interface NativeScanner {
+  new(): NativeScannerInstance;
+}
+
+export interface NativeScannerInstance {
+  setProjectRoot(path: string): void;
+  scanSceneMinimal(file: string): GameObject[];
+  scanSceneWithComponents(file: string, options?: ScanOptions): GameObjectWithComponents[];
+  findByName(file: string, pattern: string, fuzzy: boolean): GameObject[];
+  inspect(options: {
+    file: string;
+    identifier?: string;
+    includeProperties?: boolean;
+    verbose?: boolean;
+  }): GameObjectDetail | null;
+  inspectAll(file: string, includeProperties: boolean, verbose: boolean): SceneInspection;
+}
+
+// Batch edit types
+export interface PropertyEdit {
+  object_name: string;
+  property: string;
+  new_value: string;
+}
+
+// Generic component edit options
+export interface EditComponentByFileIdOptions {
+  file_path: string;
+  file_id: string;  // The file ID of the component to edit (from --- !u!<class_id> &<file_id>)
+  property: string;  // Property name (with or without m_ prefix)
+  new_value: string;
+}
+
+export interface EditComponentResult {
+  success: boolean;
+  file_path: string;
+  file_id?: string;
+  class_id?: number;
+  bytes_written?: number;
   error?: string;
 }

@@ -1,6 +1,7 @@
 pub mod parser;
 pub mod gameobject;
 pub mod component;
+pub mod config;
 
 use napi_derive::napi;
 use std::collections::HashMap;
@@ -9,12 +10,14 @@ use std::path::Path;
 
 use crate::common::{Component, GameObject, GameObjectDetail, InspectOptions, SceneInspection, ScanOptions};
 use parser::UnityYamlParser;
+use config::ComponentConfig;
 
 /// High-performance Unity scene/prefab scanner
 #[napi]
 pub struct Scanner {
     guid_cache: HashMap<String, String>,
     project_root: Option<String>,
+    config: ComponentConfig,
 }
 
 #[napi]
@@ -24,7 +27,25 @@ impl Scanner {
         Scanner {
             guid_cache: HashMap::new(),
             project_root: None,
+            config: ComponentConfig::default(),
         }
+    }
+
+    /// Add a hierarchy provider class ID (Transform-like components).
+    #[napi]
+    pub fn add_hierarchy_provider(&mut self, class_id: u32) {
+        self.config.add_hierarchy_provider(class_id);
+    }
+
+    /// Add a script container class ID (MonoBehaviour-like components).
+    #[napi]
+    pub fn add_script_container(&mut self, class_id: u32) {
+        self.config.add_script_container(class_id);
+    }
+
+    /// Get the current component configuration.
+    pub fn get_config(&self) -> &ComponentConfig {
+        &self.config
     }
 
     /// Set project root for GUID resolution
