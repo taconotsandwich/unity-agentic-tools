@@ -11,13 +11,15 @@
   "scripts": {
     "build": "bun build src/cli.ts --outfile=dist/cli.js --target=bun --format=cjs",
     "start": "bun dist/cli.js",
-    "dev": "bun src/cli.ts"
+    "dev": "bun src/cli.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "commander": "^14.0.0"
   },
   "devDependencies": {
-    "@types/node": "^25.0.0"
+    "@types/node": "^25.0.0",
+    "vitest": "^3.0.0"
   },
   "engines": {
     "bun": ">=1.0.0"
