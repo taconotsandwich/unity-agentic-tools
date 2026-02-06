@@ -75,5 +75,70 @@ describeIfNative('UnityScanner', () => {
       expect(result).toBeDefined();
       expect(result?.name).toBe('Instruction');
     });
+
+    it('should exclude properties by default', () => {
+      const result = scanner.inspect({
+        file: 'test/fixtures/Main.unity',
+        identifier: 'Instruction'
+      });
+
+      expect(result).toBeDefined();
+      if (result?.components) {
+        for (const comp of result.components) {
+          expect(comp.properties).toBeUndefined();
+        }
+      }
+    });
+
+    it('should include properties when requested', () => {
+      const result = scanner.inspect({
+        file: 'test/fixtures/Main.unity',
+        identifier: 'Instruction',
+        include_properties: true
+      });
+
+      expect(result).toBeDefined();
+      const hasProps = result?.components?.some((c: any) => c.properties !== undefined);
+      expect(hasProps).toBe(true);
+    });
+  });
+
+  describe('inspect_all', () => {
+    it('should exclude properties by default', () => {
+      const result = scanner.inspect_all('test/fixtures/Main.unity', false, false);
+
+      expect(result).toBeDefined();
+      expect(result.count).toBeGreaterThan(0);
+      for (const go of result.gameobjects) {
+        for (const comp of go.components) {
+          expect(comp.properties).toBeUndefined();
+        }
+      }
+    });
+
+    it('should include properties when requested', () => {
+      const result = scanner.inspect_all('test/fixtures/Main.unity', true, false);
+
+      expect(result).toBeDefined();
+      const hasProps = result.gameobjects.some(
+        (go: any) => go.components.some((c: any) => c.properties !== undefined)
+      );
+      expect(hasProps).toBe(true);
+    });
+
+    it('should filter Unity metadata from properties', () => {
+      const result = scanner.inspect_all('test/fixtures/Main.unity', true, false);
+
+      for (const go of result.gameobjects) {
+        for (const comp of go.components) {
+          if (comp.properties) {
+            expect(comp.properties).not.toHaveProperty('ObjectHideFlags');
+            expect(comp.properties).not.toHaveProperty('CorrespondingSourceObject');
+            expect(comp.properties).not.toHaveProperty('PrefabInstance');
+            expect(comp.properties).not.toHaveProperty('PrefabAsset');
+          }
+        }
+      }
+    });
   });
 });

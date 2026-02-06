@@ -19,8 +19,8 @@ The CLI is located at `${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js`. Always run
   - Searches for GameObjects by name.
 - **Inspect**: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js inspect <file_path> [identifier] [--properties]`
   - Gets detailed information about a specific GameObject or the whole file.
-- **Get Details**: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js get <file_path> <object_id>`
-  - Retrieves raw YAML data for a specific object.
+- **Get Details**: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js get <file_path> <object_id> [--properties]`
+  - Retrieves structured data for a specific object by file ID.
 - **Edit Property**: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js edit <file_path> <object_name> <property> <value>`
   - Safely modifies a property value while preserving GUIDs.
 - **Search Docs**: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js search-docs <query>`
