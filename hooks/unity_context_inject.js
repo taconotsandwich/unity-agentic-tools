@@ -38,13 +38,7 @@ async function main() {
       const filePath = toolInput.filePath || toolInput.path || toolInput.file_path || '';
 
       if (isUnityFile(filePath)) {
-        const suggestion = `# Tip: For Unity files, use specialized tools for token efficiency:
-# - List hierarchy: bun unity-yaml/dist/cli.js list "${filePath}"
-# - Find object: bun unity-yaml/dist/cli.js find "${filePath}" <pattern>
-# - Get details: bun unity-yaml/dist/cli.js get "${filePath}" <object_id>
-# - Edit value: bun unity-yaml/dist/cli.js edit "${filePath}" <object_name> <property> <value> --save
-`;
-        data.context = suggestion + (data.context || '');
+        data.context = `# Prefer unity-yaml CLI over raw Read for "${path.basename(filePath)}" — use list/find/inspect/edit commands.\n` + (data.context || '');
       }
     }
 

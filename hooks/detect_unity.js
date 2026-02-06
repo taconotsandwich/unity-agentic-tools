@@ -8,7 +8,6 @@
  */
 
 const readline = require('readline');
-const path = require('path');
 
 async function readStdin() {
   const rl = readline.createInterface({ input: process.stdin });
@@ -32,21 +31,7 @@ async function main() {
     const uniqueFiles = [...new Set(matches)];
 
     if (uniqueFiles.length > 0) {
-      let context = '# Tip: Use Unity-specific tools for token efficiency\n';
-
-      for (const file of uniqueFiles) {
-        const ext = path.extname(file).slice(1);
-        if (ext === 'unity' || ext === 'prefab') {
-          context += '- scene-list: List hierarchy\n';
-          context += '- scene-find: Find objects\n';
-          context += '- yaml-edit: Edit values\n';
-        } else if (ext === 'asset') {
-          context += '- scene-list: List hierarchy\n';
-          context += '- get-asset: Get properties\n';
-        }
-      }
-
-      data.context = context + (data.context || '');
+      data.context = '# Use unity-yaml CLI (list/find/inspect/edit) instead of reading Unity files raw.\n' + (data.context || '');
     }
 
     console.log(JSON.stringify(data));

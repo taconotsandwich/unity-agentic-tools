@@ -173,7 +173,7 @@ impl Scanner {
 
     /// Inspect entire file
     #[napi]
-    pub fn inspect_all(&mut self, file: String, _include_properties: bool, _verbose: bool) -> SceneInspection {
+    pub fn inspect_all(&mut self, file: String, include_properties: bool, verbose: bool) -> SceneInspection {
         let path = Path::new(&file);
         if !path.exists() {
             return SceneInspection {
@@ -201,7 +201,23 @@ impl Scanner {
             .iter()
             .map(|obj| {
                 let components = self.get_components_for_gameobject(&content, &obj.file_id, &file);
-                self.extract_gameobject_details(&content, obj, &components)
+                let mut detail = self.extract_gameobject_details(&content, obj, &components);
+
+                // Strip properties from components when not requested (token savings)
+                if !include_properties {
+                    for comp in &mut detail.components {
+                        comp.properties = None;
+                    }
+                }
+
+                // Strip verbose fields when not requested
+                if !verbose {
+                    for comp in &mut detail.components {
+                        comp.script_guid = None;
+                    }
+                }
+
+                detail
             })
             .collect();
 

@@ -68,12 +68,14 @@ program.command('find <file> <pattern>')
 program.command('get <file> <object_id>')
   .description('Get GameObject details by ID')
   .option('-c, --component <type>', 'Get specific component type')
+  .option('-p, --properties', 'Include component properties')
   .option('-j, --json', 'Output as JSON')
   .option('-v, --verbose', 'Show internal Unity IDs')
   .action((file, object_id, options) => {
     const result = getScanner().inspect({
       file,
       identifier: object_id,
+      include_properties: options.properties === true,
       verbose: options.verbose
     });
 
