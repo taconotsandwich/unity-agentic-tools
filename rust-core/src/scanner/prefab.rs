@@ -163,4 +163,47 @@ PrefabInstance:
         assert_eq!(instances.len(), 1);
         assert_eq!(instances[0].source_prefab, Some("Assets/Prefabs/Enemy.prefab".to_string()));
     }
+
+    #[test]
+    fn test_no_prefab_instances() {
+        let content = "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!1 &100\nGameObject:\n  m_Name: Cube\n  m_IsActive: 1\n";
+        let instances = extract_prefab_instances(content, &HashMap::new());
+        assert!(instances.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_prefab_instances() {
+        let second_block = r#"--- !u!1001 &800000
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 200000, guid: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, type: 3}
+      propertyPath: m_Name
+      value: MyAlly
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, type: 3}
+"#;
+        let content = format!(
+            "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n{}{}",
+            PREFAB_BLOCK, second_block
+        );
+        let instances = extract_prefab_instances(&content, &HashMap::new());
+        assert_eq!(instances.len(), 2);
+        assert_eq!(instances[0].name, "MyEnemy");
+        assert_eq!(instances[0].file_id, "700000");
+        assert_eq!(instances[1].name, "MyAlly");
+        assert_eq!(instances[1].file_id, "800000");
+    }
+
+    #[test]
+    fn test_unnamed_prefab_instance() {
+        let block = "--- !u!1001 &900000\nPrefabInstance:\n  m_Modification:\n    m_Modifications:\n    - target: {fileID: 100, guid: cccccccccccccccccccccccccccccccc, type: 3}\n      propertyPath: m_LocalPosition.x\n      value: 0\n      objectReference: {fileID: 0}\n    m_RemovedComponents: []\n  m_SourcePrefab: {fileID: 100100000, guid: cccccccccccccccccccccccccccccccc, type: 3}\n";
+        let instances = extract_prefab_instances(block, &HashMap::new());
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].name, "<unnamed>");
+    }
 }
