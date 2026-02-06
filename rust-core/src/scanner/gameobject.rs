@@ -55,6 +55,7 @@ fn extract_layer(block: &str) -> u32 {
     .unwrap_or(0)
 }
 
+#[allow(dead_code)]
 fn extract_hierarchy(content: &str, file_id: &str) -> (Option<String>, Vec<String>) {
     extract_hierarchy_with_config(content, file_id, &ComponentConfig::default())
 }
