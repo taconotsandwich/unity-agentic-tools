@@ -38,11 +38,15 @@ program.command('list <file>')
   .option('-v, --verbose', 'Show internal Unity IDs')
   .action((file, options) => {
     const result = getScanner().scan_scene_with_components(file, { verbose: options.verbose });
-    const output = {
+    const prefabCount = result.filter((r: any) => r.type === 'PrefabInstance').length;
+    const output: any = {
       file,
       count: result.length,
       objects: result,
     };
+    if (prefabCount > 0) {
+      output.prefab_instance_count = prefabCount;
+    }
     console.log(JSON.stringify(output, null, 2));
   });
 
@@ -144,7 +148,7 @@ program.command('inspect-all <file>')
   });
 
 // Edit command
-import { editProperty, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId } from './editor';
+import { editProperty, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab } from './editor';
 
 program.command('edit <file> <object_name> <property> <value>')
   .description('Edit GameObject property value safely')
@@ -251,6 +255,91 @@ program.command('create-variant <source_prefab> <output_path>')
       source_prefab,
       output_path,
       variant_name: options.name
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Remove component command
+program.command('remove-component <file> <file_id>')
+  .description('Remove a component from a Unity file by file ID')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, file_id, _options) => {
+    const result = removeComponent({
+      file_path: file,
+      file_id: file_id
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Delete command
+program.command('delete <file> <object_name>')
+  .description('Delete a GameObject and its hierarchy from a Unity file')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, object_name, _options) => {
+    const result = deleteGameObject({
+      file_path: file,
+      object_name: object_name
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Copy component command
+program.command('copy-component <file> <source_file_id> <target_object_name>')
+  .description('Copy a component to a target GameObject')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, source_file_id, target_object_name, _options) => {
+    const result = copyComponent({
+      file_path: file,
+      source_file_id: source_file_id,
+      target_game_object_name: target_object_name
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Duplicate command
+program.command('duplicate <file> <object_name>')
+  .description('Duplicate a GameObject and its hierarchy')
+  .option('-n, --name <new_name>', 'Name for the duplicated object')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, object_name, options) => {
+    const result = duplicateGameObject({
+      file_path: file,
+      object_name: object_name,
+      new_name: options.name
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Create ScriptableObject command
+program.command('create-scriptable-object <output_path> <script>')
+  .description('Create a new ScriptableObject .asset file')
+  .option('-p, --project <path>', 'Unity project path (for script GUID lookup)')
+  .option('-j, --json', 'Output as JSON')
+  .action((output_path, script, options) => {
+    const result = createScriptableObject({
+      output_path: output_path,
+      script: script,
+      project_path: options.project
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Unpack prefab command
+program.command('unpack-prefab <file> <prefab_instance>')
+  .description('Unpack a PrefabInstance into standalone GameObjects')
+  .option('-p, --project <path>', 'Unity project path (for GUID cache lookup)')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, prefab_instance, options) => {
+    const result = unpackPrefab({
+      file_path: file,
+      prefab_instance: prefab_instance,
+      project_path: options.project
     });
 
     console.log(JSON.stringify(result, null, 2));
