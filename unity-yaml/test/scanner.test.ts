@@ -147,6 +147,40 @@ describeIfNative('UnityScanner', () => {
       expect((result as any).type).toBe('PrefabInstance');
       expect((result as any).name).toBe('MyEnemy');
     });
+
+    it('GameObjects should appear before PrefabInstances in scan output', () => {
+      const result = scanner.scan_scene_with_components('test/fixtures/SceneWithPrefab.unity');
+      const firstPrefabIdx = result.findIndex((r: any) => r.type === 'PrefabInstance');
+      const lastGameObjectIdx = result.length - 1 - [...result].reverse().findIndex((r: any) => r.type !== 'PrefabInstance');
+      expect(firstPrefabIdx).toBeGreaterThan(lastGameObjectIdx);
+    });
+
+    it('inspect_all should omit prefabInstances for files without them', () => {
+      const result = scanner.inspect_all('test/fixtures/SampleScene.unity', false, false);
+      expect(result.prefabInstances).toBeUndefined();
+    });
+
+    it('verbose scan should include file_id on PrefabInstances', () => {
+      const result = scanner.scan_scene_with_components('test/fixtures/SceneWithPrefab.unity', { verbose: true });
+      const prefabs = result.filter((r: any) => r.type === 'PrefabInstance') as any[];
+      expect(prefabs.length).toBe(1);
+      expect(prefabs[0].file_id).toBe('700000');
+    });
+
+    it('non-verbose scan should omit file_id on PrefabInstances', () => {
+      const result = scanner.scan_scene_with_components('test/fixtures/SceneWithPrefab.unity');
+      const prefabs = result.filter((r: any) => r.type === 'PrefabInstance') as any[];
+      expect(prefabs[0].file_id).toBeUndefined();
+    });
+
+    it('inspect PrefabInstance should include source_guid and modifications_count', () => {
+      const result = scanner.inspect({
+        file: 'test/fixtures/SceneWithPrefab.unity',
+        identifier: '700000',
+      });
+      expect((result as any).source_guid).toBe('a1b2c3d4e5f6789012345678abcdef12');
+      expect((result as any).modifications_count).toBe(4);
+    });
   });
 
   describe('inspect_all', () => {
