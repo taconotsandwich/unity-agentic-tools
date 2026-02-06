@@ -41,10 +41,19 @@ export interface GameObjectDetail {
   parent_transform_id?: string | null;
 }
 
+export interface PrefabInstanceInfo {
+  name: string;
+  fileId: string;
+  sourceGuid: string;
+  sourcePrefab?: string;
+  modificationsCount: number;
+}
+
 export interface SceneInspection {
   file: string;
   count: number;
   gameobjects: GameObjectDetail[];
+  prefabInstances?: PrefabInstanceInfo[];
 }
 
 export interface InspectOptions {
@@ -142,6 +151,95 @@ export interface NativeScannerInstance {
     verbose?: boolean;
   }): GameObjectDetail | null;
   inspectAll(file: string, includeProperties: boolean, verbose: boolean): SceneInspection;
+}
+
+// Remove Component types
+export interface RemoveComponentOptions {
+  file_path: string;
+  file_id: string;
+}
+
+export interface RemoveComponentResult {
+  success: boolean;
+  file_path: string;
+  removed_file_id?: string;
+  removed_class_id?: number;
+  error?: string;
+}
+
+// Delete GameObject types
+export interface DeleteGameObjectOptions {
+  file_path: string;
+  object_name: string;
+}
+
+export interface DeleteGameObjectResult {
+  success: boolean;
+  file_path: string;
+  deleted_count?: number;
+  error?: string;
+}
+
+// Copy Component types
+export interface CopyComponentOptions {
+  file_path: string;
+  source_file_id: string;
+  target_game_object_name: string;
+}
+
+export interface CopyComponentResult {
+  success: boolean;
+  file_path: string;
+  source_file_id?: string;
+  new_component_id?: number;
+  target_game_object?: string;
+  error?: string;
+}
+
+// Duplicate GameObject types
+export interface DuplicateGameObjectOptions {
+  file_path: string;
+  object_name: string;
+  new_name?: string;
+}
+
+export interface DuplicateGameObjectResult {
+  success: boolean;
+  file_path: string;
+  game_object_id?: number;
+  transform_id?: number;
+  total_duplicated?: number;
+  error?: string;
+}
+
+// Create ScriptableObject types
+export interface CreateScriptableObjectOptions {
+  output_path: string;
+  script: string;
+  project_path?: string;
+}
+
+export interface CreateScriptableObjectResult {
+  success: boolean;
+  output_path: string;
+  script_guid?: string;
+  asset_guid?: string;
+  error?: string;
+}
+
+// Unpack Prefab types
+export interface UnpackPrefabOptions {
+  file_path: string;
+  prefab_instance: string;
+  project_path?: string;
+}
+
+export interface UnpackPrefabResult {
+  success: boolean;
+  file_path: string;
+  unpacked_count?: number;
+  root_game_object_id?: number;
+  error?: string;
 }
 
 // Batch edit types

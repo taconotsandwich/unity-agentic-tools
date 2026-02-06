@@ -2,13 +2,14 @@ pub mod parser;
 pub mod gameobject;
 pub mod component;
 pub mod config;
+pub mod prefab;
 
 use napi_derive::napi;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::common::{Component, GameObject, GameObjectDetail, InspectOptions, SceneInspection, ScanOptions};
+use crate::common::{Component, GameObject, GameObjectDetail, InspectOptions, PrefabInstanceInfo, SceneInspection, ScanOptions};
 use parser::UnityYamlParser;
 use config::ComponentConfig;
 
@@ -89,13 +90,33 @@ impl Scanner {
 
         self.ensure_guid_resolver(&file);
 
-        gameobjects
+        let mut results: Vec<serde_json::Value> = gameobjects
             .into_iter()
             .map(|obj| {
                 let components = self.get_components_for_gameobject(&content, &obj.file_id, &file);
                 self.build_gameobject_output(&obj, &components, verbose, false)
             })
-            .collect()
+            .collect();
+
+        // Append PrefabInstances
+        let prefab_instances = prefab::extract_prefab_instances(&content, &self.guid_cache);
+        for pi in &prefab_instances {
+            let mut entry = serde_json::json!({
+                "type": "PrefabInstance",
+                "name": pi.name,
+                "source_guid": pi.source_guid,
+                "modifications_count": pi.modifications_count,
+            });
+            if let Some(ref src) = pi.source_prefab {
+                entry["source_prefab"] = serde_json::json!(src);
+            }
+            if verbose {
+                entry["file_id"] = serde_json::json!(pi.file_id);
+            }
+            results.push(entry);
+        }
+
+        results
     }
 
     /// Find GameObjects by name pattern
@@ -149,18 +170,33 @@ impl Scanner {
 
         let identifier = options.identifier.as_ref()?;
 
+        self.ensure_guid_resolver(&options.file);
+
         // Find target file_id
         let target_file_id = if identifier.chars().all(|c| c.is_ascii_digit()) {
             identifier.clone()
         } else {
             let matches = self.find_by_name(options.file.clone(), identifier.clone(), true);
-            matches.first()?.file_id.clone()
+            match matches.first() {
+                Some(m) => m.file_id.clone(),
+                None => {
+                    // Fallback: search PrefabInstances by name
+                    let prefabs = prefab::extract_prefab_instances(&content, &self.guid_cache);
+                    let lower = identifier.to_lowercase();
+                    let pi = prefabs.iter().find(|p| p.name.to_lowercase().contains(&lower))?;
+                    return Some(self.build_prefab_instance_output(pi));
+                }
+            }
         };
+
+        // Check if target_file_id matches a PrefabInstance
+        let prefabs = prefab::extract_prefab_instances(&content, &self.guid_cache);
+        if let Some(pi) = prefabs.iter().find(|p| p.file_id == target_file_id) {
+            return Some(self.build_prefab_instance_output(pi));
+        }
 
         let gameobjects = UnityYamlParser::extract_gameobjects(&content);
         let target_obj = gameobjects.iter().find(|o| o.file_id == target_file_id)?;
-
-        self.ensure_guid_resolver(&options.file);
 
         let components = self.get_components_for_gameobject(&content, &target_file_id, &options.file);
         let verbose = options.verbose.unwrap_or(false);
@@ -180,6 +216,7 @@ impl Scanner {
                 file,
                 count: 0,
                 gameobjects: Vec::new(),
+                prefab_instances: None,
             };
         }
 
@@ -190,6 +227,7 @@ impl Scanner {
                     file,
                     count: 0,
                     gameobjects: Vec::new(),
+                    prefab_instances: None,
                 }
             }
         };
@@ -221,10 +259,18 @@ impl Scanner {
             })
             .collect();
 
+        let prefab_instances = prefab::extract_prefab_instances(&content, &self.guid_cache);
+        let prefab_opt = if prefab_instances.is_empty() {
+            None
+        } else {
+            Some(prefab_instances)
+        };
+
         SceneInspection {
             file,
             count: detailed.len() as u32,
             gameobjects: detailed,
+            prefab_instances: prefab_opt,
         }
     }
 
@@ -344,6 +390,20 @@ impl Scanner {
             }
         }
 
+        output
+    }
+
+    fn build_prefab_instance_output(&self, pi: &PrefabInstanceInfo) -> serde_json::Value {
+        let mut output = serde_json::json!({
+            "type": "PrefabInstance",
+            "name": pi.name,
+            "file_id": pi.file_id,
+            "source_guid": pi.source_guid,
+            "modifications_count": pi.modifications_count,
+        });
+        if let Some(ref src) = pi.source_prefab {
+            output["source_prefab"] = serde_json::json!(src);
+        }
         output
     }
 

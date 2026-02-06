@@ -2113,7 +2113,7 @@ var require_commander = __commonJS((exports2) => {
 
 // ../rust-core/unity-agentic-core.darwin-arm64.node
 var require_unity_agentic_core_darwin_arm64 = __commonJS((exports2, module2) => {
-  module2.exports = require("./unity-agentic-core.darwin-arm64-sefyjxxs.node");
+  module2.exports = require("./unity-agentic-core.darwin-arm64-6nfgz1jg.node");
 });
 
 // ../rust-core/index.js
@@ -3024,6 +3024,24 @@ function editComponentByFileId(options) {
     bytes_written: writeResult.bytes_written
   };
 }
+function validateUnityYAML(content) {
+  if (!content.startsWith("%YAML 1.1")) {
+    console.error("Missing or invalid YAML header");
+    return false;
+  }
+  const invalidGuids = content.match(/guid:\s*[a-f0-9]{1,29}\b/g);
+  if (invalidGuids) {
+    console.error("Found invalid GUID format (missing characters)");
+    return false;
+  }
+  const blockOpens = (content.match(/--- !u!/g) || []).length;
+  const blockCloses = (content.match(/\n---(?!u!)/g) || []).length;
+  if (Math.abs(blockOpens - blockCloses) > 1) {
+    console.error("Unbalanced YAML block markers");
+    return false;
+  }
+  return true;
+}
 function atomicWrite(filePath, content) {
   const tmpPath = `${filePath}.tmp`;
   try {
@@ -3626,6 +3644,693 @@ PrefabImporter:
     prefab_instance_id: prefabInstanceId
   };
 }
+function findBlockByFileId(content, fileId) {
+  const blocks = content.split(/(?=--- !u!)/);
+  const pattern = new RegExp(`^--- !u!(\\d+) &${fileId}\\b`);
+  for (let i = 0;i < blocks.length; i++) {
+    const match = blocks[i].match(pattern);
+    if (match) {
+      return { block: blocks[i], classId: parseInt(match[1], 10), index: i };
+    }
+  }
+  return null;
+}
+function removeBlocks(content, fileIdsToRemove) {
+  const blocks = content.split(/(?=--- !u!)/);
+  const kept = [];
+  for (let i = 0;i < blocks.length; i++) {
+    if (i === 0 && !blocks[i].startsWith("--- !u!")) {
+      kept.push(blocks[i]);
+      continue;
+    }
+    const idMatch = blocks[i].match(/^--- !u!\d+ &(\d+)/);
+    if (idMatch) {
+      const blockId = parseInt(idMatch[1], 10);
+      if (fileIdsToRemove.has(blockId)) {
+        continue;
+      }
+    }
+    kept.push(blocks[i]);
+  }
+  return kept.join("");
+}
+function removeComponentFromGameObject(content, goFileId, compFileId) {
+  const blocks = content.split(/(?=--- !u!)/);
+  const goPattern = new RegExp(`^--- !u!1 &${goFileId}\\b`);
+  for (let i = 0;i < blocks.length; i++) {
+    if (goPattern.test(blocks[i])) {
+      const compLinePattern = new RegExp(`\\s*- component: \\{fileID: ${compFileId}\\}\\n?`);
+      blocks[i] = blocks[i].replace(compLinePattern, "");
+      break;
+    }
+  }
+  return blocks.join("");
+}
+function removeChildFromParent(content, parentTransformId, childTransformId) {
+  const blocks = content.split(/(?=--- !u!)/);
+  const transformPattern = new RegExp(`^--- !u!4 &${parentTransformId}\\b`);
+  for (let i = 0;i < blocks.length; i++) {
+    if (transformPattern.test(blocks[i])) {
+      const childLinePattern = new RegExp(`\\s*- \\{fileID: ${childTransformId}\\}\\n?`);
+      blocks[i] = blocks[i].replace(childLinePattern, "");
+      if (/m_Children:\s*\n\s*m_Father:/.test(blocks[i]) || /m_Children:\s*\n\s*m_RootOrder:/.test(blocks[i])) {
+        blocks[i] = blocks[i].replace(/m_Children:\s*\n/, `m_Children: []
+`);
+      }
+      break;
+    }
+  }
+  return blocks.join("");
+}
+function collectHierarchy(content, transformFileId) {
+  const result = new Set;
+  const blocks = content.split(/(?=--- !u!)/);
+  const transformPattern = new RegExp(`^--- !u!4 &${transformFileId}\\b`);
+  let transformBlock = "";
+  for (const block of blocks) {
+    if (transformPattern.test(block)) {
+      transformBlock = block;
+      break;
+    }
+  }
+  if (!transformBlock)
+    return result;
+  const childMatches = transformBlock.matchAll(/m_Children:[\s\S]*?(?=\s*m_Father:)/g);
+  const childrenSection = childMatches.next().value;
+  if (!childrenSection)
+    return result;
+  const childIds = [];
+  const childIdMatches = childrenSection[0].matchAll(/\{fileID:\s*(\d+)\}/g);
+  for (const m of childIdMatches) {
+    const childId = parseInt(m[1], 10);
+    if (childId !== 0)
+      childIds.push(childId);
+  }
+  for (const childTransformId of childIds) {
+    result.add(childTransformId);
+    const childTransformPattern = new RegExp(`^--- !u!4 &${childTransformId}\\b`);
+    for (const block of blocks) {
+      if (childTransformPattern.test(block)) {
+        const goMatch = block.match(/m_GameObject:\s*\{fileID:\s*(\d+)\}/);
+        if (goMatch) {
+          const goId = parseInt(goMatch[1], 10);
+          result.add(goId);
+          const goPattern = new RegExp(`^--- !u!1 &${goId}\\b`);
+          for (const goBlock of blocks) {
+            if (goPattern.test(goBlock)) {
+              const compMatches = goBlock.matchAll(/component:\s*\{fileID:\s*(\d+)\}/g);
+              for (const cm of compMatches) {
+                result.add(parseInt(cm[1], 10));
+              }
+              break;
+            }
+          }
+        }
+        break;
+      }
+    }
+    const subIds = collectHierarchy(content, childTransformId);
+    for (const id of subIds) {
+      result.add(id);
+    }
+  }
+  return result;
+}
+function remapFileIds(blockText, idMap) {
+  let result = blockText;
+  result = result.replace(/^(--- !u!\d+ &)(\d+)/, (match, prefix, oldId) => {
+    const id = parseInt(oldId, 10);
+    return idMap.has(id) ? `${prefix}${idMap.get(id)}` : match;
+  });
+  result = result.replace(/(\{fileID:\s*)(\d+)(\})/g, (match, prefix, oldId, suffix) => {
+    const id = parseInt(oldId, 10);
+    if (id === 0)
+      return match;
+    return idMap.has(id) ? `${prefix}${idMap.get(id)}${suffix}` : match;
+  });
+  return result;
+}
+function applyModification(block, propertyPath, value, objectReference) {
+  if (!propertyPath.includes(".") && !propertyPath.includes("Array")) {
+    const propPattern = new RegExp(`(^\\s*${propertyPath}:\\s*)(.*)$`, "m");
+    if (propPattern.test(block)) {
+      if (objectReference && objectReference !== "{fileID: 0}") {
+        return block.replace(propPattern, `$1${objectReference}`);
+      }
+      return block.replace(propPattern, `$1${value}`);
+    }
+    return block;
+  }
+  if (propertyPath.includes(".") && !propertyPath.includes("Array")) {
+    const parts = propertyPath.split(".");
+    const parentProp = parts[0];
+    const subField = parts[1];
+    const inlinePattern = new RegExp(`(${parentProp}:\\s*\\{)([^}]*)(\\})`, "m");
+    const inlineMatch = block.match(inlinePattern);
+    if (inlineMatch) {
+      const fields = inlineMatch[2];
+      const fieldPattern = new RegExp(`(${subField}:\\s*)([^,}]+)`);
+      const updatedFields = fields.replace(fieldPattern, `$1${value}`);
+      return block.replace(inlinePattern, `$1${updatedFields}$3`);
+    }
+    return block;
+  }
+  if (propertyPath.includes("Array.data[")) {
+    const arrayMatch = propertyPath.match(/^(.+)\.Array\.data\[(\d+)\]$/);
+    if (arrayMatch) {
+      const arrayProp = arrayMatch[1];
+      const index = parseInt(arrayMatch[2], 10);
+      const arrayPattern = new RegExp(`${arrayProp}:\\s*\\n((?:\\s*-\\s*[^\\n]+\\n)*)`, "m");
+      const arrayBlockMatch = block.match(arrayPattern);
+      if (arrayBlockMatch) {
+        const lines = arrayBlockMatch[1].split(`
+`).filter((l) => l.trim().startsWith("-"));
+        if (index < lines.length) {
+          const refValue = objectReference && objectReference !== "{fileID: 0}" ? objectReference : value;
+          const oldLine = lines[index];
+          const newLine = oldLine.replace(/-\s*.*/, `- ${refValue}`);
+          return block.replace(oldLine, newLine);
+        }
+      }
+    }
+    return block;
+  }
+  return block;
+}
+function removeComponent(options) {
+  const { file_path, file_id } = options;
+  const fileIdNum = parseInt(file_id, 10);
+  if (!import_fs4.existsSync(file_path)) {
+    return { success: false, file_path, error: `File not found: ${file_path}` };
+  }
+  let content;
+  try {
+    content = import_fs4.readFileSync(file_path, "utf-8");
+  } catch (err) {
+    return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const found = findBlockByFileId(content, fileIdNum);
+  if (!found) {
+    return { success: false, file_path, error: `Component with file ID ${file_id} not found` };
+  }
+  if (found.classId === 1) {
+    return { success: false, file_path, error: "Cannot remove a GameObject with remove-component. Use delete instead." };
+  }
+  if (found.classId === 4) {
+    return { success: false, file_path, error: "Cannot remove a Transform with remove-component. Use delete to remove the entire GameObject." };
+  }
+  const goMatch = found.block.match(/m_GameObject:\s*\{fileID:\s*(\d+)\}/);
+  if (goMatch) {
+    const parentGoId = parseInt(goMatch[1], 10);
+    content = removeComponentFromGameObject(content, parentGoId, fileIdNum);
+  }
+  content = removeBlocks(content, new Set([fileIdNum]));
+  if (!validateUnityYAML(content)) {
+    return { success: false, file_path, error: "Validation failed after removing component" };
+  }
+  const writeResult = atomicWrite(file_path, content);
+  if (!writeResult.success) {
+    return { success: false, file_path, error: writeResult.error };
+  }
+  return {
+    success: true,
+    file_path,
+    removed_file_id: file_id,
+    removed_class_id: found.classId
+  };
+}
+function deleteGameObject(options) {
+  const { file_path, object_name } = options;
+  if (!import_fs4.existsSync(file_path)) {
+    return { success: false, file_path, error: `File not found: ${file_path}` };
+  }
+  let content;
+  try {
+    content = import_fs4.readFileSync(file_path, "utf-8");
+  } catch (err) {
+    return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const goId = findGameObjectIdByName(content, object_name);
+  if (goId === null) {
+    return { success: false, file_path, error: `GameObject "${object_name}" not found` };
+  }
+  const goFound = findBlockByFileId(content, goId);
+  if (!goFound) {
+    return { success: false, file_path, error: `GameObject block not found` };
+  }
+  const componentIds = new Set;
+  const compMatches = goFound.block.matchAll(/component:\s*\{fileID:\s*(\d+)\}/g);
+  for (const cm of compMatches) {
+    componentIds.add(parseInt(cm[1], 10));
+  }
+  let transformId = null;
+  let fatherId = 0;
+  const blocks = content.split(/(?=--- !u!)/);
+  for (const compId of componentIds) {
+    const transformPattern = new RegExp(`^--- !u!4 &${compId}\\b`);
+    for (const block of blocks) {
+      if (transformPattern.test(block)) {
+        transformId = compId;
+        const fatherMatch = block.match(/m_Father:\s*\{fileID:\s*(\d+)\}/);
+        if (fatherMatch) {
+          fatherId = parseInt(fatherMatch[1], 10);
+        }
+        break;
+      }
+    }
+    if (transformId !== null)
+      break;
+  }
+  const allIds = new Set([goId]);
+  for (const id of componentIds) {
+    allIds.add(id);
+  }
+  if (transformId !== null) {
+    const descendants = collectHierarchy(content, transformId);
+    for (const id of descendants) {
+      allIds.add(id);
+    }
+  }
+  if (fatherId !== 0 && transformId !== null) {
+    content = removeChildFromParent(content, fatherId, transformId);
+  }
+  content = removeBlocks(content, allIds);
+  if (!validateUnityYAML(content)) {
+    return { success: false, file_path, error: "Validation failed after deleting GameObject" };
+  }
+  const writeResult = atomicWrite(file_path, content);
+  if (!writeResult.success) {
+    return { success: false, file_path, error: writeResult.error };
+  }
+  return {
+    success: true,
+    file_path,
+    deleted_count: allIds.size
+  };
+}
+function copyComponent(options) {
+  const { file_path, source_file_id, target_game_object_name } = options;
+  const sourceIdNum = parseInt(source_file_id, 10);
+  if (!import_fs4.existsSync(file_path)) {
+    return { success: false, file_path, error: `File not found: ${file_path}` };
+  }
+  let content;
+  try {
+    content = import_fs4.readFileSync(file_path, "utf-8");
+  } catch (err) {
+    return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const found = findBlockByFileId(content, sourceIdNum);
+  if (!found) {
+    return { success: false, file_path, error: `Component with file ID ${source_file_id} not found` };
+  }
+  if (found.classId === 1) {
+    return { success: false, file_path, error: "Cannot copy a GameObject. Use duplicate instead." };
+  }
+  if (found.classId === 4) {
+    return { success: false, file_path, error: "Cannot copy a Transform component." };
+  }
+  const targetGoId = findGameObjectIdByName(content, target_game_object_name);
+  if (targetGoId === null) {
+    return { success: false, file_path, error: `Target GameObject "${target_game_object_name}" not found` };
+  }
+  const existingIds = extractExistingFileIds(content);
+  const newId = generateFileId(existingIds);
+  let clonedBlock = found.block.replace(new RegExp(`^(--- !u!${found.classId} &)${sourceIdNum}`), `$1${newId}`);
+  clonedBlock = clonedBlock.replace(/m_GameObject:\s*\{fileID:\s*\d+\}/, `m_GameObject: {fileID: ${targetGoId}}`);
+  content = addComponentToGameObject(content, targetGoId, newId);
+  content = content.endsWith(`
+`) ? content + clonedBlock : content + `
+` + clonedBlock;
+  if (!validateUnityYAML(content)) {
+    return { success: false, file_path, error: "Validation failed after copying component" };
+  }
+  const writeResult = atomicWrite(file_path, content);
+  if (!writeResult.success) {
+    return { success: false, file_path, error: writeResult.error };
+  }
+  return {
+    success: true,
+    file_path,
+    source_file_id,
+    new_component_id: newId,
+    target_game_object: target_game_object_name
+  };
+}
+function duplicateGameObject(options) {
+  const { file_path, object_name, new_name } = options;
+  if (!import_fs4.existsSync(file_path)) {
+    return { success: false, file_path, error: `File not found: ${file_path}` };
+  }
+  let content;
+  try {
+    content = import_fs4.readFileSync(file_path, "utf-8");
+  } catch (err) {
+    return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const goId = findGameObjectIdByName(content, object_name);
+  if (goId === null) {
+    return { success: false, file_path, error: `GameObject "${object_name}" not found` };
+  }
+  const goFound = findBlockByFileId(content, goId);
+  if (!goFound) {
+    return { success: false, file_path, error: `GameObject block not found` };
+  }
+  const componentIds = [];
+  const compMatches = goFound.block.matchAll(/component:\s*\{fileID:\s*(\d+)\}/g);
+  for (const cm of compMatches) {
+    componentIds.push(parseInt(cm[1], 10));
+  }
+  let transformId = null;
+  let fatherId = 0;
+  const blocks = content.split(/(?=--- !u!)/);
+  for (const compId of componentIds) {
+    const transformPattern = new RegExp(`^--- !u!4 &${compId}\\b`);
+    for (const block of blocks) {
+      if (transformPattern.test(block)) {
+        transformId = compId;
+        const fatherMatch = block.match(/m_Father:\s*\{fileID:\s*(\d+)\}/);
+        if (fatherMatch) {
+          fatherId = parseInt(fatherMatch[1], 10);
+        }
+        break;
+      }
+    }
+    if (transformId !== null)
+      break;
+  }
+  const allOldIds = new Set([goId, ...componentIds]);
+  if (transformId !== null) {
+    const descendants = collectHierarchy(content, transformId);
+    for (const id of descendants) {
+      allOldIds.add(id);
+    }
+  }
+  const existingIds = extractExistingFileIds(content);
+  const idMap = new Map;
+  for (const oldId of allOldIds) {
+    const newId = generateFileId(existingIds);
+    existingIds.add(newId);
+    idMap.set(oldId, newId);
+  }
+  const clonedBlocks = [];
+  for (const block of blocks) {
+    const idMatch = block.match(/^--- !u!\d+ &(\d+)/);
+    if (idMatch) {
+      const blockId = parseInt(idMatch[1], 10);
+      if (allOldIds.has(blockId)) {
+        clonedBlocks.push(remapFileIds(block, idMap));
+      }
+    }
+  }
+  const finalName = new_name || `${object_name} (1)`;
+  const escapedOldName = object_name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (let i = 0;i < clonedBlocks.length; i++) {
+    if (clonedBlocks[i].startsWith(`--- !u!1 &${idMap.get(goId)}`)) {
+      clonedBlocks[i] = clonedBlocks[i].replace(new RegExp(`(m_Name:\\s*)${escapedOldName}`), `$1${finalName}`);
+      break;
+    }
+  }
+  const newTransformId = transformId !== null ? idMap.get(transformId) : null;
+  let finalContent = content.endsWith(`
+`) ? content + clonedBlocks.join("") : content + `
+` + clonedBlocks.join("");
+  if (fatherId !== 0 && newTransformId !== null) {
+    finalContent = addChildToParent(finalContent, fatherId, newTransformId);
+  }
+  if (!validateUnityYAML(finalContent)) {
+    return { success: false, file_path, error: "Validation failed after duplicating GameObject" };
+  }
+  const writeResult = atomicWrite(file_path, finalContent);
+  if (!writeResult.success) {
+    return { success: false, file_path, error: writeResult.error };
+  }
+  return {
+    success: true,
+    file_path,
+    game_object_id: idMap.get(goId),
+    transform_id: newTransformId ?? undefined,
+    total_duplicated: allOldIds.size
+  };
+}
+function createScriptableObject(options) {
+  const { output_path, script, project_path } = options;
+  if (!output_path.endsWith(".asset")) {
+    return { success: false, output_path, error: "Output path must have .asset extension" };
+  }
+  const resolved = resolveScriptGuid(script, project_path);
+  if (!resolved) {
+    return { success: false, output_path, error: `Script not found: "${script}". Provide a GUID, script path, or script name with --project.` };
+  }
+  const baseName = path.basename(output_path, ".asset");
+  const assetYaml = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ${resolved.guid}, type: 3}
+  m_Name: ${baseName}
+  m_EditorClassIdentifier:
+`;
+  try {
+    import_fs4.writeFileSync(output_path, assetYaml, "utf-8");
+  } catch (err) {
+    return { success: false, output_path, error: `Failed to write asset file: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const assetGuid = generateGuid();
+  const metaContent = `fileFormatVersion: 2
+guid: ${assetGuid}
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+`;
+  try {
+    import_fs4.writeFileSync(output_path + ".meta", metaContent, "utf-8");
+  } catch (err) {
+    try {
+      const fs = require("fs");
+      fs.unlinkSync(output_path);
+    } catch {}
+    return { success: false, output_path, error: `Failed to write .meta file: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  return {
+    success: true,
+    output_path,
+    script_guid: resolved.guid,
+    asset_guid: assetGuid
+  };
+}
+function unpackPrefab(options) {
+  const { file_path, prefab_instance, project_path } = options;
+  if (!import_fs4.existsSync(file_path)) {
+    return { success: false, file_path, error: `File not found: ${file_path}` };
+  }
+  let content;
+  try {
+    content = import_fs4.readFileSync(file_path, "utf-8");
+  } catch (err) {
+    return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const blocks = content.split(/(?=--- !u!)/);
+  let prefabInstanceBlock = null;
+  let prefabInstanceId = null;
+  const asNumber = parseInt(prefab_instance, 10);
+  if (!isNaN(asNumber)) {
+    for (const block of blocks) {
+      if (new RegExp(`^--- !u!1001 &${asNumber}\\b`).test(block)) {
+        prefabInstanceBlock = block;
+        prefabInstanceId = asNumber;
+        break;
+      }
+    }
+  }
+  if (!prefabInstanceBlock) {
+    for (const block of blocks) {
+      if (block.startsWith("--- !u!1001 ")) {
+        const nameModPattern = new RegExp(`propertyPath: m_Name\\s*\\n\\s*value: ${prefab_instance.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "m");
+        if (nameModPattern.test(block)) {
+          prefabInstanceBlock = block;
+          const idMatch = block.match(/^--- !u!1001 &(\d+)/);
+          if (idMatch)
+            prefabInstanceId = parseInt(idMatch[1], 10);
+          break;
+        }
+      }
+    }
+  }
+  if (!prefabInstanceBlock || prefabInstanceId === null) {
+    return { success: false, file_path, error: `PrefabInstance "${prefab_instance}" not found` };
+  }
+  const sourcePrefabMatch = prefabInstanceBlock.match(/m_SourcePrefab:\s*\{fileID:\s*\d+,\s*guid:\s*([a-f0-9]+)/);
+  if (!sourcePrefabMatch) {
+    return { success: false, file_path, error: "Could not find m_SourcePrefab in PrefabInstance" };
+  }
+  const sourcePrefabGuid = sourcePrefabMatch[1];
+  let sourcePrefabPath = null;
+  if (project_path) {
+    const cachePath = path.join(project_path, ".unity-agentic", "guid-cache.json");
+    if (import_fs4.existsSync(cachePath)) {
+      try {
+        const cache = JSON.parse(import_fs4.readFileSync(cachePath, "utf-8"));
+        if (cache[sourcePrefabGuid]) {
+          const cachedPath = cache[sourcePrefabGuid];
+          sourcePrefabPath = path.isAbsolute(cachedPath) ? cachedPath : path.join(project_path, cachedPath);
+        }
+      } catch {}
+    }
+  }
+  if (!sourcePrefabPath || !import_fs4.existsSync(sourcePrefabPath)) {
+    return { success: false, file_path, error: `Could not resolve source prefab with GUID ${sourcePrefabGuid}. Provide --project path with GUID cache.` };
+  }
+  let prefabContent;
+  try {
+    prefabContent = import_fs4.readFileSync(sourcePrefabPath, "utf-8");
+  } catch (err) {
+    return { success: false, file_path, error: `Failed to read source prefab: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const prefabBlocks = prefabContent.split(/(?=--- !u!)/);
+  const prefabIds = [];
+  for (const block of prefabBlocks) {
+    const idMatch = block.match(/^--- !u!\d+ &(\d+)/);
+    if (idMatch) {
+      prefabIds.push(parseInt(idMatch[1], 10));
+    }
+  }
+  const existingIds = extractExistingFileIds(content);
+  const idMap = new Map;
+  for (const oldId of prefabIds) {
+    const newId = generateFileId(existingIds);
+    existingIds.add(newId);
+    idMap.set(oldId, newId);
+  }
+  const removedComponents = new Set;
+  const removedSection = prefabInstanceBlock.match(/m_RemovedComponents:\s*\n((?:\s*-\s*\{[^}]+\}\s*\n)*)/);
+  if (removedSection) {
+    const removedMatches = removedSection[1].matchAll(/fileID:\s*(\d+)/g);
+    for (const rm of removedMatches) {
+      removedComponents.add(parseInt(rm[1], 10));
+    }
+  }
+  const clonedBlocks = [];
+  for (const block of prefabBlocks) {
+    if (!block.startsWith("--- !u!"))
+      continue;
+    const idMatch = block.match(/^--- !u!\d+ &(\d+)/);
+    if (!idMatch)
+      continue;
+    const blockId = parseInt(idMatch[1], 10);
+    if (removedComponents.has(blockId))
+      continue;
+    let cloned = remapFileIds(block, idMap);
+    cloned = cloned.replace(/\s*m_CorrespondingSourceObject:\s*\{[^}]+\}\n?/, `
+  m_CorrespondingSourceObject: {fileID: 0}
+`);
+    cloned = cloned.replace(/\s*m_PrefabInstance:\s*\{[^}]+\}\n?/, `
+  m_PrefabInstance: {fileID: 0}
+`);
+    cloned = cloned.replace(/\s*m_PrefabAsset:\s*\{[^}]+\}\n?/, `
+  m_PrefabAsset: {fileID: 0}
+`);
+    clonedBlocks.push(cloned);
+  }
+  const modificationsSection = prefabInstanceBlock.match(/m_Modifications:\s*\n((?:\s*-\s*target:[\s\S]*?(?=\s*m_RemovedComponents:|\s*m_RemovedGameObjects:|\s*m_AddedGameObjects:|\s*m_AddedComponents:|\s*m_SourcePrefab:))?)/);
+  if (modificationsSection) {
+    const modEntries = modificationsSection[1].split(/\n\s*-\s*target:/).filter((s) => s.trim());
+    for (const entry of modEntries) {
+      const targetIdMatch = entry.match(/\{fileID:\s*(\d+)/);
+      const propPathMatch = entry.match(/propertyPath:\s*(.+)/);
+      const valueMatch = entry.match(/value:\s*(.*)/);
+      const objRefMatch = entry.match(/objectReference:\s*(\{[^}]*\})/);
+      if (targetIdMatch && propPathMatch) {
+        const targetOldId = parseInt(targetIdMatch[1], 10);
+        const targetNewId = idMap.get(targetOldId);
+        if (targetNewId === undefined)
+          continue;
+        const propertyPath = propPathMatch[1].trim();
+        const value = valueMatch ? valueMatch[1].trim() : "";
+        const objectReference = objRefMatch ? objRefMatch[1].trim() : "{fileID: 0}";
+        let remappedObjRef = objectReference;
+        if (objectReference !== "{fileID: 0}") {
+          remappedObjRef = objectReference.replace(/(\{fileID:\s*)(\d+)/g, (match, prefix, oldId) => {
+            const id = parseInt(oldId, 10);
+            if (id === 0)
+              return match;
+            return idMap.has(id) ? `${prefix}${idMap.get(id)}` : match;
+          });
+        }
+        for (let i = 0;i < clonedBlocks.length; i++) {
+          if (clonedBlocks[i].match(new RegExp(`^--- !u!\\d+ &${targetNewId}\\b`))) {
+            clonedBlocks[i] = applyModification(clonedBlocks[i], propertyPath, value, remappedObjRef);
+            break;
+          }
+        }
+      }
+    }
+  }
+  const transformParentMatch = prefabInstanceBlock.match(/m_TransformParent:\s*\{fileID:\s*(\d+)\}/);
+  const transformParentId = transformParentMatch ? parseInt(transformParentMatch[1], 10) : 0;
+  const rootInfo = findPrefabRootInfo(prefabContent);
+  if (rootInfo && idMap.has(rootInfo.transformId)) {
+    const newRootTransformId = idMap.get(rootInfo.transformId);
+    for (let i = 0;i < clonedBlocks.length; i++) {
+      if (clonedBlocks[i].match(new RegExp(`^--- !u!4 &${newRootTransformId}\\b`))) {
+        clonedBlocks[i] = clonedBlocks[i].replace(/m_Father:\s*\{fileID:\s*\d+\}/, `m_Father: {fileID: ${transformParentId}}`);
+        break;
+      }
+    }
+  }
+  const strippedBlockIds = new Set;
+  for (const block of blocks) {
+    if (block.includes("stripped") && block.includes(`m_PrefabInstance: {fileID: ${prefabInstanceId}}`)) {
+      const idMatch = block.match(/^--- !u!\d+ &(\d+)/);
+      if (idMatch) {
+        strippedBlockIds.add(parseInt(idMatch[1], 10));
+      }
+    }
+  }
+  for (const block of blocks) {
+    if (block.includes(`m_PrefabInstance: {fileID: 0}`) || !block.startsWith("--- !u!"))
+      continue;
+    const idMatch = block.match(/^--- !u!\d+ &(\d+)/);
+    if (!idMatch)
+      continue;
+    const blockId = parseInt(idMatch[1], 10);
+    if (strippedBlockIds.has(blockId) || blockId === prefabInstanceId)
+      continue;
+    if (block.includes(`m_PrefabInstance: {fileID: ${prefabInstanceId}}`)) {}
+  }
+  const blocksToRemove = new Set([prefabInstanceId, ...strippedBlockIds]);
+  content = removeBlocks(content, blocksToRemove);
+  content = content.endsWith(`
+`) ? content + clonedBlocks.join("") : content + `
+` + clonedBlocks.join("");
+  if (transformParentId !== 0 && rootInfo && idMap.has(rootInfo.transformId)) {
+    content = addChildToParent(content, transformParentId, idMap.get(rootInfo.transformId));
+  }
+  if (!validateUnityYAML(content)) {
+    return { success: false, file_path, error: "Validation failed after unpacking prefab" };
+  }
+  const writeResult = atomicWrite(file_path, content);
+  if (!writeResult.success) {
+    return { success: false, file_path, error: writeResult.error };
+  }
+  const newRootGoId = rootInfo ? idMap.get(rootInfo.gameObjectId) : undefined;
+  return {
+    success: true,
+    file_path,
+    unpacked_count: clonedBlocks.length,
+    root_game_object_id: newRootGoId
+  };
+}
 
 // src/cli.ts
 var __dirname = "/Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src";
@@ -3650,11 +4355,15 @@ function getScanner() {
 program.name("unity-yaml").description("Fast, token-efficient Unity YAML parser").version("1.0.0");
 program.command("list <file>").description("List GameObject hierarchy in Unity file").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, options) => {
   const result = getScanner().scan_scene_with_components(file, { verbose: options.verbose });
+  const prefabCount = result.filter((r) => r.type === "PrefabInstance").length;
   const output = {
     file,
     count: result.length,
     objects: result
   };
+  if (prefabCount > 0) {
+    output.prefab_instance_count = prefabCount;
+  }
   console.log(JSON.stringify(output, null, 2));
 });
 program.command("find <file> <pattern>").description("Find GameObjects by name pattern").option("-e, --exact", "Use exact matching").option("-j, --json", "Output as JSON").action((file, pattern, options) => {
@@ -3774,6 +4483,52 @@ program.command("create-variant <source_prefab> <output_path>").description("Cre
     source_prefab,
     output_path,
     variant_name: options.name
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("remove-component <file> <file_id>").description("Remove a component from a Unity file by file ID").option("-j, --json", "Output as JSON").action((file, file_id, _options) => {
+  const result = removeComponent({
+    file_path: file,
+    file_id
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("delete <file> <object_name>").description("Delete a GameObject and its hierarchy from a Unity file").option("-j, --json", "Output as JSON").action((file, object_name, _options) => {
+  const result = deleteGameObject({
+    file_path: file,
+    object_name
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("copy-component <file> <source_file_id> <target_object_name>").description("Copy a component to a target GameObject").option("-j, --json", "Output as JSON").action((file, source_file_id, target_object_name, _options) => {
+  const result = copyComponent({
+    file_path: file,
+    source_file_id,
+    target_game_object_name: target_object_name
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("duplicate <file> <object_name>").description("Duplicate a GameObject and its hierarchy").option("-n, --name <new_name>", "Name for the duplicated object").option("-j, --json", "Output as JSON").action((file, object_name, options) => {
+  const result = duplicateGameObject({
+    file_path: file,
+    object_name,
+    new_name: options.name
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("create-scriptable-object <output_path> <script>").description("Create a new ScriptableObject .asset file").option("-p, --project <path>", "Unity project path (for script GUID lookup)").option("-j, --json", "Output as JSON").action((output_path, script, options) => {
+  const result = createScriptableObject({
+    output_path,
+    script,
+    project_path: options.project
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("unpack-prefab <file> <prefab_instance>").description("Unpack a PrefabInstance into standalone GameObjects").option("-p, --project <path>", "Unity project path (for GUID cache lookup)").option("-j, --json", "Output as JSON").action((file, prefab_instance, options) => {
+  const result = unpackPrefab({
+    file_path: file,
+    prefab_instance,
+    project_path: options.project
   });
   console.log(JSON.stringify(result, null, 2));
 });

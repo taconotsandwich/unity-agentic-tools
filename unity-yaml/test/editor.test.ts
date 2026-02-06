@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve, join } from 'path';
 import { readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant } from '../src/editor';
+import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab } from '../src/editor';
 import { create_temp_fixture } from './test-utils';
 import type { TempFixture } from './test-utils';
 
@@ -1588,5 +1588,676 @@ describe('UnityEditor special cases', () => {
 
         // Directional Light section should be unchanged
         expect(newLightSection![0]).toBe(originalLightSection![0]);
+    });
+});
+
+// ========== Remove Component Tests ==========
+
+describe('removeComponent', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should remove a MonoBehaviour component', () => {
+        // Player's MonoBehaviour is fileID 1847675927
+        const result = removeComponent({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675927'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.removed_file_id).toBe('1847675927');
+        expect(result.removed_class_id).toBe(114);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // Block should be removed
+        expect(content).not.toContain('--- !u!114 &1847675927');
+        // Component reference should be removed from Player GO
+        expect(content).not.toContain('component: {fileID: 1847675927}');
+        // Player GO should still exist
+        expect(content).toContain('m_Name: Player');
+    });
+
+    it('should remove a collider component', () => {
+        // First add a BoxCollider to Player, then remove it
+        const addResult = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'BoxCollider'
+        });
+        expect(addResult.success).toBe(true);
+
+        const result = removeComponent({
+            file_path: temp_fixture.temp_path,
+            file_id: String(addResult.component_id!)
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.removed_class_id).toBe(65);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).not.toContain(`--- !u!65 &${addResult.component_id}`);
+    });
+
+    it('should reject Transform removal', () => {
+        // Player's Transform is fileID 1847675924
+        const result = removeComponent({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Transform');
+    });
+
+    it('should reject GameObject removal', () => {
+        // Player's GO is fileID 1847675923
+        const result = removeComponent({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675923'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('GameObject');
+    });
+
+    it('should fail for nonexistent fileId', () => {
+        const result = removeComponent({
+            file_path: temp_fixture.temp_path,
+            file_id: '9999999999'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+
+    it('should preserve file integrity after removal', () => {
+        removeComponent({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675927'
+        });
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content.startsWith('%YAML 1.1')).toBe(true);
+        expect(validateUnityYAML(content)).toBe(true);
+        // Other objects should still exist
+        expect(content).toContain('m_Name: Main Camera');
+        expect(content).toContain('m_Name: Directional Light');
+        expect(content).toContain('m_Name: GameManager');
+    });
+});
+
+// ========== Delete GameObject Tests ==========
+
+describe('deleteGameObject', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should delete a leaf GameObject (no children)', () => {
+        const result = deleteGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'GameManager'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.deleted_count).toBeGreaterThan(0);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).not.toContain('m_Name: GameManager');
+        expect(content).not.toContain('--- !u!1 &2094567890');
+        expect(content).not.toContain('--- !u!4 &2094567891');
+        expect(content).not.toContain('--- !u!114 &2094567892');
+    });
+
+    it('should delete a GameObject with children recursively', () => {
+        // Create parent → child hierarchy
+        const parentResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Parent'
+        });
+        expect(parentResult.success).toBe(true);
+
+        const childResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Child',
+            parent: 'Parent'
+        });
+        expect(childResult.success).toBe(true);
+
+        // Now delete parent - should remove both parent and child
+        const result = deleteGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'Parent'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).not.toContain('m_Name: Parent');
+        expect(content).not.toContain('m_Name: Child');
+    });
+
+    it('should delete a root object (no parent)', () => {
+        const result = deleteGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'Directional Light'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).not.toContain('m_Name: Directional Light');
+        // Other objects should remain
+        expect(content).toContain('m_Name: Main Camera');
+        expect(content).toContain('m_Name: Player');
+    });
+
+    it('should fail for object not found', () => {
+        const result = deleteGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'NonExistent'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+
+    it('should preserve file integrity after deletion', () => {
+        deleteGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'Player'
+        });
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content.startsWith('%YAML 1.1')).toBe(true);
+        expect(validateUnityYAML(content)).toBe(true);
+    });
+
+    it('should detach from parent when deleting child', () => {
+        // Create parent → child
+        createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'TestParent'
+        });
+
+        const childResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'TestChild',
+            parent: 'TestParent'
+        });
+        expect(childResult.success).toBe(true);
+
+        // Delete only the child
+        const result = deleteGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'TestChild'
+        });
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('m_Name: TestParent');
+        expect(content).not.toContain('m_Name: TestChild');
+        // Parent should not reference the deleted child
+        expect(content).not.toContain(`fileID: ${childResult.transform_id}`);
+    });
+});
+
+// ========== Copy Component Tests ==========
+
+describe('copyComponent', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should copy a MonoBehaviour to a different GO', () => {
+        // Copy Player's MonoBehaviour (1847675927) to GameManager
+        const result = copyComponent({
+            file_path: temp_fixture.temp_path,
+            source_file_id: '1847675927',
+            target_game_object_name: 'GameManager'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.new_component_id).toBeDefined();
+        expect(result.target_game_object).toBe('GameManager');
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // New block should exist
+        expect(content).toContain(`--- !u!114 &${result.new_component_id}`);
+        // Should reference GameManager's GO ID
+        expect(content).toContain(`m_GameObject: {fileID: 2094567890}`);
+        // Original should still exist
+        expect(content).toContain('--- !u!114 &1847675927');
+    });
+
+    it('should copy a component to the same GO', () => {
+        // Add a BoxCollider to Player first
+        const addResult = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'BoxCollider'
+        });
+        expect(addResult.success).toBe(true);
+
+        // Copy the BoxCollider to Player itself
+        const result = copyComponent({
+            file_path: temp_fixture.temp_path,
+            source_file_id: String(addResult.component_id!),
+            target_game_object_name: 'Player'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // Both the original and copy should exist
+        expect(content).toContain(`--- !u!65 &${addResult.component_id}`);
+        expect(content).toContain(`--- !u!65 &${result.new_component_id}`);
+    });
+
+    it('should verify source unchanged after copy', () => {
+        const originalContent = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const originalBlock = originalContent.match(/--- !u!114 &1847675927[\s\S]*?(?=--- !u!|$)/);
+
+        copyComponent({
+            file_path: temp_fixture.temp_path,
+            source_file_id: '1847675927',
+            target_game_object_name: 'GameManager'
+        });
+
+        const newContent = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const newBlock = newContent.match(/--- !u!114 &1847675927[\s\S]*?(?=--- !u!|$)/);
+        expect(newBlock![0]).toBe(originalBlock![0]);
+    });
+
+    it('should reject Transform copy', () => {
+        const result = copyComponent({
+            file_path: temp_fixture.temp_path,
+            source_file_id: '1847675924',
+            target_game_object_name: 'GameManager'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Transform');
+    });
+
+    it('should fail for nonexistent source', () => {
+        const result = copyComponent({
+            file_path: temp_fixture.temp_path,
+            source_file_id: '9999999999',
+            target_game_object_name: 'GameManager'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+
+    it('should fail for nonexistent target', () => {
+        const result = copyComponent({
+            file_path: temp_fixture.temp_path,
+            source_file_id: '1847675927',
+            target_game_object_name: 'NonExistent'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+});
+
+// ========== Duplicate GameObject Tests ==========
+
+describe('duplicateGameObject', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should duplicate a flat GO (no children)', () => {
+        const result = duplicateGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'GameManager'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.game_object_id).toBeDefined();
+        expect(result.transform_id).toBeDefined();
+        expect(result.total_duplicated).toBeGreaterThan(0);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // Original should still exist
+        expect(content).toContain('m_Name: GameManager');
+        // Clone should have default name
+        expect(content).toContain('m_Name: GameManager (1)');
+    });
+
+    it('should duplicate with custom name', () => {
+        const result = duplicateGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'Player',
+            new_name: 'Player2'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('m_Name: Player');
+        expect(content).toContain('m_Name: Player2');
+    });
+
+    it('should duplicate with hierarchy', () => {
+        // Create parent → child
+        createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'DupParent'
+        });
+        createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'DupChild',
+            parent: 'DupParent'
+        });
+
+        const result = duplicateGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'DupParent',
+            new_name: 'DupParentCopy'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.total_duplicated).toBeGreaterThanOrEqual(4); // parent GO + Transform + child GO + Transform
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('m_Name: DupParentCopy');
+    });
+
+    it('should use default "(1)" name when no new_name provided', () => {
+        const result = duplicateGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'Player'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('m_Name: Player (1)');
+    });
+
+    it('should remap internal refs but preserve external refs', () => {
+        const result = duplicateGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'Player',
+            new_name: 'PlayerClone'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+
+        // Cloned Transform should reference cloned GO
+        const clonedTransformPattern = new RegExp(`--- !u!4 &${result.transform_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const clonedTransform = content.match(clonedTransformPattern);
+        expect(clonedTransform).not.toBeNull();
+        expect(clonedTransform![0]).toContain(`m_GameObject: {fileID: ${result.game_object_id}}`);
+
+        // Cloned GO should reference cloned Transform
+        const clonedGoPattern = new RegExp(`--- !u!1 &${result.game_object_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const clonedGo = content.match(clonedGoPattern);
+        expect(clonedGo).not.toBeNull();
+        expect(clonedGo![0]).toContain(`component: {fileID: ${result.transform_id}}`);
+    });
+
+    it('should verify original unchanged', () => {
+        const originalContent = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const originalPlayerBlock = originalContent.match(/--- !u!1 &1847675923[\s\S]*?(?=--- !u!)/);
+
+        duplicateGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'Player',
+            new_name: 'PlayerClone'
+        });
+
+        const newContent = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const newPlayerBlock = newContent.match(/--- !u!1 &1847675923[\s\S]*?(?=--- !u!)/);
+        expect(newPlayerBlock![0]).toBe(originalPlayerBlock![0]);
+    });
+
+    it('should fail for object not found', () => {
+        const result = duplicateGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'NonExistent'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+});
+
+// ========== Create ScriptableObject Tests ==========
+
+describe('createScriptableObject', () => {
+    const outputPath = join(tmpdir(), 'TestSO.asset');
+
+    afterEach(() => {
+        try {
+            unlinkSync(outputPath);
+            unlinkSync(outputPath + '.meta');
+        } catch { /* ignore */ }
+    });
+
+    it('should create with raw GUID', () => {
+        const testGuid = 'aabbccdd11223344aabbccdd11223344';
+        const result = createScriptableObject({
+            output_path: outputPath,
+            script: testGuid
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.script_guid).toBe(testGuid);
+        expect(result.asset_guid).toBeDefined();
+        expect(result.asset_guid).toHaveLength(32);
+    });
+
+    it('should create valid YAML structure', () => {
+        const testGuid = 'aabbccdd11223344aabbccdd11223344';
+        createScriptableObject({
+            output_path: outputPath,
+            script: testGuid
+        });
+
+        const content = readFileSync(outputPath, 'utf-8');
+        expect(content).toContain('%YAML 1.1');
+        expect(content).toContain('--- !u!114 &11400000');
+        expect(content).toContain('MonoBehaviour:');
+        expect(content).toContain(`guid: ${testGuid}`);
+        expect(content).toContain('m_Name: TestSO');
+        expect(content).toContain('m_GameObject: {fileID: 0}');
+    });
+
+    it('should create .meta file', () => {
+        const testGuid = 'aabbccdd11223344aabbccdd11223344';
+        const result = createScriptableObject({
+            output_path: outputPath,
+            script: testGuid
+        });
+
+        expect(result.success).toBe(true);
+
+        const metaContent = readFileSync(outputPath + '.meta', 'utf-8');
+        expect(metaContent).toContain('fileFormatVersion: 2');
+        expect(metaContent).toContain('guid:');
+        const guidMatch = metaContent.match(/guid:\s*([a-f0-9]+)/);
+        expect(guidMatch).not.toBeNull();
+        expect(guidMatch![1]).toHaveLength(32);
+    });
+
+    it('should have m_GameObject: {fileID: 0}', () => {
+        const testGuid = 'aabbccdd11223344aabbccdd11223344';
+        createScriptableObject({
+            output_path: outputPath,
+            script: testGuid
+        });
+
+        const content = readFileSync(outputPath, 'utf-8');
+        expect(content).toContain('m_GameObject: {fileID: 0}');
+    });
+
+    it('should error on non-.asset path', () => {
+        const result = createScriptableObject({
+            output_path: join(tmpdir(), 'TestSO.unity'),
+            script: 'aabbccdd11223344aabbccdd11223344'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('.asset');
+    });
+
+    it('should error on bad script', () => {
+        const result = createScriptableObject({
+            output_path: outputPath,
+            script: 'NonExistentScript'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+});
+
+// ========== Unpack Prefab Tests ==========
+
+describe('unpackPrefab', () => {
+    let temp_fixture: TempFixture;
+    const projectDir = join(tmpdir(), 'test-unpack-project');
+    const cacheDir = join(projectDir, '.unity-agentic');
+    const cachePath = join(cacheDir, 'guid-cache.json');
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SceneWithPrefab.unity')
+        );
+        // Set up mock project with GUID cache pointing to the actual prefab fixture
+        mkdirSync(cacheDir, { recursive: true });
+        const prefabFixturePath = resolve(__dirname, 'fixtures', 'SamplePrefab.prefab');
+        // The cache maps GUID → relative path, but we'll use an absolute path trick
+        // by making project_path empty and storing absolute path in cache
+        writeFileSync(cachePath, JSON.stringify({
+            'a1b2c3d4e5f6789012345678abcdef12': prefabFixturePath
+        }));
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+        rmSync(projectDir, { recursive: true, force: true });
+    });
+
+    it('should unpack a prefab instance by fileID', () => {
+        const result = unpackPrefab({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            project_path: projectDir
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.unpacked_count).toBeGreaterThan(0);
+        expect(result.root_game_object_id).toBeDefined();
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // PrefabInstance block should be removed
+        expect(content).not.toContain('--- !u!1001 &700000');
+        // Stripped blocks should be removed
+        expect(content).not.toContain('stripped');
+        // Standalone GO blocks should exist
+        expect(content).toContain('m_Name: MyEnemy');
+        // Should still have the camera
+        expect(content).toContain('m_Name: Main Camera');
+    });
+
+    it('should unpack by name from modifications', () => {
+        const result = unpackPrefab({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: 'MyEnemy',
+            project_path: projectDir
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.unpacked_count).toBeGreaterThan(0);
+    });
+
+    it('should apply modifications to cloned blocks', () => {
+        const result = unpackPrefab({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            project_path: projectDir
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // Name modification should be applied
+        expect(content).toContain('m_Name: MyEnemy');
+    });
+
+    it('should fail for nonexistent prefab instance', () => {
+        const result = unpackPrefab({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '9999999',
+            project_path: projectDir
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+
+    it('should fail without project path', () => {
+        const result = unpackPrefab({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('resolve');
+    });
+
+    it('should preserve file integrity after unpack', () => {
+        const result = unpackPrefab({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            project_path: projectDir
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content.startsWith('%YAML 1.1')).toBe(true);
+        expect(validateUnityYAML(content)).toBe(true);
     });
 });
