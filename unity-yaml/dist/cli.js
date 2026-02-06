@@ -2113,7 +2113,7 @@ var require_commander = __commonJS((exports2) => {
 
 // ../rust-core/unity-agentic-core.darwin-arm64.node
 var require_unity_agentic_core_darwin_arm64 = __commonJS((exports2, module2) => {
-  module2.exports = require("./unity-agentic-core.darwin-arm64-sefyjxxs.node");
+  module2.exports = require("./unity-agentic-core.darwin-arm64-6nfgz1jg.node");
 });
 
 // ../rust-core/index.js
@@ -4355,11 +4355,15 @@ function getScanner() {
 program.name("unity-yaml").description("Fast, token-efficient Unity YAML parser").version("1.0.0");
 program.command("list <file>").description("List GameObject hierarchy in Unity file").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, options) => {
   const result = getScanner().scan_scene_with_components(file, { verbose: options.verbose });
+  const prefabCount = result.filter((r) => r.type === "PrefabInstance").length;
   const output = {
     file,
     count: result.length,
     objects: result
   };
+  if (prefabCount > 0) {
+    output.prefab_instance_count = prefabCount;
+  }
   console.log(JSON.stringify(output, null, 2));
 });
 program.command("find <file> <pattern>").description("Find GameObjects by name pattern").option("-e, --exact", "Use exact matching").option("-j, --json", "Output as JSON").action((file, pattern, options) => {

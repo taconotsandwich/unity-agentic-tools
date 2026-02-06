@@ -46,6 +46,18 @@ pub struct GameObjectDetail {
     pub parent_transform_id: Option<String>,
 }
 
+/// PrefabInstance information
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrefabInstanceInfo {
+    pub name: String,
+    pub file_id: String,
+    pub source_guid: String,
+    #[napi(ts_type = "string | undefined")]
+    pub source_prefab: Option<String>,
+    pub modifications_count: u32,
+}
+
 /// Full scene inspection result
 #[napi(object)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +65,8 @@ pub struct SceneInspection {
     pub file: String,
     pub count: u32,
     pub gameobjects: Vec<GameObjectDetail>,
+    #[napi(ts_type = "PrefabInstanceInfo[] | undefined")]
+    pub prefab_instances: Option<Vec<PrefabInstanceInfo>>,
 }
 
 /// Options for scanning

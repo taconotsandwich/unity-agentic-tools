@@ -65,7 +65,7 @@ impl UnityYamlParser {
 
     /// Get all blocks from content, indexed by file ID
     pub fn parse_all_blocks(content: &str) -> Vec<(u32, String, String)> {
-        let pattern = Regex::new(r"--- !u!(\d+) &(\d+)\s*\n")
+        let pattern = Regex::new(r"--- !u!(\d+) &(\d+)(?: stripped)?\s*\n")
             .expect("Invalid regex");
 
         let mut blocks = Vec::new();
