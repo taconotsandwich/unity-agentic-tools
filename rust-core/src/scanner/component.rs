@@ -54,6 +54,7 @@ pub fn extract_components_with_config(
         .collect()
 }
 
+#[allow(dead_code)]
 fn extract_single_component(
     content: &str,
     file_id: &str,
@@ -115,6 +116,16 @@ fn extract_single_component_with_config(
     Some(component)
 }
 
+/// Unity metadata properties that are rarely useful for agents and waste tokens.
+/// These are internal Unity fields present on nearly every component.
+const METADATA_PROPERTIES: &[&str] = &[
+    "ObjectHideFlags",
+    "CorrespondingSourceObject",
+    "PrefabInstance",
+    "PrefabAsset",
+    "PrefabInternal",
+];
+
 fn extract_properties(content: &str, file_id: &str, class_id: u32) -> serde_json::Value {
     // Find the start of this block
     let header = format!("--- !u!{} &{}", class_id, file_id);
@@ -135,6 +146,10 @@ fn extract_properties(content: &str, file_id: &str, class_id: u32) -> serde_json
         if let Some(caps) = prop_re.captures(line) {
             if let (Some(name), Some(value)) = (caps.get(1), caps.get(2)) {
                 let clean_name = name.as_str().to_string();
+                // Skip Unity metadata properties that waste tokens
+                if METADATA_PROPERTIES.contains(&clean_name.as_str()) {
+                    continue;
+                }
                 let clean_value = value.as_str().trim().to_string();
                 props.insert(clean_name, serde_json::json!(clean_value));
             }
@@ -156,5 +171,19 @@ mod tests {
         let obj = props.as_object().unwrap();
         assert!(obj.contains_key("LocalPosition"));
         assert!(obj.contains_key("LocalScale"));
+    }
+
+    #[test]
+    fn test_metadata_properties_filtered() {
+        let content = "--- !u!4 &456\nTransform:\n  m_ObjectHideFlags: 0\n  m_CorrespondingSourceObject: {fileID: 0}\n  m_PrefabInstance: {fileID: 0}\n  m_PrefabAsset: {fileID: 0}\n  m_LocalPosition: {x: 1, y: 2, z: 3}\n";
+        let props = extract_properties(content, "456", 4);
+        let obj = props.as_object().unwrap();
+        // Metadata should be filtered out
+        assert!(!obj.contains_key("ObjectHideFlags"));
+        assert!(!obj.contains_key("CorrespondingSourceObject"));
+        assert!(!obj.contains_key("PrefabInstance"));
+        assert!(!obj.contains_key("PrefabAsset"));
+        // Real properties should remain
+        assert!(obj.contains_key("LocalPosition"));
     }
 }

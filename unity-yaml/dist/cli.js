@@ -2113,7 +2113,7 @@ var require_commander = __commonJS((exports2) => {
 
 // ../rust-core/unity-agentic-core.darwin-arm64.node
 var require_unity_agentic_core_darwin_arm64 = __commonJS((exports2, module2) => {
-  module2.exports = require("./unity-agentic-core.darwin-arm64-3n85rert.node");
+  module2.exports = require("./unity-agentic-core.darwin-arm64-sefyjxxs.node");
 });
 
 // ../rust-core/index.js
@@ -3669,10 +3669,11 @@ program.command("find <file> <pattern>").description("Find GameObjects by name p
   };
   console.log(JSON.stringify(output, null, 2));
 });
-program.command("get <file> <object_id>").description("Get GameObject details by ID").option("-c, --component <type>", "Get specific component type").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, object_id, options) => {
+program.command("get <file> <object_id>").description("Get GameObject details by ID").option("-c, --component <type>", "Get specific component type").option("-p, --properties", "Include component properties").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, object_id, options) => {
   const result = getScanner().inspect({
     file,
     identifier: object_id,
+    include_properties: options.properties === true,
     verbose: options.verbose
   });
   if (!result) {
