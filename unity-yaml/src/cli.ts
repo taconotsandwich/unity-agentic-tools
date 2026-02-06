@@ -38,11 +38,15 @@ program.command('list <file>')
   .option('-v, --verbose', 'Show internal Unity IDs')
   .action((file, options) => {
     const result = getScanner().scan_scene_with_components(file, { verbose: options.verbose });
-    const output = {
+    const prefabCount = result.filter((r: any) => r.type === 'PrefabInstance').length;
+    const output: any = {
       file,
       count: result.length,
       objects: result,
     };
+    if (prefabCount > 0) {
+      output.prefab_instance_count = prefabCount;
+    }
     console.log(JSON.stringify(output, null, 2));
   });
 

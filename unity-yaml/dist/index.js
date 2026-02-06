@@ -30,7 +30,7 @@ var __export = (target, all) => {
 
 // ../rust-core/unity-agentic-core.darwin-arm64.node
 var require_unity_agentic_core_darwin_arm64 = __commonJS((exports2, module2) => {
-  module2.exports = require("./unity-agentic-core.darwin-arm64-sefyjxxs.node");
+  module2.exports = require("./unity-agentic-core.darwin-arm64-6nfgz1jg.node");
 });
 
 // ../rust-core/index.js

@@ -41,10 +41,19 @@ export interface GameObjectDetail {
   parent_transform_id?: string | null;
 }
 
+export interface PrefabInstanceInfo {
+  name: string;
+  fileId: string;
+  sourceGuid: string;
+  sourcePrefab?: string;
+  modificationsCount: number;
+}
+
 export interface SceneInspection {
   file: string;
   count: number;
   gameobjects: GameObjectDetail[];
+  prefabInstances?: PrefabInstanceInfo[];
 }
 
 export interface InspectOptions {

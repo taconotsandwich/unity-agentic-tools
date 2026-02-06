@@ -103,6 +103,52 @@ describeIfNative('UnityScanner', () => {
     });
   });
 
+  describe('PrefabInstance awareness', () => {
+    it('scan_scene_with_components should find PrefabInstances', () => {
+      const result = scanner.scan_scene_with_components('test/fixtures/SceneWithPrefab.unity');
+      const prefabs = result.filter((r: any) => r.type === 'PrefabInstance') as any[];
+      expect(prefabs.length).toBe(1);
+      expect(prefabs[0].name).toBe('MyEnemy');
+      expect(prefabs[0].source_guid).toBe('a1b2c3d4e5f6789012345678abcdef12');
+      expect(prefabs[0].modifications_count).toBe(4);
+    });
+
+    it('scan_scene_with_components should include regular GameObjects too', () => {
+      const result = scanner.scan_scene_with_components('test/fixtures/SceneWithPrefab.unity');
+      const gameobjects = result.filter((r: any) => r.type !== 'PrefabInstance');
+      expect(gameobjects.length).toBeGreaterThan(0);
+      expect(gameobjects.some((go: any) => go.name === 'Main Camera')).toBe(true);
+    });
+
+    it('inspect_all should include prefabInstances field', () => {
+      const result = scanner.inspect_all('test/fixtures/SceneWithPrefab.unity', false, false);
+      expect(result.prefabInstances).toBeDefined();
+      expect(result.prefabInstances!.length).toBe(1);
+      expect(result.prefabInstances![0].name).toBe('MyEnemy');
+      expect(result.prefabInstances![0].fileId).toBe('700000');
+    });
+
+    it('inspect by file ID should find PrefabInstance', () => {
+      const result = scanner.inspect({
+        file: 'test/fixtures/SceneWithPrefab.unity',
+        identifier: '700000',
+      });
+      expect(result).toBeDefined();
+      expect((result as any).type).toBe('PrefabInstance');
+      expect((result as any).name).toBe('MyEnemy');
+    });
+
+    it('inspect by name should find PrefabInstance', () => {
+      const result = scanner.inspect({
+        file: 'test/fixtures/SceneWithPrefab.unity',
+        identifier: 'MyEnemy',
+      });
+      expect(result).toBeDefined();
+      expect((result as any).type).toBe('PrefabInstance');
+      expect((result as any).name).toBe('MyEnemy');
+    });
+  });
+
   describe('inspect_all', () => {
     it('should exclude properties by default', () => {
       const result = scanner.inspect_all('test/fixtures/Main.unity', false, false);
