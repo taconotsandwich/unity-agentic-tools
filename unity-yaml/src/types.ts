@@ -67,6 +67,27 @@ export interface ScanOptions {
   verbose?: boolean;
 }
 
+// Pagination types
+export interface PaginationOptions {
+  file: string;
+  include_properties?: boolean;
+  verbose?: boolean;
+  page_size?: number;
+  cursor?: number;
+  max_depth?: number;
+}
+
+export interface PaginatedInspection {
+  file: string;
+  total: number;
+  cursor: number;
+  next_cursor?: number;
+  truncated: boolean;
+  page_size: number;
+  gameobjects: GameObjectDetail[];
+  prefabInstances?: PrefabInstanceInfo[];
+}
+
 // Creation types
 export interface Vector3 {
   x: number;
@@ -151,6 +172,14 @@ export interface NativeScannerInstance {
     verbose?: boolean;
   }): GameObjectDetail | null;
   inspectAll(file: string, includeProperties: boolean, verbose: boolean): SceneInspection;
+  inspectAllPaginated(options: {
+    file: string;
+    includeProperties?: boolean;
+    verbose?: boolean;
+    pageSize?: number;
+    cursor?: number;
+    maxDepth?: number;
+  }): PaginatedInspection;
 }
 
 // Remove Component types
@@ -242,6 +271,34 @@ export interface UnpackPrefabResult {
   error?: string;
 }
 
+// Reparent GameObject types
+export interface ReparentGameObjectOptions {
+  file_path: string;
+  object_name: string;
+  new_parent: string;  // Parent name or "root" for scene root
+}
+
+export interface ReparentGameObjectResult {
+  success: boolean;
+  file_path: string;
+  child_transform_id?: number;
+  old_parent_transform_id?: number;
+  new_parent_transform_id?: number;
+  error?: string;
+}
+
+// Create .meta file types
+export interface CreateMetaFileOptions {
+  script_path: string;
+}
+
+export interface CreateMetaFileResult {
+  success: boolean;
+  meta_path: string;
+  guid?: string;
+  error?: string;
+}
+
 // Batch edit types
 export interface PropertyEdit {
   object_name: string;
@@ -263,5 +320,176 @@ export interface EditComponentResult {
   file_id?: string;
   class_id?: number;
   bytes_written?: number;
+  error?: string;
+}
+
+// ========== Settings Types ==========
+
+export interface ReadSettingsOptions {
+  project_path: string;
+  setting: string;
+}
+
+export interface ReadSettingsResult {
+  success: boolean;
+  project_path: string;
+  setting: string;
+  file_path?: string;
+  data?: TagManagerData | PhysicsData | QualitySettingsData | TimeSettingsData | Record<string, any>;
+  error?: string;
+}
+
+export interface TagManagerData {
+  tags: string[];
+  layers: { index: number; name: string }[];
+  sorting_layers: { name: string; unique_id: number; locked: number }[];
+}
+
+export interface PhysicsData {
+  gravity: { x: number; y: number; z: number };
+  default_contact_offset: number;
+  default_solver_iterations: number;
+  default_solver_velocity_iterations: number;
+  bounce_threshold: number;
+  sleep_threshold: number;
+  queries_hit_triggers: boolean;
+  auto_simulation: boolean;
+  [key: string]: any;
+}
+
+export interface QualitySettingsData {
+  current_quality: number;
+  quality_levels: QualityLevel[];
+}
+
+export interface QualityLevel {
+  name: string;
+  pixel_light_count: number;
+  shadows: number;
+  shadow_resolution: number;
+  shadow_distance: number;
+  anti_aliasing: number;
+  vsync_count: number;
+  lod_bias: number;
+  [key: string]: any;
+}
+
+export interface TimeSettingsData {
+  fixed_timestep: number;
+  max_timestep: number;
+  time_scale: number;
+  max_particle_timestep: number;
+}
+
+export interface EditSettingsOptions {
+  project_path: string;
+  setting: string;
+  property: string;
+  value: string;
+}
+
+export interface EditSettingsResult {
+  success: boolean;
+  project_path: string;
+  setting: string;
+  file_path?: string;
+  bytes_written?: number;
+  error?: string;
+}
+
+export interface TagEditOptions {
+  project_path: string;
+  action: 'add' | 'remove';
+  tag: string;
+}
+
+export interface LayerEditOptions {
+  project_path: string;
+  index: number;
+  name: string;
+}
+
+export interface SortingLayerEditOptions {
+  project_path: string;
+  action: 'add' | 'remove';
+  name: string;
+}
+
+// ========== Scene Creator Types ==========
+
+export interface CreateSceneOptions {
+  output_path: string;
+  include_defaults?: boolean;
+  scene_guid?: string;
+}
+
+export interface CreateSceneResult {
+  success: boolean;
+  output_path: string;
+  scene_guid?: string;
+  meta_path?: string;
+  error?: string;
+}
+
+// ========== Project Search Types ==========
+
+export interface ProjectSearchOptions {
+  project_path: string;
+  name?: string;
+  component?: string;
+  tag?: string;
+  layer?: number;
+  file_type?: 'scene' | 'prefab' | 'all';
+  page_size?: number;
+  cursor?: number;
+}
+
+export interface ProjectSearchMatch {
+  file: string;
+  game_object: string;
+  file_id: string;
+  tag?: string;
+  layer?: number;
+  components?: string[];
+}
+
+export interface ProjectSearchResult {
+  success: boolean;
+  project_path: string;
+  total_files_scanned: number;
+  total_matches: number;
+  cursor: number;
+  next_cursor?: number;
+  truncated: boolean;
+  matches: ProjectSearchMatch[];
+  error?: string;
+}
+
+// ========== Project Grep Types ==========
+
+export interface ProjectGrepOptions {
+  project_path: string;
+  pattern: string;
+  file_type?: 'cs' | 'yaml' | 'unity' | 'prefab' | 'asset' | 'all';
+  max_results?: number;
+  context_lines?: number;
+}
+
+export interface GrepMatch {
+  file: string;
+  line_number: number;
+  line: string;
+  context_before?: string[];
+  context_after?: string[];
+}
+
+export interface ProjectGrepResult {
+  success: boolean;
+  project_path: string;
+  pattern: string;
+  total_files_scanned: number;
+  total_matches: number;
+  truncated: boolean;
+  matches: GrepMatch[];
   error?: string;
 }

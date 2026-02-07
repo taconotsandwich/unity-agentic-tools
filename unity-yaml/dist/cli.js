@@ -2113,7 +2113,7 @@ var require_commander = __commonJS((exports2) => {
 
 // ../rust-core/unity-agentic-core.darwin-arm64.node
 var require_unity_agentic_core_darwin_arm64 = __commonJS((exports2, module2) => {
-  module2.exports = require("./unity-agentic-core.darwin-arm64-6nfgz1jg.node");
+  module2.exports = require("./unity-agentic-core.darwin-arm64-eb5qd13r.node");
 });
 
 // ../rust-core/index.js
@@ -2503,6 +2503,16 @@ class UnityScanner {
   inspect_all(file, include_properties = false, verbose = false) {
     return this.scanner.inspectAll(file, include_properties, verbose);
   }
+  inspect_all_paginated(options) {
+    return this.scanner.inspectAllPaginated({
+      file: options.file,
+      includeProperties: options.include_properties,
+      verbose: options.verbose,
+      pageSize: options.page_size,
+      cursor: options.cursor,
+      maxDepth: options.max_depth
+    });
+  }
 }
 
 // src/setup.ts
@@ -2668,10 +2678,10 @@ function removeDirectoryRecursive(dir) {
 }
 
 // src/cli.ts
-var path2 = __toESM(require("path"));
+var path7 = __toESM(require("path"));
 
 // src/editor.ts
-var import_fs4 = require("fs");
+var import_fs5 = require("fs");
 var path = __toESM(require("path"));
 
 // src/class-ids.ts
@@ -2888,9 +2898,53 @@ function get_class_id(component_name) {
   return null;
 }
 
+// src/utils.ts
+var import_fs4 = require("fs");
+function atomicWrite(filePath, content) {
+  const tmpPath = `${filePath}.tmp`;
+  try {
+    import_fs4.writeFileSync(tmpPath, content, "utf-8");
+    if (import_fs4.existsSync(filePath)) {
+      import_fs4.renameSync(filePath, `${filePath}.bak`);
+    }
+    import_fs4.renameSync(tmpPath, filePath);
+    try {
+      if (import_fs4.existsSync(`${filePath}.bak`)) {
+        import_fs4.unlinkSync(`${filePath}.bak`);
+      }
+    } catch {}
+    return {
+      success: true,
+      file_path: filePath,
+      bytes_written: Buffer.byteLength(content, "utf-8")
+    };
+  } catch (error) {
+    if (import_fs4.existsSync(`${filePath}.bak`)) {
+      try {
+        import_fs4.renameSync(`${filePath}.bak`, filePath);
+      } catch (restoreError) {
+        console.error("Failed to restore backup:", restoreError);
+      }
+    }
+    return {
+      success: false,
+      file_path: filePath,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+function generateGuid() {
+  const hex = "0123456789abcdef";
+  let guid = "";
+  for (let i = 0;i < 32; i++) {
+    guid += hex[Math.floor(Math.random() * 16)];
+  }
+  return guid;
+}
+
 // src/editor.ts
 function safeUnityYAMLEdit(filePath, objectName, propertyName, newValue) {
-  if (!import_fs4.existsSync(filePath)) {
+  if (!import_fs5.existsSync(filePath)) {
     return {
       success: false,
       file_path: filePath,
@@ -2899,7 +2953,7 @@ function safeUnityYAMLEdit(filePath, objectName, propertyName, newValue) {
   }
   let content;
   try {
-    content = import_fs4.readFileSync(filePath, "utf-8");
+    content = import_fs5.readFileSync(filePath, "utf-8");
   } catch (err) {
     return {
       success: false,
@@ -2948,7 +3002,7 @@ function editProperty(options) {
 }
 function editComponentByFileId(options) {
   const { file_path, file_id, property, new_value } = options;
-  if (!import_fs4.existsSync(file_path)) {
+  if (!import_fs5.existsSync(file_path)) {
     return {
       success: false,
       file_path,
@@ -2957,7 +3011,7 @@ function editComponentByFileId(options) {
   }
   let content;
   try {
-    content = import_fs4.readFileSync(file_path, "utf-8");
+    content = import_fs5.readFileSync(file_path, "utf-8");
   } catch (err) {
     return {
       success: false,
@@ -2965,7 +3019,17 @@ function editComponentByFileId(options) {
       error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
     };
   }
-  const normalizedProperty = property.startsWith("m_") ? property.slice(2) : property;
+  let normalizedProperty;
+  if (property.includes(".") || property.includes("Array")) {
+    const rootSegment = property.split(".")[0];
+    if (rootSegment.startsWith("m_")) {
+      normalizedProperty = property;
+    } else {
+      normalizedProperty = "m_" + property;
+    }
+  } else {
+    normalizedProperty = property.startsWith("m_") ? property : "m_" + property;
+  }
   const blockPattern = new RegExp(`--- !u!(\\d+) &${file_id}\\b`);
   const blockMatch = content.match(blockPattern);
   if (!blockMatch) {
@@ -2993,18 +3057,15 @@ function editComponentByFileId(options) {
     };
   }
   const targetBlock = blocks[targetBlockIndex];
-  const propertyPattern = new RegExp(`(^\\s*m_${normalizedProperty}:\\s*)([^\\n]*)`, "m");
-  let updatedBlock;
-  if (propertyPattern.test(targetBlock)) {
-    updatedBlock = targetBlock.replace(propertyPattern, `$1${new_value}`);
-  } else {
-    const altPropertyPattern = new RegExp(`(^\\s*${normalizedProperty}:\\s*)([^\\n]*)`, "m");
-    if (altPropertyPattern.test(targetBlock)) {
-      updatedBlock = targetBlock.replace(altPropertyPattern, `$1${new_value}`);
-    } else {
-      updatedBlock = targetBlock.replace(/(\n)(--- !u!|$)/, `
-  m_${normalizedProperty}: ${new_value}$1$2`);
-    }
+  let updatedBlock = applyModification(targetBlock, normalizedProperty, new_value, "{fileID: 0}");
+  if (updatedBlock === targetBlock) {
+    const withoutPrefix = property.startsWith("m_") ? property.slice(2) : property;
+    updatedBlock = applyModification(targetBlock, withoutPrefix, new_value, "{fileID: 0}");
+  }
+  if (updatedBlock === targetBlock && !property.includes(".") && !property.includes("Array")) {
+    const addProp = property.startsWith("m_") ? property : "m_" + property;
+    updatedBlock = targetBlock.replace(/(\n)(--- !u!|$)/, `
+  ${addProp}: ${new_value}$1$2`);
   }
   blocks[targetBlockIndex] = updatedBlock;
   const finalContent = blocks.join("");
@@ -3041,40 +3102,6 @@ function validateUnityYAML(content) {
     return false;
   }
   return true;
-}
-function atomicWrite(filePath, content) {
-  const tmpPath = `${filePath}.tmp`;
-  try {
-    import_fs4.writeFileSync(tmpPath, content, "utf-8");
-    if (import_fs4.existsSync(filePath)) {
-      import_fs4.renameSync(filePath, `${filePath}.bak`);
-    }
-    import_fs4.renameSync(tmpPath, filePath);
-    try {
-      if (import_fs4.existsSync(`${filePath}.bak`)) {
-        const fs = require("fs");
-        fs.unlinkSync(`${filePath}.bak`);
-      }
-    } catch {}
-    return {
-      success: true,
-      file_path: filePath,
-      bytes_written: Buffer.byteLength(content, "utf-8")
-    };
-  } catch (error) {
-    if (import_fs4.existsSync(`${filePath}.bak`)) {
-      try {
-        import_fs4.renameSync(`${filePath}.bak`, filePath);
-      } catch (restoreError) {
-        console.error("Failed to restore backup:", restoreError);
-      }
-    }
-    return {
-      success: false,
-      file_path: filePath,
-      error: error instanceof Error ? error.message : String(error)
-    };
-  }
 }
 function extractExistingFileIds(content) {
   const ids = new Set;
@@ -3172,7 +3199,7 @@ function createGameObject(options) {
       error: "GameObject name cannot be empty"
     };
   }
-  if (!import_fs4.existsSync(file_path)) {
+  if (!import_fs5.existsSync(file_path)) {
     return {
       success: false,
       file_path,
@@ -3181,7 +3208,7 @@ function createGameObject(options) {
   }
   let content;
   try {
-    content = import_fs4.readFileSync(file_path, "utf-8");
+    content = import_fs5.readFileSync(file_path, "utf-8");
   } catch (err) {
     return {
       success: false,
@@ -3266,7 +3293,7 @@ function eulerToQuaternion(euler) {
 }
 function editTransform(options) {
   const { file_path, transform_id, position, rotation, scale } = options;
-  if (!import_fs4.existsSync(file_path)) {
+  if (!import_fs5.existsSync(file_path)) {
     return {
       success: false,
       file_path,
@@ -3275,7 +3302,7 @@ function editTransform(options) {
   }
   let content;
   try {
-    content = import_fs4.readFileSync(file_path, "utf-8");
+    content = import_fs5.readFileSync(file_path, "utf-8");
   } catch (err) {
     return {
       success: false,
@@ -3358,7 +3385,7 @@ function resolveScriptGuid(script, projectPath) {
   }
   if (script.endsWith(".cs")) {
     const metaPath = script + ".meta";
-    if (import_fs4.existsSync(metaPath)) {
+    if (import_fs5.existsSync(metaPath)) {
       const guid = extractGuidFromMeta(metaPath);
       if (guid) {
         return { guid, path: script };
@@ -3367,7 +3394,7 @@ function resolveScriptGuid(script, projectPath) {
     if (projectPath) {
       const fullPath = path.join(projectPath, script);
       const fullMetaPath = fullPath + ".meta";
-      if (import_fs4.existsSync(fullMetaPath)) {
+      if (import_fs5.existsSync(fullMetaPath)) {
         const guid = extractGuidFromMeta(fullMetaPath);
         if (guid) {
           return { guid, path: script };
@@ -3377,9 +3404,9 @@ function resolveScriptGuid(script, projectPath) {
   }
   if (projectPath) {
     const cachePath = path.join(projectPath, ".unity-agentic", "guid-cache.json");
-    if (import_fs4.existsSync(cachePath)) {
+    if (import_fs5.existsSync(cachePath)) {
       try {
-        const cache = JSON.parse(import_fs4.readFileSync(cachePath, "utf-8"));
+        const cache = JSON.parse(import_fs5.readFileSync(cachePath, "utf-8"));
         const scriptNameLower = script.toLowerCase().replace(/\.cs$/, "");
         for (const [guid, assetPath] of Object.entries(cache)) {
           if (!assetPath.endsWith(".cs"))
@@ -3415,7 +3442,7 @@ MonoBehaviour:
 }
 function addComponent(options) {
   const { file_path, game_object_name, component_type, project_path } = options;
-  if (!import_fs4.existsSync(file_path)) {
+  if (!import_fs5.existsSync(file_path)) {
     return {
       success: false,
       file_path,
@@ -3424,7 +3451,7 @@ function addComponent(options) {
   }
   let content;
   try {
-    content = import_fs4.readFileSync(file_path, "utf-8");
+    content = import_fs5.readFileSync(file_path, "utf-8");
   } catch (err) {
     return {
       success: false,
@@ -3483,11 +3510,11 @@ function addComponent(options) {
   };
 }
 function extractGuidFromMeta(metaPath) {
-  if (!import_fs4.existsSync(metaPath)) {
+  if (!import_fs5.existsSync(metaPath)) {
     return null;
   }
   try {
-    const content = import_fs4.readFileSync(metaPath, "utf-8");
+    const content = import_fs5.readFileSync(metaPath, "utf-8");
     const match = content.match(/guid:\s*([a-f0-9]{32})/);
     return match ? match[1] : null;
   } catch {
@@ -3515,17 +3542,9 @@ function findPrefabRootInfo(content) {
   }
   return null;
 }
-function generateGuid() {
-  const hex = "0123456789abcdef";
-  let guid = "";
-  for (let i = 0;i < 32; i++) {
-    guid += hex[Math.floor(Math.random() * 16)];
-  }
-  return guid;
-}
 function createPrefabVariant(options) {
   const { source_prefab, output_path, variant_name } = options;
-  if (!import_fs4.existsSync(source_prefab)) {
+  if (!import_fs5.existsSync(source_prefab)) {
     return {
       success: false,
       output_path,
@@ -3557,7 +3576,7 @@ function createPrefabVariant(options) {
   }
   let sourceContent;
   try {
-    sourceContent = import_fs4.readFileSync(source_prefab, "utf-8");
+    sourceContent = import_fs5.readFileSync(source_prefab, "utf-8");
   } catch (err) {
     return {
       success: false,
@@ -3607,7 +3626,7 @@ PrefabInstance:
   m_SourcePrefab: {fileID: 100100000, guid: ${sourceGuid}, type: 3}
 `;
   try {
-    import_fs4.writeFileSync(output_path, variantYaml, "utf-8");
+    import_fs5.writeFileSync(output_path, variantYaml, "utf-8");
   } catch (err) {
     return {
       success: false,
@@ -3625,7 +3644,7 @@ PrefabImporter:
   assetBundleVariant:
 `;
   try {
-    import_fs4.writeFileSync(output_path + ".meta", variantMetaContent, "utf-8");
+    import_fs5.writeFileSync(output_path + ".meta", variantMetaContent, "utf-8");
   } catch (err) {
     try {
       const fs = require("fs");
@@ -3820,12 +3839,12 @@ function applyModification(block, propertyPath, value, objectReference) {
 function removeComponent(options) {
   const { file_path, file_id } = options;
   const fileIdNum = parseInt(file_id, 10);
-  if (!import_fs4.existsSync(file_path)) {
+  if (!import_fs5.existsSync(file_path)) {
     return { success: false, file_path, error: `File not found: ${file_path}` };
   }
   let content;
   try {
-    content = import_fs4.readFileSync(file_path, "utf-8");
+    content = import_fs5.readFileSync(file_path, "utf-8");
   } catch (err) {
     return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -3861,12 +3880,12 @@ function removeComponent(options) {
 }
 function deleteGameObject(options) {
   const { file_path, object_name } = options;
-  if (!import_fs4.existsSync(file_path)) {
+  if (!import_fs5.existsSync(file_path)) {
     return { success: false, file_path, error: `File not found: ${file_path}` };
   }
   let content;
   try {
-    content = import_fs4.readFileSync(file_path, "utf-8");
+    content = import_fs5.readFileSync(file_path, "utf-8");
   } catch (err) {
     return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -3931,12 +3950,12 @@ function deleteGameObject(options) {
 function copyComponent(options) {
   const { file_path, source_file_id, target_game_object_name } = options;
   const sourceIdNum = parseInt(source_file_id, 10);
-  if (!import_fs4.existsSync(file_path)) {
+  if (!import_fs5.existsSync(file_path)) {
     return { success: false, file_path, error: `File not found: ${file_path}` };
   }
   let content;
   try {
-    content = import_fs4.readFileSync(file_path, "utf-8");
+    content = import_fs5.readFileSync(file_path, "utf-8");
   } catch (err) {
     return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -3979,12 +3998,12 @@ function copyComponent(options) {
 }
 function duplicateGameObject(options) {
   const { file_path, object_name, new_name } = options;
-  if (!import_fs4.existsSync(file_path)) {
+  if (!import_fs5.existsSync(file_path)) {
     return { success: false, file_path, error: `File not found: ${file_path}` };
   }
   let content;
   try {
-    content = import_fs4.readFileSync(file_path, "utf-8");
+    content = import_fs5.readFileSync(file_path, "utf-8");
   } catch (err) {
     return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -4099,7 +4118,7 @@ MonoBehaviour:
   m_EditorClassIdentifier:
 `;
   try {
-    import_fs4.writeFileSync(output_path, assetYaml, "utf-8");
+    import_fs5.writeFileSync(output_path, assetYaml, "utf-8");
   } catch (err) {
     return { success: false, output_path, error: `Failed to write asset file: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -4114,7 +4133,7 @@ NativeFormatImporter:
   assetBundleVariant:
 `;
   try {
-    import_fs4.writeFileSync(output_path + ".meta", metaContent, "utf-8");
+    import_fs5.writeFileSync(output_path + ".meta", metaContent, "utf-8");
   } catch (err) {
     try {
       const fs = require("fs");
@@ -4131,12 +4150,12 @@ NativeFormatImporter:
 }
 function unpackPrefab(options) {
   const { file_path, prefab_instance, project_path } = options;
-  if (!import_fs4.existsSync(file_path)) {
+  if (!import_fs5.existsSync(file_path)) {
     return { success: false, file_path, error: `File not found: ${file_path}` };
   }
   let content;
   try {
-    content = import_fs4.readFileSync(file_path, "utf-8");
+    content = import_fs5.readFileSync(file_path, "utf-8");
   } catch (err) {
     return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -4178,9 +4197,9 @@ function unpackPrefab(options) {
   let sourcePrefabPath = null;
   if (project_path) {
     const cachePath = path.join(project_path, ".unity-agentic", "guid-cache.json");
-    if (import_fs4.existsSync(cachePath)) {
+    if (import_fs5.existsSync(cachePath)) {
       try {
-        const cache = JSON.parse(import_fs4.readFileSync(cachePath, "utf-8"));
+        const cache = JSON.parse(import_fs5.readFileSync(cachePath, "utf-8"));
         if (cache[sourcePrefabGuid]) {
           const cachedPath = cache[sourcePrefabGuid];
           sourcePrefabPath = path.isAbsolute(cachedPath) ? cachedPath : path.join(project_path, cachedPath);
@@ -4188,12 +4207,12 @@ function unpackPrefab(options) {
       } catch {}
     }
   }
-  if (!sourcePrefabPath || !import_fs4.existsSync(sourcePrefabPath)) {
+  if (!sourcePrefabPath || !import_fs5.existsSync(sourcePrefabPath)) {
     return { success: false, file_path, error: `Could not resolve source prefab with GUID ${sourcePrefabGuid}. Provide --project path with GUID cache.` };
   }
   let prefabContent;
   try {
-    prefabContent = import_fs4.readFileSync(sourcePrefabPath, "utf-8");
+    prefabContent = import_fs5.readFileSync(sourcePrefabPath, "utf-8");
   } catch (err) {
     return { success: false, file_path, error: `Failed to read source prefab: ${err instanceof Error ? err.message : String(err)}` };
   }
@@ -4331,7 +4350,1624 @@ function unpackPrefab(options) {
     root_game_object_id: newRootGoId
   };
 }
+function isAncestor(content, childTransformId, candidateAncestorTransformId) {
+  const blocks = content.split(/(?=--- !u!)/);
+  let currentId = candidateAncestorTransformId;
+  const visited = new Set;
+  while (currentId !== 0) {
+    if (currentId === childTransformId)
+      return true;
+    if (visited.has(currentId))
+      return false;
+    visited.add(currentId);
+    const pattern = new RegExp(`^--- !u!4 &${currentId}\\b`);
+    let fatherId = 0;
+    for (const block of blocks) {
+      if (pattern.test(block)) {
+        const fatherMatch = block.match(/m_Father:\s*\{fileID:\s*(\d+)\}/);
+        if (fatherMatch) {
+          fatherId = parseInt(fatherMatch[1], 10);
+        }
+        break;
+      }
+    }
+    currentId = fatherId;
+  }
+  return false;
+}
+function reparentGameObject(options) {
+  const { file_path, object_name, new_parent } = options;
+  if (!import_fs5.existsSync(file_path)) {
+    return { success: false, file_path, error: `File not found: ${file_path}` };
+  }
+  let content;
+  try {
+    content = import_fs5.readFileSync(file_path, "utf-8");
+  } catch (err) {
+    return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const childTransformId = findTransformIdByName(content, object_name);
+  if (childTransformId === null) {
+    return { success: false, file_path, error: `GameObject "${object_name}" not found` };
+  }
+  const blocks = content.split(/(?=--- !u!)/);
+  const childTransformPattern = new RegExp(`^--- !u!4 &${childTransformId}\\b`);
+  let oldParentTransformId = 0;
+  for (const block of blocks) {
+    if (childTransformPattern.test(block)) {
+      const fatherMatch = block.match(/m_Father:\s*\{fileID:\s*(\d+)\}/);
+      if (fatherMatch) {
+        oldParentTransformId = parseInt(fatherMatch[1], 10);
+      }
+      break;
+    }
+  }
+  let newParentTransformId = 0;
+  if (new_parent.toLowerCase() !== "root") {
+    const foundId = findTransformIdByName(content, new_parent);
+    if (foundId === null) {
+      return { success: false, file_path, error: `New parent GameObject "${new_parent}" not found` };
+    }
+    newParentTransformId = foundId;
+    if (newParentTransformId === childTransformId) {
+      return { success: false, file_path, error: "Cannot reparent a GameObject under itself" };
+    }
+    if (isAncestor(content, childTransformId, newParentTransformId)) {
+      return { success: false, file_path, error: "Cannot reparent: would create circular hierarchy" };
+    }
+  }
+  if (oldParentTransformId !== 0) {
+    content = removeChildFromParent(content, oldParentTransformId, childTransformId);
+  }
+  const fatherPattern = new RegExp(`(--- !u!4 &${childTransformId}\\b[\\s\\S]*?m_Father:\\s*)\\{fileID:\\s*\\d+\\}`);
+  content = content.replace(fatherPattern, `$1{fileID: ${newParentTransformId}}`);
+  if (newParentTransformId !== 0) {
+    content = addChildToParent(content, newParentTransformId, childTransformId);
+  }
+  if (!validateUnityYAML(content)) {
+    return { success: false, file_path, error: "Validation failed after reparent" };
+  }
+  const writeResult = atomicWrite(file_path, content);
+  if (!writeResult.success) {
+    return { success: false, file_path, error: writeResult.error };
+  }
+  return {
+    success: true,
+    file_path,
+    child_transform_id: childTransformId,
+    old_parent_transform_id: oldParentTransformId,
+    new_parent_transform_id: newParentTransformId
+  };
+}
+function createMetaFile(options) {
+  const { script_path } = options;
+  const metaPath = script_path + ".meta";
+  if (import_fs5.existsSync(metaPath)) {
+    return {
+      success: false,
+      meta_path: metaPath,
+      error: `.meta file already exists: ${metaPath}`
+    };
+  }
+  const guid = generateGuid();
+  const metaContent = `fileFormatVersion: 2
+guid: ${guid}
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+`;
+  try {
+    import_fs5.writeFileSync(metaPath, metaContent, "utf-8");
+  } catch (err) {
+    return {
+      success: false,
+      meta_path: metaPath,
+      error: `Failed to write .meta file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  return {
+    success: true,
+    meta_path: metaPath,
+    guid
+  };
+}
+function createScene(options) {
+  const { output_path, include_defaults, scene_guid } = options;
+  if (!output_path.endsWith(".unity")) {
+    return {
+      success: false,
+      output_path,
+      error: "Output path must have .unity extension"
+    };
+  }
+  const guid = scene_guid || generateGuid();
+  let yaml = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!29 &1
+OcclusionCullingSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_OcclusionBakeSettings:
+    smallestOccluder: 5
+    smallestHole: 0.25
+    backfaceThreshold: 100
+  m_SceneGUID: 00000000000000000000000000000000
+  m_OcclusionCullingData: {fileID: 0}
+--- !u!104 &2
+RenderSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 9
+  m_Fog: 0
+  m_FogColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+  m_FogMode: 3
+  m_FogDensity: 0.01
+  m_LinearFogStart: 0
+  m_LinearFogEnd: 300
+  m_AmbientSkyColor: {r: 0.212, g: 0.227, b: 0.259, a: 1}
+  m_AmbientEquatorColor: {r: 0.114, g: 0.125, b: 0.133, a: 1}
+  m_AmbientGroundColor: {r: 0.047, g: 0.043, b: 0.035, a: 1}
+  m_AmbientIntensity: 1
+  m_AmbientMode: 0
+  m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
+  m_SkyboxMaterial: {fileID: 10304, guid: 0000000000000000f000000000000000, type: 0}
+  m_HaloStrength: 0.5
+  m_FlareStrength: 1
+  m_FlareFadeSpeed: 3
+  m_HaloTexture: {fileID: 0}
+  m_SpotCookie: {fileID: 10001, guid: 0000000000000000e000000000000000, type: 0}
+  m_DefaultReflectionMode: 0
+  m_DefaultReflectionResolution: 128
+  m_ReflectionBounces: 1
+  m_ReflectionIntensity: 1
+  m_CustomReflection: {fileID: 0}
+  m_Sun: {fileID: 0}
+  m_IndirectSpecularColor: {r: 0.44657898, g: 0.4964133, b: 0.5748178, a: 1}
+  m_UseRadianceAmbientProbe: 0
+--- !u!157 &3
+LightmapSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 12
+  m_GIWorkflowMode: 1
+  m_GISettings:
+    serializedVersion: 2
+    m_BounceScale: 1
+    m_IndirectOutputScale: 1
+    m_AlbedoBoost: 1
+    m_EnvironmentLightingMode: 0
+    m_EnableBakedLightmaps: 1
+    m_EnableRealtimeLightmaps: 0
+  m_LightmapEditorSettings:
+    serializedVersion: 12
+    m_Resolution: 2
+    m_BakeResolution: 40
+    m_AtlasSize: 1024
+    m_AO: 0
+    m_AOMaxDistance: 1
+    m_CompAOExponent: 1
+    m_CompAOExponentDirect: 0
+    m_ExtractAmbientOcclusion: 0
+    m_Padding: 2
+    m_LightmapParameters: {fileID: 0}
+    m_LightmapsBakeMode: 1
+    m_TextureCompression: 1
+    m_FinalGather: 0
+    m_FinalGatherFiltering: 1
+    m_FinalGatherRayCount: 256
+    m_ReflectionCompression: 2
+    m_MixedBakeMode: 2
+    m_BakeBackend: 1
+    m_PVRSampling: 1
+    m_PVRDirectSampleCount: 32
+    m_PVRSampleCount: 512
+    m_PVRBounces: 2
+    m_PVREnvironmentSampleCount: 256
+    m_PVREnvironmentReferencePointCount: 2048
+    m_PVRFilteringMode: 1
+    m_PVRDenoiserTypeDirect: 1
+    m_PVRDenoiserTypeIndirect: 1
+    m_PVRDenoiserTypeAO: 1
+    m_PVRFilterTypeDirect: 0
+    m_PVRFilterTypeIndirect: 0
+    m_PVRFilterTypeAO: 0
+    m_PVREnvironmentMIS: 1
+    m_PVRCulling: 1
+    m_PVRFilteringGaussRadiusDirect: 1
+    m_PVRFilteringGaussRadiusIndirect: 5
+    m_PVRFilteringGaussRadiusAO: 2
+    m_PVRFilteringAtrousPositionSigmaDirect: 0.5
+    m_PVRFilteringAtrousPositionSigmaIndirect: 2
+    m_PVRFilteringAtrousPositionSigmaAO: 1
+    m_ExportTrainingData: 0
+    m_TrainingDataDestination: TrainingData
+    m_LightProbeSampleCountMultiplier: 4
+  m_LightingDataAsset: {fileID: 0}
+  m_LightingSettings: {fileID: 0}
+--- !u!196 &4
+NavMeshSettings:
+  serializedVersion: 2
+  m_ObjectHideFlags: 0
+  m_BuildSettings:
+    serializedVersion: 3
+    agentTypeID: 0
+    agentRadius: 0.5
+    agentHeight: 2
+    agentSlope: 45
+    agentClimb: 0.4
+    ledgeDropHeight: 0
+    maxJumpAcrossDistance: 0
+    minRegionArea: 2
+    manualCellSize: 0
+    cellSize: 0.16666667
+    manualTileSize: 0
+    tileSize: 256
+    buildHeightMesh: 0
+    maxJobWorkers: 0
+    preserveTilesOutsideBounds: 0
+    debug:
+      m_Flags: 0
+  m_NavMeshData: {fileID: 0}
+`;
+  if (include_defaults) {
+    yaml += `--- !u!1 &519420028
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 519420032}
+  - component: {fileID: 519420031}
+  - component: {fileID: 519420029}
+  m_Layer: 0
+  m_Name: Main Camera
+  m_TagString: MainCamera
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &519420032
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 519420028}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 1, z: -10}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!20 &519420031
+Camera:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 519420028}
+  m_Enabled: 1
+  serializedVersion: 2
+  m_ClearFlags: 1
+  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}
+  m_projectionMatrixMode: 1
+  m_GateFitMode: 2
+  m_FOVAxisMode: 0
+  m_Iso: 200
+  m_ShutterSpeed: 0.005
+  m_Aperture: 16
+  m_FocusDistance: 10
+  m_FocalLength: 50
+  m_BladeCount: 5
+  m_Curvature: {x: 2, y: 11}
+  m_BarrelClipping: 0.25
+  m_Anamorphism: 0
+  m_SensorSize: {x: 36, y: 24}
+  m_LensShift: {x: 0, y: 0}
+  m_NormalizedViewPortRect:
+    serializedVersion: 2
+    x: 0
+    y: 0
+    width: 1
+    height: 1
+  near clip plane: 0.3
+  far clip plane: 1000
+  field of view: 60
+  orthographic: 0
+  orthographic size: 5
+  m_Depth: -1
+  m_CullingMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_RenderingPath: -1
+  m_TargetTexture: {fileID: 0}
+  m_TargetDisplay: 0
+  m_TargetEye: 3
+  m_HDR: 1
+  m_AllowMSAA: 1
+  m_AllowDynamicResolution: 0
+  m_ForceIntoRT: 0
+  m_OcclusionCulling: 1
+  m_StereoConvergence: 10
+  m_StereoSeparation: 0.022
+--- !u!81 &519420029
+AudioListener:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 519420028}
+  m_Enabled: 1
+--- !u!1 &705507993
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 705507995}
+  - component: {fileID: 705507994}
+  m_Layer: 0
+  m_Name: Directional Light
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &705507995
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 705507993}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0.40821788, y: -0.23456968, z: 0.10938163, w: 0.8754261}
+  m_LocalPosition: {x: 0, y: 3, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 50, y: -30, z: 0}
+--- !u!108 &705507994
+Light:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 705507993}
+  m_Enabled: 1
+  serializedVersion: 10
+  m_Type: 1
+  m_Shape: 0
+  m_Color: {r: 1, g: 0.95686275, b: 0.8392157, a: 1}
+  m_Intensity: 1
+  m_Range: 10
+  m_SpotAngle: 30
+  m_InnerSpotAngle: 21.80208
+  m_CookieSize: 10
+  m_Shadows:
+    m_Type: 2
+    m_Resolution: -1
+    m_CustomResolution: -1
+    m_Strength: 1
+    m_Bias: 0.05
+    m_NormalBias: 0.4
+    m_NearPlane: 0.2
+    m_CullingMatrixOverride:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    m_UseCullingMatrixOverride: 0
+  m_Cookie: {fileID: 0}
+  m_DrawHalo: 0
+  m_Flare: {fileID: 0}
+  m_RenderMode: 0
+  m_CullingMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_RenderingLayerMask: 1
+  m_Lightmapping: 4
+  m_LightShadowCasterMode: 0
+  m_AreaSize: {x: 1, y: 1}
+  m_BounceIntensity: 1
+  m_ColorTemperature: 6570
+  m_UseColorTemperature: 0
+  m_BoundingSphereOverride: {x: 0, y: 0, z: 0, w: 0}
+  m_UseBoundingSphereOverride: 0
+  m_UseViewFrustumForShadowCasterCull: 1
+  m_ShadowRadius: 0
+  m_ShadowAngle: 0
+`;
+  }
+  try {
+    import_fs5.writeFileSync(output_path, yaml, "utf-8");
+  } catch (err) {
+    return {
+      success: false,
+      output_path,
+      error: `Failed to write scene file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const metaContent = `fileFormatVersion: 2
+guid: ${guid}
+DefaultImporter:
+  externalObjects: {}
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+`;
+  const metaPath = output_path + ".meta";
+  try {
+    import_fs5.writeFileSync(metaPath, metaContent, "utf-8");
+  } catch (err) {
+    try {
+      const fs = require("fs");
+      fs.unlinkSync(output_path);
+    } catch {}
+    return {
+      success: false,
+      output_path,
+      error: `Failed to write .meta file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  return {
+    success: true,
+    output_path,
+    scene_guid: guid,
+    meta_path: metaPath
+  };
+}
 
+// src/settings.ts
+var import_fs6 = require("fs");
+var path2 = __toESM(require("path"));
+function read_setting_file(file_path) {
+  return import_fs6.readFileSync(file_path, "utf-8").replace(/\r\n/g, `
+`);
+}
+var SETTING_ALIASES = {
+  tags: "TagManager",
+  tagmanager: "TagManager",
+  physics: "DynamicsManager",
+  dynamicsmanager: "DynamicsManager",
+  quality: "QualitySettings",
+  qualitysettings: "QualitySettings",
+  time: "TimeManager",
+  timemanager: "TimeManager",
+  input: "InputManager",
+  inputmanager: "InputManager",
+  audio: "AudioManager",
+  audiomanager: "AudioManager",
+  editor: "EditorSettings",
+  editorsettings: "EditorSettings",
+  graphics: "GraphicsSettings",
+  graphicssettings: "GraphicsSettings",
+  physics2d: "Physics2DSettings",
+  physics2dsettings: "Physics2DSettings",
+  player: "ProjectSettings",
+  projectsettings: "ProjectSettings",
+  navmesh: "NavMeshAreas",
+  navmeshareas: "NavMeshAreas"
+};
+function resolve_setting_name(setting) {
+  const lower = setting.toLowerCase();
+  return SETTING_ALIASES[lower] || setting;
+}
+function resolve_setting_path(project_path, setting) {
+  const canonical = resolve_setting_name(setting);
+  return path2.join(project_path, "ProjectSettings", `${canonical}.asset`);
+}
+function parse_tag_manager(content) {
+  const tags = [];
+  const layers = [];
+  const sorting_layers = [];
+  const tagsMatch = content.match(/tags:\s*\n((?:\s*-\s*.+\n)*)/);
+  if (tagsMatch) {
+    const tagLines = tagsMatch[1].matchAll(/^\s*-\s*(.+)$/gm);
+    for (const m of tagLines) {
+      tags.push(m[1].trim());
+    }
+  }
+  const layersMatch = content.match(/layers:\s*\n([\s\S]*?)(?=\s*m_SortingLayers:)/);
+  if (layersMatch) {
+    const layerLines = layersMatch[1].split(`
+`).filter((l) => l.match(/^\s*-/));
+    for (let i = 0;i < layerLines.length; i++) {
+      const nameMatch = layerLines[i].match(/^\s*-\s*(.*)$/);
+      const name = nameMatch ? nameMatch[1].trim() : "";
+      if (name) {
+        layers.push({ index: i, name });
+      }
+    }
+  }
+  const sortingMatch = content.match(/m_SortingLayers:\s*\n([\s\S]*?)(?=\n[^\s]|\n*$)/);
+  if (sortingMatch) {
+    const entryPattern = /- name:\s*(.+)\n\s*uniqueID:\s*(\d+)\n\s*locked:\s*(\d+)/g;
+    let m;
+    while ((m = entryPattern.exec(sortingMatch[1])) !== null) {
+      sorting_layers.push({
+        name: m[1].trim(),
+        unique_id: parseInt(m[2], 10),
+        locked: parseInt(m[3], 10)
+      });
+    }
+  }
+  return { tags, layers, sorting_layers };
+}
+function parse_dynamics_manager(content) {
+  const parse_vector = (str) => {
+    const m = str.match(/\{x:\s*([-\d.]+),\s*y:\s*([-\d.]+),\s*z:\s*([-\d.]+)\}/);
+    return m ? { x: parseFloat(m[1]), y: parseFloat(m[2]), z: parseFloat(m[3]) } : { x: 0, y: 0, z: 0 };
+  };
+  const get_float = (key) => {
+    const m = content.match(new RegExp(`${key}:\\s*([-\\d.]+)`));
+    return m ? parseFloat(m[1]) : 0;
+  };
+  const get_int = (key) => {
+    const m = content.match(new RegExp(`${key}:\\s*(\\d+)`));
+    return m ? parseInt(m[1], 10) : 0;
+  };
+  const gravity_match = content.match(/m_Gravity:\s*(\{[^}]+\})/);
+  const gravity = gravity_match ? parse_vector(gravity_match[1]) : { x: 0, y: -9.81, z: 0 };
+  return {
+    gravity,
+    default_contact_offset: get_float("m_DefaultContactOffset"),
+    default_solver_iterations: get_int("m_DefaultSolverIterations"),
+    default_solver_velocity_iterations: get_int("m_DefaultSolverVelocityIterations"),
+    bounce_threshold: get_float("m_BounceThreshold"),
+    sleep_threshold: get_float("m_SleepThreshold"),
+    queries_hit_triggers: get_int("m_QueriesHitTriggers") === 1,
+    auto_simulation: get_int("m_AutoSimulation") === 1
+  };
+}
+function parse_quality_settings(content) {
+  const current_match = content.match(/m_CurrentQuality:\s*(\d+)/);
+  const current_quality = current_match ? parseInt(current_match[1], 10) : 0;
+  const quality_levels = [];
+  const levels_section = content.match(/m_QualitySettings:\s*\n([\s\S]*?)(?=\n\s*m_PerPlatformDefaultQuality:|\n*$)/);
+  if (levels_section) {
+    const entries = levels_section[1].split(/\n\s*-\s*serializedVersion:\s*\d+\n/).filter((s) => s.trim());
+    for (const entry of entries) {
+      const get = (key) => {
+        const m = entry.match(new RegExp(`${key}:\\s*(.+)`));
+        return m ? m[1].trim() : "";
+      };
+      const name = get("name");
+      if (!name)
+        continue;
+      quality_levels.push({
+        name,
+        pixel_light_count: parseInt(get("pixelLightCount") || "0", 10),
+        shadows: parseInt(get("shadows") || "0", 10),
+        shadow_resolution: parseInt(get("shadowResolution") || "0", 10),
+        shadow_distance: parseFloat(get("shadowDistance") || "0"),
+        anti_aliasing: parseInt(get("antiAliasing") || "0", 10),
+        vsync_count: parseInt(get("vSyncCount") || "0", 10),
+        lod_bias: parseFloat(get("lodBias") || "0")
+      });
+    }
+  }
+  return { current_quality, quality_levels };
+}
+function parse_time_manager(content) {
+  const get_float = (key) => {
+    const m = content.match(new RegExp(`${key}:\\s*([-\\d.]+)`));
+    return m ? parseFloat(m[1]) : 0;
+  };
+  return {
+    fixed_timestep: get_float("Fixed Timestep"),
+    max_timestep: get_float("Maximum Allowed Timestep"),
+    time_scale: get_float("m_TimeScale"),
+    max_particle_timestep: get_float("Maximum Particle Timestep")
+  };
+}
+function parse_generic_asset(content) {
+  const result = {};
+  const lines = content.split(`
+`);
+  for (const line of lines) {
+    const match = line.match(/^\s{2}(\w[\w\s]*\w|\w+):\s*(.+)$/);
+    if (match) {
+      const key = match[1];
+      let value = match[2].trim();
+      if (/^-?\d+(\.\d+)?$/.test(value)) {
+        value = parseFloat(value);
+      } else if (value === "0" || value === "1") {
+        value = parseInt(value, 10);
+      }
+      result[key] = value;
+    }
+  }
+  return result;
+}
+function read_settings(options) {
+  const { project_path, setting } = options;
+  const file_path = resolve_setting_path(project_path, setting);
+  if (!import_fs6.existsSync(file_path)) {
+    return {
+      success: false,
+      project_path,
+      setting,
+      error: `Settings file not found: ${file_path}`
+    };
+  }
+  let content;
+  try {
+    content = read_setting_file(file_path);
+  } catch (err) {
+    return {
+      success: false,
+      project_path,
+      setting,
+      error: `Failed to read settings file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const canonical = resolve_setting_name(setting);
+  let data;
+  switch (canonical) {
+    case "TagManager":
+      data = parse_tag_manager(content);
+      break;
+    case "DynamicsManager":
+      data = parse_dynamics_manager(content);
+      break;
+    case "QualitySettings":
+      data = parse_quality_settings(content);
+      break;
+    case "TimeManager":
+      data = parse_time_manager(content);
+      break;
+    default:
+      data = parse_generic_asset(content);
+      break;
+  }
+  return {
+    success: true,
+    project_path,
+    setting: canonical,
+    file_path,
+    data
+  };
+}
+function edit_settings(options) {
+  const { project_path, setting, property, value } = options;
+  const file_path = resolve_setting_path(project_path, setting);
+  if (!import_fs6.existsSync(file_path)) {
+    return {
+      success: false,
+      project_path,
+      setting,
+      error: `Settings file not found: ${file_path}`
+    };
+  }
+  let content;
+  try {
+    content = read_setting_file(file_path);
+  } catch (err) {
+    return {
+      success: false,
+      project_path,
+      setting,
+      error: `Failed to read settings file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const propPattern = new RegExp(`(^\\s*${property}:\\s*)(.*)$`, "m");
+  if (!propPattern.test(content)) {
+    const prefixedPattern = new RegExp(`(^\\s*m_${property}:\\s*)(.*)$`, "m");
+    if (!prefixedPattern.test(content)) {
+      return {
+        success: false,
+        project_path,
+        setting,
+        error: `Property "${property}" not found in ${setting}`
+      };
+    }
+    content = content.replace(prefixedPattern, `$1${value}`);
+  } else {
+    content = content.replace(propPattern, `$1${value}`);
+  }
+  const result = atomicWrite(file_path, content);
+  if (!result.success) {
+    return {
+      success: false,
+      project_path,
+      setting,
+      error: result.error
+    };
+  }
+  return {
+    success: true,
+    project_path,
+    setting: resolve_setting_name(setting),
+    file_path,
+    bytes_written: result.bytes_written
+  };
+}
+function edit_tag(options) {
+  const { project_path, action, tag } = options;
+  const file_path = resolve_setting_path(project_path, "TagManager");
+  if (!import_fs6.existsSync(file_path)) {
+    return {
+      success: false,
+      project_path,
+      setting: "TagManager",
+      error: `TagManager not found: ${file_path}`
+    };
+  }
+  let content;
+  try {
+    content = read_setting_file(file_path);
+  } catch (err) {
+    return {
+      success: false,
+      project_path,
+      setting: "TagManager",
+      error: `Failed to read TagManager: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  if (action === "add") {
+    const existing = parse_tag_manager(content);
+    if (existing.tags.includes(tag)) {
+      return {
+        success: false,
+        project_path,
+        setting: "TagManager",
+        error: `Tag "${tag}" already exists`
+      };
+    }
+    content = content.replace(/(tags:\s*\n(?:\s*-\s*.+\n)*)/, `$1  - ${tag}
+`);
+  } else {
+    const tagPattern = new RegExp(`^\\s*-\\s*${tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$\\n?`, "m");
+    if (!tagPattern.test(content)) {
+      return {
+        success: false,
+        project_path,
+        setting: "TagManager",
+        error: `Tag "${tag}" not found`
+      };
+    }
+    content = content.replace(tagPattern, "");
+  }
+  const result = atomicWrite(file_path, content);
+  if (!result.success) {
+    return {
+      success: false,
+      project_path,
+      setting: "TagManager",
+      error: result.error
+    };
+  }
+  return {
+    success: true,
+    project_path,
+    setting: "TagManager",
+    file_path,
+    bytes_written: result.bytes_written
+  };
+}
+function edit_layer(options) {
+  const { project_path, index, name } = options;
+  const file_path = resolve_setting_path(project_path, "TagManager");
+  if (!import_fs6.existsSync(file_path)) {
+    return {
+      success: false,
+      project_path,
+      setting: "TagManager",
+      error: `TagManager not found: ${file_path}`
+    };
+  }
+  const RESERVED_LAYERS = {
+    0: "Default",
+    1: "TransparentFX",
+    2: "Ignore Raycast",
+    4: "Water",
+    5: "UI"
+  };
+  if (index < 0 || index > 31) {
+    return {
+      success: false,
+      project_path,
+      setting: "TagManager",
+      error: `Layer index must be between 0 and 31`
+    };
+  }
+  if (RESERVED_LAYERS[index]) {
+    return {
+      success: false,
+      project_path,
+      setting: "TagManager",
+      error: `Cannot modify reserved layer "${RESERVED_LAYERS[index]}" at index ${index}`
+    };
+  }
+  let content;
+  try {
+    content = read_setting_file(file_path);
+  } catch (err) {
+    return {
+      success: false,
+      project_path,
+      setting: "TagManager",
+      error: `Failed to read TagManager: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const layersMatch = content.match(/(layers:\s*\n)([\s\S]*?)(?=\s*m_SortingLayers:)/);
+  if (!layersMatch) {
+    return {
+      success: false,
+      project_path,
+      setting: "TagManager",
+      error: "Could not find layers section in TagManager"
+    };
+  }
+  const layerLines = layersMatch[2].split(`
+`).filter((l) => l.match(/^\s*-/));
+  if (index >= layerLines.length) {
+    return {
+      success: false,
+      project_path,
+      setting: "TagManager",
+      error: `Layer index ${index} is out of range (file has ${layerLines.length} layers)`
+    };
+  }
+  layerLines[index] = `  - ${name}`;
+  const newLayersSection = layerLines.join(`
+`) + `
+`;
+  content = content.replace(layersMatch[2], newLayersSection);
+  const result = atomicWrite(file_path, content);
+  if (!result.success) {
+    return {
+      success: false,
+      project_path,
+      setting: "TagManager",
+      error: result.error
+    };
+  }
+  return {
+    success: true,
+    project_path,
+    setting: "TagManager",
+    file_path,
+    bytes_written: result.bytes_written
+  };
+}
+function edit_sorting_layer(options) {
+  const { project_path, action, name } = options;
+  const file_path = resolve_setting_path(project_path, "TagManager");
+  if (!import_fs6.existsSync(file_path)) {
+    return {
+      success: false,
+      project_path,
+      setting: "TagManager",
+      error: `TagManager not found: ${file_path}`
+    };
+  }
+  let content;
+  try {
+    content = read_setting_file(file_path);
+  } catch (err) {
+    return {
+      success: false,
+      project_path,
+      setting: "TagManager",
+      error: `Failed to read TagManager: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  if (action === "add") {
+    const existing = parse_tag_manager(content);
+    if (existing.sorting_layers.some((sl) => sl.name === name)) {
+      return {
+        success: false,
+        project_path,
+        setting: "TagManager",
+        error: `Sorting layer "${name}" already exists`
+      };
+    }
+    const unique_id = Math.floor(Math.random() * 4294967295);
+    const newEntry = `  - name: ${name}
+    uniqueID: ${unique_id}
+    locked: 0
+`;
+    const sortingEnd = content.match(/(m_SortingLayers:\s*\n(?:\s+-\s+name:[\s\S]*?(?=\n[^\s]|\n*$)))/);
+    if (sortingEnd) {
+      content = content.replace(sortingEnd[1], sortingEnd[1] + newEntry);
+    } else {
+      content = content.trimEnd() + `
+` + newEntry;
+    }
+  } else {
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const slPattern = new RegExp(`\\s*-\\s*name:\\s*${escapedName}\\n\\s*uniqueID:\\s*\\d+\\n\\s*locked:\\s*\\d+\\n?`, "m");
+    if (!slPattern.test(content)) {
+      return {
+        success: false,
+        project_path,
+        setting: "TagManager",
+        error: `Sorting layer "${name}" not found`
+      };
+    }
+    content = content.replace(slPattern, `
+`);
+  }
+  const result = atomicWrite(file_path, content);
+  if (!result.success) {
+    return {
+      success: false,
+      project_path,
+      setting: "TagManager",
+      error: result.error
+    };
+  }
+  return {
+    success: true,
+    project_path,
+    setting: "TagManager",
+    file_path,
+    bytes_written: result.bytes_written
+  };
+}
+
+// src/project-search.ts
+var import_fs7 = require("fs");
+var path3 = __toESM(require("path"));
+var BINARY_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".bmp",
+  ".tga",
+  ".psd",
+  ".tif",
+  ".tiff",
+  ".fbx",
+  ".obj",
+  ".dae",
+  ".blend",
+  ".3ds",
+  ".max",
+  ".dll",
+  ".so",
+  ".dylib",
+  ".exe",
+  ".a",
+  ".lib",
+  ".mp3",
+  ".wav",
+  ".ogg",
+  ".aif",
+  ".aiff",
+  ".mp4",
+  ".mov",
+  ".avi",
+  ".wmv",
+  ".zip",
+  ".gz",
+  ".tar",
+  ".rar",
+  ".7z",
+  ".ttf",
+  ".otf",
+  ".woff",
+  ".woff2",
+  ".bank",
+  ".bytes",
+  ".db"
+]);
+var SKIP_DIRS = new Set(["Library", "Temp", "obj", "Logs", ".git", ".unity-agentic", "node_modules"]);
+function walk_project_files(project_path, extensions, exclude_dirs) {
+  const result = [];
+  const skipSet = new Set([...SKIP_DIRS, ...exclude_dirs || []]);
+  const extSet = new Set(extensions.map((e) => e.startsWith(".") ? e : `.${e}`));
+  function walk(dir) {
+    let entries;
+    try {
+      entries = import_fs7.readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path3.join(dir, entry);
+      let stat;
+      try {
+        stat = import_fs7.statSync(full);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory()) {
+        if (!skipSet.has(entry)) {
+          walk(full);
+        }
+      } else if (stat.isFile()) {
+        const ext = path3.extname(entry).toLowerCase();
+        if (extSet.has(ext)) {
+          result.push(full);
+        }
+      }
+    }
+  }
+  const assetsDir = path3.join(project_path, "Assets");
+  if (import_fs7.existsSync(assetsDir)) {
+    walk(assetsDir);
+  }
+  if (extSet.has(".asset")) {
+    const settingsDir = path3.join(project_path, "ProjectSettings");
+    if (import_fs7.existsSync(settingsDir)) {
+      walk(settingsDir);
+    }
+  }
+  return result;
+}
+function search_project(options) {
+  const {
+    project_path,
+    name,
+    component,
+    tag,
+    layer,
+    file_type = "all",
+    page_size = 50,
+    cursor = 0
+  } = options;
+  if (!import_fs7.existsSync(project_path)) {
+    return {
+      success: false,
+      project_path,
+      total_files_scanned: 0,
+      total_matches: 0,
+      cursor: 0,
+      truncated: false,
+      matches: [],
+      error: `Project path not found: ${project_path}`
+    };
+  }
+  if (!isNativeModuleAvailable()) {
+    return {
+      success: false,
+      project_path,
+      total_files_scanned: 0,
+      total_matches: 0,
+      cursor: 0,
+      truncated: false,
+      matches: [],
+      error: "Native scanner module not available. Run /initial-install first."
+    };
+  }
+  const extensions = [];
+  if (file_type === "scene" || file_type === "all")
+    extensions.push(".unity");
+  if (file_type === "prefab" || file_type === "all")
+    extensions.push(".prefab");
+  const files = walk_project_files(project_path, extensions);
+  const paginatedFiles = files.slice(cursor, cursor + page_size);
+  const truncated = cursor + page_size < files.length;
+  const next_cursor = truncated ? cursor + page_size : undefined;
+  const scanner = new UnityScanner;
+  const matches = [];
+  for (const file of paginatedFiles) {
+    try {
+      let gameObjects;
+      if (name) {
+        gameObjects = scanner.find_by_name(file, name, true);
+      } else {
+        if (component) {
+          gameObjects = scanner.scan_scene_with_components(file);
+        } else {
+          gameObjects = scanner.scan_scene_minimal(file);
+        }
+      }
+      for (const go of gameObjects) {
+        if (component) {
+          const goWithComps = go;
+          if (goWithComps.components) {
+            const hasComponent = goWithComps.components.some((c) => c.type.toLowerCase() === component.toLowerCase());
+            if (!hasComponent)
+              continue;
+          } else {
+            continue;
+          }
+        }
+        if (tag && go.tag !== tag)
+          continue;
+        if (layer !== undefined && go.layer !== layer)
+          continue;
+        const relPath = path3.relative(project_path, file);
+        const match = {
+          file: relPath,
+          game_object: go.name,
+          file_id: go.file_id,
+          tag: go.tag,
+          layer: go.layer
+        };
+        const goAny = go;
+        if (goAny.components) {
+          match.components = goAny.components.map((c) => c.type);
+        }
+        matches.push(match);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return {
+    success: true,
+    project_path,
+    total_files_scanned: paginatedFiles.length,
+    total_matches: matches.length,
+    cursor,
+    next_cursor,
+    truncated,
+    matches
+  };
+}
+function grep_project(options) {
+  const {
+    project_path,
+    pattern,
+    file_type = "all",
+    max_results = 100,
+    context_lines = 0
+  } = options;
+  if (!import_fs7.existsSync(project_path)) {
+    return {
+      success: false,
+      project_path,
+      pattern,
+      total_files_scanned: 0,
+      total_matches: 0,
+      truncated: false,
+      matches: [],
+      error: `Project path not found: ${project_path}`
+    };
+  }
+  let regex;
+  try {
+    regex = new RegExp(pattern, "i");
+  } catch (err) {
+    return {
+      success: false,
+      project_path,
+      pattern,
+      total_files_scanned: 0,
+      total_matches: 0,
+      truncated: false,
+      matches: [],
+      error: `Invalid regex pattern: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  const EXTENSION_MAP = {
+    cs: [".cs"],
+    yaml: [".yaml", ".yml"],
+    unity: [".unity"],
+    prefab: [".prefab"],
+    asset: [".asset"],
+    all: [".cs", ".unity", ".prefab", ".asset", ".yaml", ".yml", ".txt", ".json", ".xml", ".shader", ".cginc", ".hlsl", ".compute", ".asmdef", ".asmref"]
+  };
+  const extensions = EXTENSION_MAP[file_type] || EXTENSION_MAP.all;
+  const files = walk_project_files(project_path, extensions);
+  const matches = [];
+  let totalFilesScanned = 0;
+  let truncated = false;
+  for (const file of files) {
+    const ext = path3.extname(file).toLowerCase();
+    if (BINARY_EXTENSIONS.has(ext))
+      continue;
+    totalFilesScanned++;
+    let content;
+    try {
+      content = import_fs7.readFileSync(file, "utf-8");
+    } catch {
+      continue;
+    }
+    const lines = content.split(`
+`);
+    const relPath = path3.relative(project_path, file);
+    for (let i = 0;i < lines.length; i++) {
+      if (regex.test(lines[i])) {
+        let line = lines[i];
+        if (line.length > 200) {
+          line = line.substring(0, 200) + "...";
+        }
+        const match = {
+          file: relPath,
+          line_number: i + 1,
+          line
+        };
+        if (context_lines > 0) {
+          match.context_before = [];
+          match.context_after = [];
+          for (let j = Math.max(0, i - context_lines);j < i; j++) {
+            let ctxLine = lines[j];
+            if (ctxLine.length > 200)
+              ctxLine = ctxLine.substring(0, 200) + "...";
+            match.context_before.push(ctxLine);
+          }
+          for (let j = i + 1;j <= Math.min(lines.length - 1, i + context_lines); j++) {
+            let ctxLine = lines[j];
+            if (ctxLine.length > 200)
+              ctxLine = ctxLine.substring(0, 200) + "...";
+            match.context_after.push(ctxLine);
+          }
+        }
+        matches.push(match);
+        if (matches.length >= max_results) {
+          truncated = true;
+          break;
+        }
+      }
+    }
+    if (truncated)
+      break;
+  }
+  return {
+    success: true,
+    project_path,
+    pattern,
+    total_files_scanned: totalFilesScanned,
+    total_matches: matches.length,
+    truncated,
+    matches
+  };
+}
+
+// ../unity-build-settings/src/version.ts
+var fs = __toESM(require("fs"));
+var path4 = __toESM(require("path"));
+function parse_version(versionString) {
+  const match = versionString.match(/^(\d+)\.(\d+)\.(\d+)([abfp])(\d+)$/);
+  if (!match) {
+    throw new Error(`Invalid Unity version format: ${versionString}`);
+  }
+  return {
+    raw: versionString,
+    major: parseInt(match[1], 10),
+    minor: parseInt(match[2], 10),
+    patch: parseInt(match[3], 10),
+    releaseType: match[4],
+    revision: parseInt(match[5], 10)
+  };
+}
+function is_unity6_or_later(version) {
+  return version.major >= 6000;
+}
+function read_project_version(projectPath) {
+  const versionFile = path4.join(projectPath, "ProjectSettings", "ProjectVersion.txt");
+  if (!fs.existsSync(versionFile)) {
+    throw new Error(`ProjectVersion.txt not found at: ${versionFile}`);
+  }
+  const content = fs.readFileSync(versionFile, "utf-8").replace(/\r\n/g, `
+`);
+  const versionMatch = content.match(/m_EditorVersion:\s*(.+)/);
+  if (!versionMatch) {
+    throw new Error("Could not parse m_EditorVersion from ProjectVersion.txt");
+  }
+  const version = parse_version(versionMatch[1].trim());
+  const revisionMatch = content.match(/m_EditorVersionWithRevision:\s*(.+)/);
+  if (revisionMatch) {
+    version.fullRevision = revisionMatch[1].trim();
+  }
+  return version;
+}
+function has_build_profiles(projectPath) {
+  const profilesPath = path4.join(projectPath, "Assets", "Settings", "Build Profiles");
+  return {
+    exists: fs.existsSync(profilesPath),
+    path: profilesPath
+  };
+}
+function get_project_info(projectPath) {
+  const version = read_project_version(projectPath);
+  const buildProfiles = has_build_profiles(projectPath);
+  return {
+    projectPath,
+    version,
+    isUnity6OrLater: is_unity6_or_later(version),
+    hasBuildProfiles: buildProfiles.exists,
+    buildProfilesPath: buildProfiles.exists ? buildProfiles.path : undefined
+  };
+}
+// ../unity-build-settings/src/build-settings.ts
+var fs2 = __toESM(require("fs"));
+var path5 = __toESM(require("path"));
+function parse_editor_build_settings(filePath) {
+  if (!fs2.existsSync(filePath)) {
+    throw new Error(`EditorBuildSettings.asset not found: ${filePath}`);
+  }
+  const content = fs2.readFileSync(filePath, "utf-8").replace(/\r\n/g, `
+`);
+  const scenes = [];
+  const scenePattern = /-\s*enabled:\s*(\d+)\n\s+path:\s*([^\n]+)\n\s+guid:\s*([a-f0-9]+)/g;
+  let match;
+  let buildIndex = 0;
+  while ((match = scenePattern.exec(content)) !== null) {
+    const enabled = match[1] === "1";
+    const scenePath = match[2].trim();
+    const guid = match[3].trim();
+    if (scenePath) {
+      scenes.push({
+        enabled,
+        path: scenePath,
+        guid,
+        buildIndex: enabled ? buildIndex++ : -1
+      });
+    }
+  }
+  return { scenes };
+}
+function parse_build_profile(filePath) {
+  if (!fs2.existsSync(filePath)) {
+    throw new Error(`Build profile not found: ${filePath}`);
+  }
+  const content = fs2.readFileSync(filePath, "utf-8");
+  const name = path5.basename(filePath, ".asset");
+  const profile = {
+    name,
+    path: filePath
+  };
+  const platformMatch = content.match(/m_BuildTarget:\s*(\d+)/);
+  if (platformMatch) {
+    profile.platform = get_platform_name(parseInt(platformMatch[1], 10));
+  }
+  const definesMatch = content.match(/m_ScriptingDefines:\s*([^\n]+)/);
+  if (definesMatch && definesMatch[1].trim()) {
+    profile.scriptingDefines = definesMatch[1].trim().split(";").filter((d) => d);
+  }
+  const scenes = [];
+  const scenePattern = /-\s*enabled:\s*(\d+)\n\s+path:\s*([^\n]+)\n\s+guid:\s*([a-f0-9]+)/g;
+  let match;
+  let buildIndex = 0;
+  while ((match = scenePattern.exec(content)) !== null) {
+    const enabled = match[1] === "1";
+    const scenePath = match[2].trim();
+    const guid = match[3].trim();
+    if (scenePath) {
+      scenes.push({
+        enabled,
+        path: scenePath,
+        guid,
+        buildIndex: enabled ? buildIndex++ : -1
+      });
+    }
+  }
+  if (scenes.length > 0) {
+    profile.scenes = scenes;
+  }
+  return profile;
+}
+function get_platform_name(buildTarget) {
+  const platforms = {
+    1: "StandaloneOSX",
+    2: "StandaloneWindows",
+    5: "iOS",
+    9: "Android",
+    13: "StandaloneWindows64",
+    19: "WebGL",
+    21: "StandaloneLinux64",
+    24: "PS4",
+    25: "XboxOne",
+    27: "tvOS",
+    31: "Switch",
+    38: "PS5"
+  };
+  return platforms[buildTarget] || `Unknown(${buildTarget})`;
+}
+function list_build_profiles(projectPath) {
+  const profilesPath = path5.join(projectPath, "Assets", "Settings", "Build Profiles");
+  if (!fs2.existsSync(profilesPath)) {
+    return [];
+  }
+  const profiles = [];
+  const files = fs2.readdirSync(profilesPath);
+  for (const file of files) {
+    if (file.endsWith(".asset")) {
+      const filePath = path5.join(profilesPath, file);
+      try {
+        profiles.push(parse_build_profile(filePath));
+      } catch (e) {}
+    }
+  }
+  return profiles;
+}
+function get_build_settings(projectPath) {
+  const projectInfo = get_project_info(projectPath);
+  const editorBuildSettingsPath = path5.join(projectPath, "ProjectSettings", "EditorBuildSettings.asset");
+  const editorBuildSettings = parse_editor_build_settings(editorBuildSettingsPath);
+  const buildProfiles = list_build_profiles(projectPath);
+  return {
+    projectInfo,
+    editorBuildSettings,
+    buildProfiles
+  };
+}
+// ../unity-build-settings/src/editor.ts
+var fs3 = __toESM(require("fs"));
+var path6 = __toESM(require("path"));
+function get_build_settings_path(projectPath) {
+  return path6.join(projectPath, "ProjectSettings", "EditorBuildSettings.asset");
+}
+function read_build_settings_content(projectPath) {
+  const filePath = get_build_settings_path(projectPath);
+  if (!fs3.existsSync(filePath)) {
+    throw new Error(`EditorBuildSettings.asset not found: ${filePath}`);
+  }
+  return fs3.readFileSync(filePath, "utf-8").replace(/\r\n/g, `
+`);
+}
+function scene_to_yaml(scene) {
+  return `  - enabled: ${scene.enabled ? 1 : 0}
+    path: ${scene.path}
+    guid: ${scene.guid}`;
+}
+function write_scenes(projectPath, scenes) {
+  const filePath = get_build_settings_path(projectPath);
+  const content = read_build_settings_content(projectPath);
+  const scenesYaml = scenes.map(scene_to_yaml).join(`
+`);
+  const newContent = content.replace(/m_Scenes:[\s\S]*?(?=\s+m_configObjects:|$)/, `m_Scenes:
+${scenesYaml}
+  `);
+  const tempPath = filePath + ".tmp";
+  fs3.writeFileSync(tempPath, newContent, "utf-8");
+  fs3.renameSync(tempPath, filePath);
+}
+function get_scene_guid(projectPath, scenePath) {
+  const fullPath = path6.join(projectPath, scenePath);
+  const metaPath = fullPath + ".meta";
+  if (!fs3.existsSync(metaPath)) {
+    return null;
+  }
+  const content = fs3.readFileSync(metaPath, "utf-8");
+  const match = content.match(/guid:\s*([a-f0-9]+)/);
+  return match ? match[1] : null;
+}
+function add_scene(projectPath, scenePath, options) {
+  const enabled = options?.enabled ?? true;
+  const position = options?.position;
+  const fullScenePath = path6.join(projectPath, scenePath);
+  if (!fs3.existsSync(fullScenePath)) {
+    return { success: false, message: `Scene file not found: ${scenePath}` };
+  }
+  const guid = get_scene_guid(projectPath, scenePath);
+  if (!guid) {
+    return { success: false, message: `Could not find GUID for scene: ${scenePath}. Missing .meta file?` };
+  }
+  const buildSettingsPath = get_build_settings_path(projectPath);
+  const current = parse_editor_build_settings(buildSettingsPath);
+  if (current.scenes.some((s) => s.path === scenePath)) {
+    return { success: false, message: `Scene already in build settings: ${scenePath}` };
+  }
+  const newScene = { enabled, path: scenePath, guid };
+  const scenes = current.scenes.map((s) => ({
+    enabled: s.enabled,
+    path: s.path,
+    guid: s.guid || ""
+  }));
+  if (position !== undefined && position >= 0 && position <= scenes.length) {
+    scenes.splice(position, 0, newScene);
+  } else {
+    scenes.push(newScene);
+  }
+  write_scenes(projectPath, scenes);
+  const updated = parse_editor_build_settings(buildSettingsPath);
+  return {
+    success: true,
+    message: `Added scene: ${scenePath}`,
+    scenes: updated.scenes
+  };
+}
+function remove_scene(projectPath, scenePath) {
+  const buildSettingsPath = get_build_settings_path(projectPath);
+  const current = parse_editor_build_settings(buildSettingsPath);
+  const sceneIndex = current.scenes.findIndex((s) => s.path === scenePath);
+  if (sceneIndex === -1) {
+    return { success: false, message: `Scene not found in build settings: ${scenePath}` };
+  }
+  const scenes = current.scenes.filter((s) => s.path !== scenePath).map((s) => ({
+    enabled: s.enabled,
+    path: s.path,
+    guid: s.guid || ""
+  }));
+  write_scenes(projectPath, scenes);
+  const updated = parse_editor_build_settings(buildSettingsPath);
+  return {
+    success: true,
+    message: `Removed scene: ${scenePath}`,
+    scenes: updated.scenes
+  };
+}
+function enable_scene(projectPath, scenePath) {
+  return set_scene_enabled(projectPath, scenePath, true);
+}
+function disable_scene(projectPath, scenePath) {
+  return set_scene_enabled(projectPath, scenePath, false);
+}
+function set_scene_enabled(projectPath, scenePath, enabled) {
+  const buildSettingsPath = get_build_settings_path(projectPath);
+  const current = parse_editor_build_settings(buildSettingsPath);
+  const sceneIndex = current.scenes.findIndex((s) => s.path === scenePath);
+  if (sceneIndex === -1) {
+    return { success: false, message: `Scene not found in build settings: ${scenePath}` };
+  }
+  const scene = current.scenes[sceneIndex];
+  if (scene.enabled === enabled) {
+    return {
+      success: true,
+      message: `Scene already ${enabled ? "enabled" : "disabled"}: ${scenePath}`,
+      scenes: current.scenes
+    };
+  }
+  const scenes = current.scenes.map((s) => ({
+    enabled: s.path === scenePath ? enabled : s.enabled,
+    path: s.path,
+    guid: s.guid || ""
+  }));
+  write_scenes(projectPath, scenes);
+  const updated = parse_editor_build_settings(buildSettingsPath);
+  return {
+    success: true,
+    message: `${enabled ? "Enabled" : "Disabled"} scene: ${scenePath}`,
+    scenes: updated.scenes
+  };
+}
+function move_scene(projectPath, scenePath, newPosition) {
+  const buildSettingsPath = get_build_settings_path(projectPath);
+  const current = parse_editor_build_settings(buildSettingsPath);
+  const sceneIndex = current.scenes.findIndex((s) => s.path === scenePath);
+  if (sceneIndex === -1) {
+    return { success: false, message: `Scene not found in build settings: ${scenePath}` };
+  }
+  if (newPosition < 0 || newPosition >= current.scenes.length) {
+    return {
+      success: false,
+      message: `Invalid position: ${newPosition}. Must be 0-${current.scenes.length - 1}`
+    };
+  }
+  if (sceneIndex === newPosition) {
+    return {
+      success: true,
+      message: `Scene already at position ${newPosition}: ${scenePath}`,
+      scenes: current.scenes
+    };
+  }
+  const scenes = current.scenes.map((s) => ({
+    enabled: s.enabled,
+    path: s.path,
+    guid: s.guid || ""
+  }));
+  const [movedScene] = scenes.splice(sceneIndex, 1);
+  scenes.splice(newPosition, 0, movedScene);
+  write_scenes(projectPath, scenes);
+  const updated = parse_editor_build_settings(buildSettingsPath);
+  return {
+    success: true,
+    message: `Moved scene to position ${newPosition}: ${scenePath}`,
+    scenes: updated.scenes
+  };
+}
 // src/cli.ts
 var __dirname = "/Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src";
 var { exec } = require("child_process");
@@ -4353,18 +5989,18 @@ function getScanner() {
   return _scanner;
 }
 program.name("unity-yaml").description("Fast, token-efficient Unity YAML parser").version("1.0.0");
-program.command("list <file>").description("List GameObject hierarchy in Unity file").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, options) => {
-  const result = getScanner().scan_scene_with_components(file, { verbose: options.verbose });
-  const prefabCount = result.filter((r) => r.type === "PrefabInstance").length;
-  const output = {
+program.command("list <file>").description("List GameObject hierarchy in Unity file").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").option("--page-size <n>", "Max objects per page (default 200, max 1000)", "200").option("--cursor <n>", "Start offset for pagination (default 0)", "0").option("--max-depth <n>", "Max hierarchy depth (default 10, max 50)", "10").action((file, options) => {
+  const pageSize = Math.min(parseInt(options.pageSize, 10) || 200, 1000);
+  const cursor = parseInt(options.cursor, 10) || 0;
+  const maxDepth = Math.min(parseInt(options.maxDepth, 10) || 10, 50);
+  const result = getScanner().inspect_all_paginated({
     file,
-    count: result.length,
-    objects: result
-  };
-  if (prefabCount > 0) {
-    output.prefab_instance_count = prefabCount;
-  }
-  console.log(JSON.stringify(output, null, 2));
+    verbose: options.verbose === true,
+    page_size: pageSize,
+    cursor,
+    max_depth: maxDepth
+  });
+  console.log(JSON.stringify(result, null, 2));
 });
 program.command("find <file> <pattern>").description("Find GameObjects by name pattern").option("-e, --exact", "Use exact matching").option("-j, --json", "Output as JSON").action((file, pattern, options) => {
   const fuzzy = options.exact !== true;
@@ -4398,9 +6034,16 @@ program.command("get <file> <object_id>").description("Get GameObject details by
   }
   console.log(JSON.stringify({ file, object: result }, null, 2));
 });
-program.command("inspect <file> [identifier]").description("Inspect Unity file or specific GameObject").option("-p, --properties", "Include component properties").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, identifier, options) => {
+program.command("inspect <file> [identifier]").description("Inspect Unity file or specific GameObject").option("-p, --properties", "Include component properties").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").option("--page-size <n>", "Max objects per page when no identifier (default 200)").option("--cursor <n>", "Start offset for pagination (default 0)").option("--max-depth <n>", "Max hierarchy depth (default 10)").action((file, identifier, options) => {
   if (!identifier) {
-    const result2 = getScanner().inspect_all(file, options.properties === true, options.verbose === true);
+    const result2 = getScanner().inspect_all_paginated({
+      file,
+      include_properties: options.properties === true,
+      verbose: options.verbose === true,
+      page_size: options.pageSize ? Math.min(parseInt(options.pageSize, 10), 1000) : undefined,
+      cursor: options.cursor ? parseInt(options.cursor, 10) : undefined,
+      max_depth: options.maxDepth ? Math.min(parseInt(options.maxDepth, 10), 50) : undefined
+    });
     console.log(JSON.stringify(result2, null, 2));
     return;
   }
@@ -4416,8 +6059,15 @@ program.command("inspect <file> [identifier]").description("Inspect Unity file o
   }
   console.log(JSON.stringify(result, null, 2));
 });
-program.command("inspect-all <file>").description("Inspect entire Unity file with all details").option("-p, --properties", "Include component properties").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, options) => {
-  const result = getScanner().inspect_all(file, options.properties === true, options.verbose === true);
+program.command("inspect-all <file>").description("Inspect entire Unity file with all details").option("-p, --properties", "Include component properties").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").option("--page-size <n>", "Max objects per page (default 200, max 1000)").option("--cursor <n>", "Start offset for pagination (default 0)").option("--max-depth <n>", "Max hierarchy depth (default 10, max 50)").action((file, options) => {
+  const result = getScanner().inspect_all_paginated({
+    file,
+    include_properties: options.properties === true,
+    verbose: options.verbose === true,
+    page_size: options.pageSize ? Math.min(parseInt(options.pageSize, 10), 1000) : undefined,
+    cursor: options.cursor ? parseInt(options.cursor, 10) : undefined,
+    max_depth: options.maxDepth ? Math.min(parseInt(options.maxDepth, 10), 50) : undefined
+  });
   console.log(JSON.stringify(result, null, 2));
 });
 program.command("edit <file> <object_name> <property> <value>").description("Edit GameObject property value safely").option("-j, --json", "Output as JSON").action((file, object_name, property, value, _options) => {
@@ -4469,7 +6119,7 @@ program.command("add-component <file> <object_name> <component>").description("A
   });
   console.log(JSON.stringify(result, null, 2));
 });
-program.command("edit-component <file> <file_id> <property> <value>").description("Edit any component property by file ID (works with any Unity class type)").option("-j, --json", "Output as JSON").action((file, file_id, property, value, _options) => {
+program.command("edit-component <file> <file_id> <property> <value>").description("Edit any component property by file ID. Supports dotted paths (m_LocalPosition.x) and array paths (m_Materials.Array.data[0])").option("-j, --json", "Output as JSON").action((file, file_id, property, value, _options) => {
   const result = editComponentByFileId({
     file_path: file,
     file_id,
@@ -4532,8 +6182,104 @@ program.command("unpack-prefab <file> <prefab_instance>").description("Unpack a 
   });
   console.log(JSON.stringify(result, null, 2));
 });
+program.command("reparent <file> <object_name> <new_parent>").description('Move a GameObject under a new parent. Use "root" to move to scene root').option("-j, --json", "Output as JSON").action((file, object_name, new_parent, _options) => {
+  const result = reparentGameObject({
+    file_path: file,
+    object_name,
+    new_parent
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("create-meta <script_path>").description("Generate a Unity .meta file for a script (MonoImporter)").option("-j, --json", "Output as JSON").action((script_path, _options) => {
+  const result = createMetaFile({
+    script_path
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("read-settings <project_path>").description("Read Unity project settings (TagManager, DynamicsManager, QualitySettings, TimeManager, etc.)").option("-s, --setting <name>", "Setting name or alias (tags, physics, quality, time)", "TagManager").option("-j, --json", "Output as JSON").action((project_path, options) => {
+  const result = read_settings({
+    project_path,
+    setting: options.setting
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("edit-settings <project_path>").description("Edit a property in any ProjectSettings/*.asset file").option("-s, --setting <name>", "Setting name or alias").option("--property <name>", "Property name to edit").option("--value <value>", "New value").option("-j, --json", "Output as JSON").action((project_path, options) => {
+  if (!options.setting || !options.property || !options.value) {
+    console.error(JSON.stringify({ success: false, error: "Required: --setting, --property, --value" }, null, 2));
+    process.exit(1);
+  }
+  const result = edit_settings({
+    project_path,
+    setting: options.setting,
+    property: options.property,
+    value: options.value
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("edit-tag <project_path> <action> <tag>").description("Add or remove a tag in the TagManager").option("-j, --json", "Output as JSON").action((project_path, action, tag, _options) => {
+  if (action !== "add" && action !== "remove") {
+    console.error(JSON.stringify({ success: false, error: 'Action must be "add" or "remove"' }, null, 2));
+    process.exit(1);
+  }
+  const result = edit_tag({
+    project_path,
+    action,
+    tag
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("edit-layer <project_path> <index> <name>").description("Set a named layer at a specific index (3-31)").option("-j, --json", "Output as JSON").action((project_path, index, name, _options) => {
+  const result = edit_layer({
+    project_path,
+    index: parseInt(index, 10),
+    name
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("edit-sorting-layer <project_path> <action> <name>").description("Add or remove a sorting layer").option("-j, --json", "Output as JSON").action((project_path, action, name, _options) => {
+  if (action !== "add" && action !== "remove") {
+    console.error(JSON.stringify({ success: false, error: 'Action must be "add" or "remove"' }, null, 2));
+    process.exit(1);
+  }
+  const result = edit_sorting_layer({
+    project_path,
+    action,
+    name
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("create-scene <output_path>").description("Create a new Unity scene file with required global blocks").option("-d, --defaults", "Include default Main Camera and Directional Light").option("-j, --json", "Output as JSON").action((output_path, options) => {
+  const result = createScene({
+    output_path,
+    include_defaults: options.defaults === true
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("search <project_path>").description("Search across all scene/prefab files in a Unity project").option("-n, --name <pattern>", "Search by GameObject name (supports wildcards)").option("-c, --component <type>", "Filter by component type").option("-t, --tag <tag>", "Filter by tag").option("-l, --layer <index>", "Filter by layer index").option("--type <type>", "File type filter: scene, prefab, all", "all").option("--page-size <n>", "Max files per page", "50").option("--cursor <n>", "Start offset for pagination", "0").option("-j, --json", "Output as JSON").action((project_path, options) => {
+  const result = search_project({
+    project_path,
+    name: options.name,
+    component: options.component,
+    tag: options.tag,
+    layer: options.layer !== undefined ? parseInt(options.layer, 10) : undefined,
+    file_type: options.type,
+    page_size: parseInt(options.pageSize, 10) || 50,
+    cursor: parseInt(options.cursor, 10) || 0
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("grep <project_path> <pattern>").description("Search for a regex pattern across project files").option("--type <type>", "File type filter: cs, yaml, unity, prefab, asset, all", "all").option("-m, --max <n>", "Max results", "100").option("-C, --context <n>", "Context lines around matches", "0").option("-j, --json", "Output as JSON").action((project_path, pattern, options) => {
+  const result = grep_project({
+    project_path,
+    pattern,
+    file_type: options.type,
+    max_results: parseInt(options.max, 10) || 100,
+    context_lines: parseInt(options.context, 10) || 0
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
 program.command("search-docs <query>").description("Search Unity documentation").option("--summarize", "-s", "Summarize results").option("--compress", "-c", "Compress results").option("-j, --json", "Output as JSON").action((query, options) => {
-  const docIndexerPath = path2.join(__dirname, "..", "..", "doc-indexer", "dist", "cli.js");
+  const docIndexerPath = path7.join(__dirname, "..", "..", "doc-indexer", "dist", "cli.js");
   const args = [docIndexerPath, "search", query];
   if (options.summarize)
     args.push("-s");
@@ -4550,7 +6296,7 @@ program.command("search-docs <query>").description("Search Unity documentation")
   });
 });
 program.command("index-docs <path>").description("Index Unity documentation").action((pathArg) => {
-  const docIndexerPath = path2.join(__dirname, "..", "..", "doc-indexer", "dist", "cli.js");
+  const docIndexerPath = path7.join(__dirname, "..", "..", "doc-indexer", "dist", "cli.js");
   const args = [docIndexerPath, "index", pathArg];
   exec(`bun ${args.join(" ")}`, (error, stdout, _stderr) => {
     if (error) {
@@ -4559,6 +6305,62 @@ program.command("index-docs <path>").description("Index Unity documentation").ac
     }
     console.log(stdout);
   });
+});
+program.command("build-settings <project_path>").description("Read build settings (scene list, build profiles)").option("-j, --json", "Output as JSON").action((project_path, _options) => {
+  try {
+    const result = get_build_settings(project_path);
+    console.log(JSON.stringify(result, null, 2));
+  } catch (err) {
+    console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+  }
+});
+program.command("build-add-scene <project_path> <scene_path>").description("Add a scene to build settings").option("-j, --json", "Output as JSON").action((project_path, scene_path, _options) => {
+  try {
+    const result = add_scene(project_path, scene_path);
+    console.log(JSON.stringify(result, null, 2));
+  } catch (err) {
+    console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+  }
+});
+program.command("build-remove-scene <project_path> <scene_path>").description("Remove a scene from build settings").option("-j, --json", "Output as JSON").action((project_path, scene_path, _options) => {
+  try {
+    const result = remove_scene(project_path, scene_path);
+    console.log(JSON.stringify(result, null, 2));
+  } catch (err) {
+    console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+  }
+});
+program.command("build-enable-scene <project_path> <scene_path>").description("Enable a scene in build settings").option("-j, --json", "Output as JSON").action((project_path, scene_path, _options) => {
+  try {
+    const result = enable_scene(project_path, scene_path);
+    console.log(JSON.stringify(result, null, 2));
+  } catch (err) {
+    console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+  }
+});
+program.command("build-disable-scene <project_path> <scene_path>").description("Disable a scene in build settings").option("-j, --json", "Output as JSON").action((project_path, scene_path, _options) => {
+  try {
+    const result = disable_scene(project_path, scene_path);
+    console.log(JSON.stringify(result, null, 2));
+  } catch (err) {
+    console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+  }
+});
+program.command("build-move-scene <project_path> <scene_path> <new_index>").description("Move a scene to a new position in build settings").option("-j, --json", "Output as JSON").action((project_path, scene_path, new_index, _options) => {
+  try {
+    const result = move_scene(project_path, scene_path, parseInt(new_index, 10));
+    console.log(JSON.stringify(result, null, 2));
+  } catch (err) {
+    console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+  }
+});
+program.command("project-version <project_path>").description("Read Unity project version").option("-j, --json", "Output as JSON").action((project_path, _options) => {
+  try {
+    const version = read_project_version(project_path);
+    console.log(JSON.stringify(version, null, 2));
+  } catch (err) {
+    console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+  }
 });
 program.command("setup").description("Set up unity-agentic tools for a Unity project").option("-p, --project <path>", "Path to Unity project (defaults to current directory)").option("--index-docs", "Also create documentation index").action((options) => {
   const result = setup({
@@ -4578,19 +6380,19 @@ program.command("cleanup").description("Clean up unity-agentic files from a Unit
   console.log(JSON.stringify(result, null, 2));
 });
 program.command("status").description("Show current configuration and status").option("-p, --project <path>", "Path to Unity project (defaults to current directory)").action((options) => {
-  const projectPath = path2.resolve(options.project || process.cwd());
-  const configPath = path2.join(projectPath, ".unity-agentic");
-  const configFile = path2.join(configPath, "config.json");
+  const projectPath = path7.resolve(options.project || process.cwd());
+  const configPath = path7.join(projectPath, ".unity-agentic");
+  const configFile = path7.join(configPath, "config.json");
   let config = null;
   let guidCacheCount = 0;
   try {
-    const { existsSync: existsSync5, readFileSync: readFileSync3 } = require("fs");
-    if (existsSync5(configFile)) {
-      config = JSON.parse(readFileSync3(configFile, "utf-8"));
+    const { existsSync: existsSync11, readFileSync: readFileSync8 } = require("fs");
+    if (existsSync11(configFile)) {
+      config = JSON.parse(readFileSync8(configFile, "utf-8"));
     }
-    const guidCachePath = path2.join(configPath, "guid-cache.json");
-    if (existsSync5(guidCachePath)) {
-      const guidCache = JSON.parse(readFileSync3(guidCachePath, "utf-8"));
+    const guidCachePath = path7.join(configPath, "guid-cache.json");
+    if (existsSync11(guidCachePath)) {
+      const guidCache = JSON.parse(readFileSync8(guidCachePath, "utf-8"));
       guidCacheCount = Object.keys(guidCache).length;
     }
   } catch {}

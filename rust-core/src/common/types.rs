@@ -90,6 +90,39 @@ pub struct InspectOptions {
     pub verbose: Option<bool>,
 }
 
+/// Pagination options for inspect_all
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct PaginationOptions {
+    pub file: String,
+    #[napi(ts_type = "boolean | undefined")]
+    pub include_properties: Option<bool>,
+    #[napi(ts_type = "boolean | undefined")]
+    pub verbose: Option<bool>,
+    #[napi(ts_type = "number | undefined")]
+    pub page_size: Option<u32>,
+    #[napi(ts_type = "number | undefined")]
+    pub cursor: Option<u32>,
+    #[napi(ts_type = "number | undefined")]
+    pub max_depth: Option<u32>,
+}
+
+/// Paginated inspection result
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginatedInspection {
+    pub file: String,
+    pub total: u32,
+    pub cursor: u32,
+    #[napi(ts_type = "number | undefined")]
+    pub next_cursor: Option<u32>,
+    pub truncated: bool,
+    pub page_size: u32,
+    pub gameobjects: Vec<GameObjectDetail>,
+    #[napi(ts_type = "PrefabInstanceInfo[] | undefined")]
+    pub prefab_instances: Option<Vec<PrefabInstanceInfo>>,
+}
+
 /// Chunk types for indexing
 #[napi(string_enum)]
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -138,4 +138,110 @@ mod tests {
         assert!(jaccard_similarity("hello world", "hello world") > 0.9);
         assert!(jaccard_similarity("hello", "world") < 0.1);
     }
+
+    #[test]
+    fn test_store_and_retrieve_via_keyword_search() {
+        let mut storage = IndexStorage::new();
+        storage.store_chunk(Chunk {
+            id: "test1".to_string(),
+            content: "Unity MonoBehaviour lifecycle methods".to_string(),
+            tokens: 5,
+            chunk_type: crate::common::ChunkType::Prose,
+            metadata: crate::common::ChunkMetadata {
+                file_path: "test.md".to_string(),
+                section: None,
+                language: None,
+                unity_class: None,
+                unity_method: None,
+            },
+        });
+        let results = storage.keyword_search("MonoBehaviour lifecycle");
+        assert!(!results.is_empty());
+        assert_eq!(results[0].id, "test1");
+    }
+
+    #[test]
+    fn test_case_insensitive_keyword_search() {
+        let mut storage = IndexStorage::new();
+        storage.store_chunk(Chunk {
+            id: "case1".to_string(),
+            content: "UNITY GAME ENGINE".to_string(),
+            tokens: 3,
+            chunk_type: crate::common::ChunkType::Prose,
+            metadata: crate::common::ChunkMetadata {
+                file_path: "test.md".to_string(),
+                section: None,
+                language: None,
+                unity_class: None,
+                unity_method: None,
+            },
+        });
+        // Search lowercase should find uppercase content
+        let results = storage.keyword_search("unity game engine");
+        assert!(!results.is_empty());
+    }
+
+    #[test]
+    fn test_empty_store_returns_empty() {
+        let storage = IndexStorage::new();
+        let results = storage.keyword_search("anything");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_clear_removes_all() {
+        let mut storage = IndexStorage::new();
+        storage.store_chunk(Chunk {
+            id: "clear1".to_string(),
+            content: "some data here".to_string(),
+            tokens: 3,
+            chunk_type: crate::common::ChunkType::Prose,
+            metadata: crate::common::ChunkMetadata {
+                file_path: "test.md".to_string(),
+                section: None,
+                language: None,
+                unity_class: None,
+                unity_method: None,
+            },
+        });
+        storage.clear();
+        let results = storage.keyword_search("data");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_stats_returns_correct_counts() {
+        // Clear first to remove any residual data from other tests sharing CWD
+        let mut storage = IndexStorage::new();
+        storage.clear();
+        storage.store_chunk(Chunk {
+            id: "s1".to_string(),
+            content: "chunk one".to_string(),
+            tokens: 2,
+            chunk_type: crate::common::ChunkType::Prose,
+            metadata: crate::common::ChunkMetadata {
+                file_path: "test.md".to_string(),
+                section: None,
+                language: None,
+                unity_class: None,
+                unity_method: None,
+            },
+        });
+        storage.store_chunk(Chunk {
+            id: "s2".to_string(),
+            content: "chunk two".to_string(),
+            tokens: 3,
+            chunk_type: crate::common::ChunkType::Prose,
+            metadata: crate::common::ChunkMetadata {
+                file_path: "test.md".to_string(),
+                section: None,
+                language: None,
+                unity_class: None,
+                unity_method: None,
+            },
+        });
+        let (count, total_tokens) = storage.stats();
+        assert_eq!(count, 2);
+        assert_eq!(total_tokens, 5);
+    }
 }

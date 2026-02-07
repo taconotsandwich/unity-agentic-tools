@@ -1,6 +1,6 @@
 import { createRequire } from 'module';
 import { existsSync } from 'fs';
-import { GameObject, GameObjectDetail, GameObjectWithComponents, SceneInspection, InspectOptions, ScanOptions, NativeScanner, NativeScannerInstance } from './types';
+import { GameObject, GameObjectDetail, GameObjectWithComponents, SceneInspection, InspectOptions, ScanOptions, NativeScanner, NativeScannerInstance, PaginationOptions, PaginatedInspection } from './types';
 import { getBinaryPath, getBinaryDir } from './binary-path';
 
 // Load the native Rust module from host machine
@@ -100,5 +100,19 @@ export class UnityScanner {
    */
   inspect_all(file: string, include_properties: boolean = false, verbose: boolean = false): SceneInspection {
     return this.scanner.inspectAll(file, include_properties, verbose);
+  }
+
+  /**
+   * Inspect entire file with pagination
+   */
+  inspect_all_paginated(options: PaginationOptions): PaginatedInspection {
+    return this.scanner.inspectAllPaginated({
+      file: options.file,
+      includeProperties: options.include_properties,
+      verbose: options.verbose,
+      pageSize: options.page_size,
+      cursor: options.cursor,
+      maxDepth: options.max_depth,
+    });
   }
 }
