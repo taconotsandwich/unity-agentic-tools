@@ -36,18 +36,22 @@ program.command('list <file>')
   .description('List GameObject hierarchy in Unity file')
   .option('-j, --json', 'Output as JSON')
   .option('-v, --verbose', 'Show internal Unity IDs')
+  .option('--page-size <n>', 'Max objects per page (default 200, max 1000)', '200')
+  .option('--cursor <n>', 'Start offset for pagination (default 0)', '0')
+  .option('--max-depth <n>', 'Max hierarchy depth (default 10, max 50)', '10')
   .action((file, options) => {
-    const result = getScanner().scan_scene_with_components(file, { verbose: options.verbose });
-    const prefabCount = result.filter((r: any) => r.type === 'PrefabInstance').length;
-    const output: any = {
+    const pageSize = Math.min(parseInt(options.pageSize, 10) || 200, 1000);
+    const cursor = parseInt(options.cursor, 10) || 0;
+    const maxDepth = Math.min(parseInt(options.maxDepth, 10) || 10, 50);
+
+    const result = getScanner().inspect_all_paginated({
       file,
-      count: result.length,
-      objects: result,
-    };
-    if (prefabCount > 0) {
-      output.prefab_instance_count = prefabCount;
-    }
-    console.log(JSON.stringify(output, null, 2));
+      verbose: options.verbose === true,
+      page_size: pageSize,
+      cursor,
+      max_depth: maxDepth,
+    });
+    console.log(JSON.stringify(result, null, 2));
   });
 
 // Find command
@@ -105,14 +109,20 @@ program.command('inspect <file> [identifier]')
   .option('-p, --properties', 'Include component properties')
   .option('-j, --json', 'Output as JSON')
   .option('-v, --verbose', 'Show internal Unity IDs')
+  .option('--page-size <n>', 'Max objects per page when no identifier (default 200)')
+  .option('--cursor <n>', 'Start offset for pagination (default 0)')
+  .option('--max-depth <n>', 'Max hierarchy depth (default 10)')
   .action((file, identifier, options) => {
-    // If no identifier provided, inspect the entire file
+    // If no identifier provided, inspect the entire file (with pagination)
     if (!identifier) {
-      const result = getScanner().inspect_all(
+      const result = getScanner().inspect_all_paginated({
         file,
-        options.properties === true,
-        options.verbose === true
-      );
+        include_properties: options.properties === true,
+        verbose: options.verbose === true,
+        page_size: options.pageSize ? Math.min(parseInt(options.pageSize, 10), 1000) : undefined,
+        cursor: options.cursor ? parseInt(options.cursor, 10) : undefined,
+        max_depth: options.maxDepth ? Math.min(parseInt(options.maxDepth, 10), 50) : undefined,
+      });
       console.log(JSON.stringify(result, null, 2));
       return;
     }
@@ -138,17 +148,23 @@ program.command('inspect-all <file>')
   .option('-p, --properties', 'Include component properties')
   .option('-j, --json', 'Output as JSON')
   .option('-v, --verbose', 'Show internal Unity IDs')
+  .option('--page-size <n>', 'Max objects per page (default 200, max 1000)')
+  .option('--cursor <n>', 'Start offset for pagination (default 0)')
+  .option('--max-depth <n>', 'Max hierarchy depth (default 10, max 50)')
   .action((file, options) => {
-    const result = getScanner().inspect_all(
+    const result = getScanner().inspect_all_paginated({
       file,
-      options.properties === true,
-      options.verbose === true
-    );
+      include_properties: options.properties === true,
+      verbose: options.verbose === true,
+      page_size: options.pageSize ? Math.min(parseInt(options.pageSize, 10), 1000) : undefined,
+      cursor: options.cursor ? parseInt(options.cursor, 10) : undefined,
+      max_depth: options.maxDepth ? Math.min(parseInt(options.maxDepth, 10), 50) : undefined,
+    });
     console.log(JSON.stringify(result, null, 2));
   });
 
 // Edit command
-import { editProperty, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab } from './editor';
+import { editProperty, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile } from './editor';
 
 program.command('edit <file> <object_name> <property> <value>')
   .description('Edit GameObject property value safely')
@@ -232,7 +248,7 @@ program.command('add-component <file> <object_name> <component>')
 
 // Edit component by file ID command
 program.command('edit-component <file> <file_id> <property> <value>')
-  .description('Edit any component property by file ID (works with any Unity class type)')
+  .description('Edit any component property by file ID. Supports dotted paths (m_LocalPosition.x) and array paths (m_Materials.Array.data[0])')
   .option('-j, --json', 'Output as JSON')
   .action((file, file_id, property, value, _options) => {
     const result = editComponentByFileId({
@@ -340,6 +356,32 @@ program.command('unpack-prefab <file> <prefab_instance>')
       file_path: file,
       prefab_instance: prefab_instance,
       project_path: options.project
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Reparent command
+program.command('reparent <file> <object_name> <new_parent>')
+  .description('Move a GameObject under a new parent. Use "root" to move to scene root')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, object_name, new_parent, _options) => {
+    const result = reparentGameObject({
+      file_path: file,
+      object_name: object_name,
+      new_parent: new_parent
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Create meta file command
+program.command('create-meta <script_path>')
+  .description('Generate a Unity .meta file for a script (MonoImporter)')
+  .option('-j, --json', 'Output as JSON')
+  .action((script_path, _options) => {
+    const result = createMetaFile({
+      script_path: script_path
     });
 
     console.log(JSON.stringify(result, null, 2));

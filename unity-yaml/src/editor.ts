@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
 import * as path from 'path';
-import type { CreateGameObjectOptions, CreateGameObjectResult, EditTransformOptions, Vector3, AddComponentOptions, AddComponentResult, CreatePrefabVariantOptions, CreatePrefabVariantResult, Quaternion, PropertyEdit, EditComponentByFileIdOptions, EditComponentResult, RemoveComponentOptions, RemoveComponentResult, DeleteGameObjectOptions, DeleteGameObjectResult, CopyComponentOptions, CopyComponentResult, DuplicateGameObjectOptions, DuplicateGameObjectResult, CreateScriptableObjectOptions, CreateScriptableObjectResult, UnpackPrefabOptions, UnpackPrefabResult } from './types';
+import type { CreateGameObjectOptions, CreateGameObjectResult, EditTransformOptions, Vector3, AddComponentOptions, AddComponentResult, CreatePrefabVariantOptions, CreatePrefabVariantResult, Quaternion, PropertyEdit, EditComponentByFileIdOptions, EditComponentResult, RemoveComponentOptions, RemoveComponentResult, DeleteGameObjectOptions, DeleteGameObjectResult, CopyComponentOptions, CopyComponentResult, DuplicateGameObjectOptions, DuplicateGameObjectResult, CreateScriptableObjectOptions, CreateScriptableObjectResult, UnpackPrefabOptions, UnpackPrefabResult, ReparentGameObjectOptions, ReparentGameObjectResult, CreateMetaFileOptions, CreateMetaFileResult } from './types';
 import { get_class_id, UNITY_CLASS_IDS } from './class-ids';
 
 export interface EditResult {
@@ -148,10 +148,23 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
     };
   }
 
-  // Normalize property name: strip m_ prefix if provided, we'll add it back
-  const normalizedProperty = property.startsWith('m_')
-    ? property.slice(2)
-    : property;
+  // Normalize property name for applyModification:
+  // - Dotted/array paths: keep as-is if they already have m_ prefix,
+  //   otherwise prepend m_ to the root segment only
+  // - Simple paths: ensure m_ prefix
+  let normalizedProperty: string;
+  if (property.includes('.') || property.includes('Array')) {
+    // Dotted or array path — ensure root segment has m_ prefix
+    const rootSegment = property.split('.')[0];
+    if (rootSegment.startsWith('m_')) {
+      normalizedProperty = property;
+    } else {
+      normalizedProperty = 'm_' + property;
+    }
+  } else {
+    // Simple path
+    normalizedProperty = property.startsWith('m_') ? property : 'm_' + property;
+  }
 
   // Find the block with this file ID (any class type)
   const blockPattern = new RegExp(`--- !u!(\\d+) &${file_id}\\b`);
@@ -189,32 +202,24 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
     };
   }
 
-  // Edit the property in the target block
+  // Use applyModification for all path types (simple, dotted, array)
   const targetBlock = blocks[targetBlockIndex];
-  const propertyPattern = new RegExp(
-    `(^\\s*m_${normalizedProperty}:\\s*)([^\\n]*)`,
-    'm'
-  );
+  let updatedBlock = applyModification(targetBlock, normalizedProperty, new_value, '{fileID: 0}');
 
-  let updatedBlock: string;
-  if (propertyPattern.test(targetBlock)) {
-    // Replace existing property
-    updatedBlock = targetBlock.replace(propertyPattern, `$1${new_value}`);
-  } else {
-    // Property doesn't exist - try without m_ prefix (some properties don't have it)
-    const altPropertyPattern = new RegExp(
-      `(^\\s*${normalizedProperty}:\\s*)([^\\n]*)`,
-      'm'
+  // If applyModification didn't change anything, try without m_ prefix
+  // (some properties like "serializedVersion" don't use m_ prefix)
+  if (updatedBlock === targetBlock) {
+    const withoutPrefix = property.startsWith('m_') ? property.slice(2) : property;
+    updatedBlock = applyModification(targetBlock, withoutPrefix, new_value, '{fileID: 0}');
+  }
+
+  // If still unchanged and it's a simple path, add the property
+  if (updatedBlock === targetBlock && !property.includes('.') && !property.includes('Array')) {
+    const addProp = property.startsWith('m_') ? property : 'm_' + property;
+    updatedBlock = targetBlock.replace(
+      /(\n)(--- !u!|$)/,
+      `\n  ${addProp}: ${new_value}$1$2`
     );
-    if (altPropertyPattern.test(targetBlock)) {
-      updatedBlock = targetBlock.replace(altPropertyPattern, `$1${new_value}`);
-    } else {
-      // Add the property (with m_ prefix by default)
-      updatedBlock = targetBlock.replace(
-        /(\n)(--- !u!|$)/,
-        `\n  m_${normalizedProperty}: ${new_value}$1$2`
-      );
-    }
   }
 
   blocks[targetBlockIndex] = updatedBlock;
@@ -314,35 +319,91 @@ function atomicWrite(filePath: string, content: string): EditResult {
 
 /**
  * Batch edit multiple properties in a single file for better performance.
+ * Single-pass: reads once, applies all edits in memory, validates, writes once.
  */
 export function batchEditProperties(
   filePath: string,
   edits: PropertyEdit[]
 ): EditResult {
-  let updatedContent = '';
+  if (!existsSync(filePath)) {
+    return {
+      success: false,
+      file_path: filePath,
+      error: `File not found: ${filePath}`
+    };
+  }
 
+  let content: string;
+  try {
+    content = readFileSync(filePath, 'utf-8');
+  } catch (err) {
+    return {
+      success: false,
+      file_path: filePath,
+      error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+
+  // Split into blocks once
+  let blocks = content.split(/(?=--- !u!)/);
+
+  // Group edits by object_name to find each block only once
+  const editsByObject = new Map<string, PropertyEdit[]>();
   for (const edit of edits) {
-    const result = safeUnityYAMLEdit(
-      filePath,
-      edit.object_name,
-      edit.property,
-      edit.new_value
-    );
+    const existing = editsByObject.get(edit.object_name) || [];
+    existing.push(edit);
+    editsByObject.set(edit.object_name, existing);
+  }
 
-    if (!result.success) {
+  // Apply all edits in memory
+  for (const [objectName, objectEdits] of editsByObject) {
+    const escapedName = objectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const namePattern = new RegExp(`^\\s*m_Name:\\s*${escapedName}\\s*$`, 'm');
+
+    let targetBlockIndex = -1;
+    for (let i = 0; i < blocks.length; i++) {
+      if (blocks[i].startsWith('--- !u!1 ') && namePattern.test(blocks[i])) {
+        targetBlockIndex = i;
+        break;
+      }
+    }
+
+    if (targetBlockIndex === -1) {
       return {
         success: false,
         file_path: filePath,
-        error: `Failed to edit ${edit.object_name}.${edit.property}: ${result.error}`
+        error: `Failed to edit ${objectName}.${objectEdits[0].property}: GameObject "${objectName}" not found in file`
       };
     }
 
-    updatedContent = readFileSync(filePath, 'utf-8');
+    // Apply each property edit to this block
+    for (const edit of objectEdits) {
+      const normalizedProperty = edit.property.startsWith('m_')
+        ? edit.property.slice(2)
+        : edit.property;
+
+      const propertyPattern = new RegExp(
+        `(^\\s*m_${normalizedProperty}:\\s*)([^\\n]*)`,
+        'm'
+      );
+
+      if (propertyPattern.test(blocks[targetBlockIndex])) {
+        blocks[targetBlockIndex] = blocks[targetBlockIndex].replace(
+          propertyPattern,
+          `$1${edit.new_value}`
+        );
+      } else {
+        blocks[targetBlockIndex] = blocks[targetBlockIndex].replace(
+          /(\n)(--- !u!|$)/,
+          `\n  m_${normalizedProperty}: ${edit.new_value}$1$2`
+        );
+      }
+    }
   }
 
-  const isValid = validateUnityYAML(updatedContent);
+  const updatedContent = blocks.join('');
 
-  if (!isValid) {
+  if (!validateUnityYAML(updatedContent)) {
     return {
       success: false,
       file_path: filePath,
@@ -2169,5 +2230,187 @@ export function unpackPrefab(options: UnpackPrefabOptions): UnpackPrefabResult {
     file_path,
     unpacked_count: clonedBlocks.length,
     root_game_object_id: newRootGoId
+  };
+}
+
+// ========== Phase 7: Reparent GameObject ==========
+
+/**
+ * Check if candidateAncestorTransformId is an ancestor of childTransformId
+ * by walking up the m_Father chain. Prevents circular parenting.
+ *
+ * TODO(human): Implement the ancestor walk logic
+ */
+function isAncestor(content: string, childTransformId: number, candidateAncestorTransformId: number): boolean {
+  // Walk up from candidateAncestorTransformId's m_Father chain.
+  // If we ever reach childTransformId, it means childTransformId is an
+  // ancestor of candidateAncestorTransformId — making the reparent circular.
+  const blocks = content.split(/(?=--- !u!)/);
+
+  let currentId = candidateAncestorTransformId;
+  const visited = new Set<number>();
+
+  while (currentId !== 0) {
+    if (currentId === childTransformId) return true;
+    if (visited.has(currentId)) return false; // already a cycle, bail
+    visited.add(currentId);
+
+    // Find this Transform block and read its m_Father
+    const pattern = new RegExp(`^--- !u!4 &${currentId}\\b`);
+    let fatherId = 0;
+    for (const block of blocks) {
+      if (pattern.test(block)) {
+        const fatherMatch = block.match(/m_Father:\s*\{fileID:\s*(\d+)\}/);
+        if (fatherMatch) {
+          fatherId = parseInt(fatherMatch[1], 10);
+        }
+        break;
+      }
+    }
+    currentId = fatherId;
+  }
+
+  return false;
+}
+
+/**
+ * Reparent a GameObject under a new parent (or to root).
+ */
+export function reparentGameObject(options: ReparentGameObjectOptions): ReparentGameObjectResult {
+  const { file_path, object_name, new_parent } = options;
+
+  if (!existsSync(file_path)) {
+    return { success: false, file_path, error: `File not found: ${file_path}` };
+  }
+
+  let content: string;
+  try {
+    content = readFileSync(file_path, 'utf-8');
+  } catch (err) {
+    return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  // Find the child's Transform ID
+  const childTransformId = findTransformIdByName(content, object_name);
+  if (childTransformId === null) {
+    return { success: false, file_path, error: `GameObject "${object_name}" not found` };
+  }
+
+  // Read the child's current m_Father
+  const blocks = content.split(/(?=--- !u!)/);
+  const childTransformPattern = new RegExp(`^--- !u!4 &${childTransformId}\\b`);
+  let oldParentTransformId = 0;
+
+  for (const block of blocks) {
+    if (childTransformPattern.test(block)) {
+      const fatherMatch = block.match(/m_Father:\s*\{fileID:\s*(\d+)\}/);
+      if (fatherMatch) {
+        oldParentTransformId = parseInt(fatherMatch[1], 10);
+      }
+      break;
+    }
+  }
+
+  // Resolve new parent
+  let newParentTransformId = 0;
+  if (new_parent.toLowerCase() !== 'root') {
+    const foundId = findTransformIdByName(content, new_parent);
+    if (foundId === null) {
+      return { success: false, file_path, error: `New parent GameObject "${new_parent}" not found` };
+    }
+    newParentTransformId = foundId;
+
+    // Prevent self-parenting
+    if (newParentTransformId === childTransformId) {
+      return { success: false, file_path, error: 'Cannot reparent a GameObject under itself' };
+    }
+
+    // Prevent circular parenting
+    if (isAncestor(content, childTransformId, newParentTransformId)) {
+      return { success: false, file_path, error: 'Cannot reparent: would create circular hierarchy' };
+    }
+  }
+
+  // Remove from old parent's m_Children (if it had a parent)
+  if (oldParentTransformId !== 0) {
+    content = removeChildFromParent(content, oldParentTransformId, childTransformId);
+  }
+
+  // Update child's m_Father to new parent
+  const fatherPattern = new RegExp(
+    `(--- !u!4 &${childTransformId}\\b[\\s\\S]*?m_Father:\\s*)\\{fileID:\\s*\\d+\\}`
+  );
+  content = content.replace(fatherPattern, `$1{fileID: ${newParentTransformId}}`);
+
+  // Add to new parent's m_Children (if not reparenting to root)
+  if (newParentTransformId !== 0) {
+    content = addChildToParent(content, newParentTransformId, childTransformId);
+  }
+
+  if (!validateUnityYAML(content)) {
+    return { success: false, file_path, error: 'Validation failed after reparent' };
+  }
+
+  const writeResult = atomicWrite(file_path, content);
+  if (!writeResult.success) {
+    return { success: false, file_path, error: writeResult.error };
+  }
+
+  return {
+    success: true,
+    file_path,
+    child_transform_id: childTransformId,
+    old_parent_transform_id: oldParentTransformId,
+    new_parent_transform_id: newParentTransformId
+  };
+}
+
+// ========== Phase 8: Create .meta File ==========
+
+/**
+ * Create a Unity .meta file for a script, using a generated GUID.
+ * Will not overwrite existing .meta files.
+ */
+export function createMetaFile(options: CreateMetaFileOptions): CreateMetaFileResult {
+  const { script_path } = options;
+  const metaPath = script_path + '.meta';
+
+  if (existsSync(metaPath)) {
+    return {
+      success: false,
+      meta_path: metaPath,
+      error: `.meta file already exists: ${metaPath}`
+    };
+  }
+
+  const guid = generateGuid();
+
+  const metaContent = `fileFormatVersion: 2
+guid: ${guid}
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+`;
+
+  try {
+    writeFileSync(metaPath, metaContent, 'utf-8');
+  } catch (err) {
+    return {
+      success: false,
+      meta_path: metaPath,
+      error: `Failed to write .meta file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+
+  return {
+    success: true,
+    meta_path: metaPath,
+    guid
   };
 }

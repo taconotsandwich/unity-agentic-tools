@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve, join } from 'path';
 import { readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab } from '../src/editor';
+import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile } from '../src/editor';
 import { create_temp_fixture } from './test-utils';
 import type { TempFixture } from './test-utils';
 
@@ -361,6 +361,57 @@ describe('UnityEditor', () => {
 
             expect(result.success).toBe(false);
             expect(result.error).toContain('NonExistent');
+        });
+
+        it('should handle 5+ edits across multiple objects in single pass', () => {
+            const result = batchEditProperties(temp_fixture.temp_path, [
+                { object_name: 'Player', property: 'm_Name', new_value: 'Hero' },
+                { object_name: 'Player', property: 'm_Layer', new_value: '5' },
+                { object_name: 'Player', property: 'm_TagString', new_value: 'NPC' },
+                { object_name: 'Main Camera', property: 'm_Name', new_value: 'Cam' },
+                { object_name: 'Main Camera', property: 'm_Layer', new_value: '8' },
+                { object_name: 'Directional Light', property: 'm_StaticEditorFlags', new_value: '255' }
+            ]);
+
+            expect(result.success).toBe(true);
+
+            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+            expect(content).toContain('m_Name: Hero');
+            expect(content).toContain('m_Name: Cam');
+            // Verify Player block has multiple edits
+            const heroSection = content.match(/--- !u!1 &1847675923[\s\S]*?(?=--- !u!)/);
+            expect(heroSection).not.toBeNull();
+            expect(heroSection![0]).toContain('m_Layer: 5');
+            expect(heroSection![0]).toContain('m_TagString: NPC');
+            // Verify Light edit
+            expect(content).toMatch(/m_StaticEditorFlags: 255/);
+        });
+
+        it('should not leave partial edits on failure', () => {
+            const originalContent = readFileSync(temp_fixture.temp_path, 'utf-8');
+
+            const result = batchEditProperties(temp_fixture.temp_path, [
+                { object_name: 'Player', property: 'm_Name', new_value: 'Hero' },
+                { object_name: 'NonExistent', property: 'm_Name', new_value: 'Fail' }
+            ]);
+
+            expect(result.success).toBe(false);
+
+            // File should be unchanged since the batch failed before writing
+            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+            expect(content).toBe(originalContent);
+        });
+
+        it('should succeed with an empty edits array', () => {
+            const originalContent = readFileSync(temp_fixture.temp_path, 'utf-8');
+
+            const result = batchEditProperties(temp_fixture.temp_path, []);
+
+            expect(result.success).toBe(true);
+
+            // File content should be unchanged
+            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+            expect(content).toBe(originalContent);
         });
     });
 
@@ -2259,5 +2310,402 @@ describe('unpackPrefab', () => {
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content.startsWith('%YAML 1.1')).toBe(true);
         expect(validateUnityYAML(content)).toBe(true);
+    });
+});
+
+// ========== Edit Component by FileId (Dotted/Array Path) Tests ==========
+
+describe('editComponentByFileId', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should edit a simple property (backwards compat)', () => {
+        // Edit Player's Transform (1847675924) m_ConstrainProportionsScale
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'm_ConstrainProportionsScale',
+            new_value: '1'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.class_id).toBe(4);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const transformBlock = content.match(/--- !u!4 &1847675924[\s\S]*?(?=--- !u!|$)/);
+        expect(transformBlock).not.toBeNull();
+        expect(transformBlock![0]).toContain('m_ConstrainProportionsScale: 1');
+    });
+
+    it('should edit a dotted path (inline object field)', () => {
+        // Edit Player's Transform m_LocalPosition.x (currently {x: 0, y: 0.5, z: 0})
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'm_LocalPosition.x',
+            new_value: '42'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const transformBlock = content.match(/--- !u!4 &1847675924[\s\S]*?(?=--- !u!|$)/);
+        expect(transformBlock).not.toBeNull();
+        expect(transformBlock![0]).toContain('m_LocalPosition: {x: 42, y: 0.5, z: 0}');
+    });
+
+    it('should edit an array path', () => {
+        // Edit Player's MeshRenderer (1847675926) m_Materials.Array.data[0]
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675926',
+            property: 'm_Materials.Array.data[0]',
+            new_value: '{fileID: 99999, guid: aaaa0000bbbb1111cccc2222dddd3333, type: 2}'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const rendererBlock = content.match(/--- !u!23 &1847675926[\s\S]*?(?=--- !u!|$)/);
+        expect(rendererBlock).not.toBeNull();
+        expect(rendererBlock![0]).toContain('guid: aaaa0000bbbb1111cccc2222dddd3333');
+    });
+
+    it('should auto-prepend m_ prefix for dotted paths without it', () => {
+        // Use "LocalPosition.y" without m_ prefix — should still work
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'LocalPosition.y',
+            new_value: '99'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const transformBlock = content.match(/--- !u!4 &1847675924[\s\S]*?(?=--- !u!|$)/);
+        expect(transformBlock).not.toBeNull();
+        expect(transformBlock![0]).toContain('m_LocalPosition: {x: 0, y: 99, z: 0}');
+    });
+
+    it('should edit non-m_ properties via fallback path', () => {
+        // serializedVersion doesn't have m_ prefix — tests the fallback logic
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'serializedVersion',
+            new_value: '99'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const transformBlock = content.match(/--- !u!4 &1847675924[\s\S]*?(?=--- !u!|$)/);
+        expect(transformBlock).not.toBeNull();
+        expect(transformBlock![0]).toContain('serializedVersion: 99');
+    });
+
+    it('should append a property that does not exist', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'm_NewCustomProp',
+            new_value: 'hello'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const transformBlock = content.match(/--- !u!4 &1847675924[\s\S]*?(?=--- !u!|$)/);
+        expect(transformBlock).not.toBeNull();
+        expect(transformBlock![0]).toContain('m_NewCustomProp: hello');
+    });
+
+    it('should return error for non-existent file', () => {
+        const result = editComponentByFileId({
+            file_path: '/tmp/no-such-file-ever.unity',
+            file_id: '1847675924',
+            property: 'm_IsActive',
+            new_value: '0'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('File not found');
+    });
+
+    it('should return error for non-existent file ID', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '9999999999',
+            property: 'm_IsActive',
+            new_value: '0'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+});
+
+// ========== Reparent GameObject Tests ==========
+
+describe('reparentGameObject', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should reparent to a new parent', () => {
+        // Create A and B, then reparent B under A
+        const aResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'ParentA'
+        });
+        expect(aResult.success).toBe(true);
+
+        const bResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'ChildB'
+        });
+        expect(bResult.success).toBe(true);
+
+        const result = reparentGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'ChildB',
+            new_parent: 'ParentA'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.new_parent_transform_id).toBe(aResult.transform_id);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // ChildB's Transform should have m_Father pointing to ParentA's transform
+        const childPattern = new RegExp(`--- !u!4 &${bResult.transform_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const childMatch = content.match(childPattern);
+        expect(childMatch).not.toBeNull();
+        expect(childMatch![0]).toContain(`m_Father: {fileID: ${aResult.transform_id}}`);
+
+        // ParentA's Transform should list ChildB in m_Children
+        const parentPattern = new RegExp(`--- !u!4 &${aResult.transform_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const parentMatch = content.match(parentPattern);
+        expect(parentMatch).not.toBeNull();
+        expect(parentMatch![0]).toContain(`fileID: ${bResult.transform_id}`);
+    });
+
+    it('should reparent to root', () => {
+        // Create parent → child, then reparent child to root
+        createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'TempParent'
+        });
+        const childResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'TempChild',
+            parent: 'TempParent'
+        });
+        expect(childResult.success).toBe(true);
+
+        const result = reparentGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'TempChild',
+            new_parent: 'root'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.new_parent_transform_id).toBe(0);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const childPattern = new RegExp(`--- !u!4 &${childResult.transform_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const childMatch = content.match(childPattern);
+        expect(childMatch).not.toBeNull();
+        expect(childMatch![0]).toContain('m_Father: {fileID: 0}');
+    });
+
+    it('should prevent circular parenting', () => {
+        // Create A → B hierarchy
+        createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'CircleA'
+        });
+        createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'CircleB',
+            parent: 'CircleA'
+        });
+
+        // Try to reparent A under B (would create cycle)
+        const result = reparentGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'CircleA',
+            new_parent: 'CircleB'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('circular');
+    });
+
+    it('should prevent self-parenting', () => {
+        createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'SelfRef'
+        });
+
+        const result = reparentGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'SelfRef',
+            new_parent: 'SelfRef'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('itself');
+    });
+
+    it('should transfer from one parent to another', () => {
+        // Create two parents and a child under the first
+        const parent1 = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Parent1'
+        });
+        expect(parent1.success).toBe(true);
+
+        const parent2 = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Parent2'
+        });
+        expect(parent2.success).toBe(true);
+
+        const child = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'TransferChild',
+            parent: 'Parent1'
+        });
+        expect(child.success).toBe(true);
+
+        // Verify child is under Parent1
+        let content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const p1Block = content.match(new RegExp(`--- !u!4 &${parent1.transform_id}[\\s\\S]*?(?=--- !u!|$)`));
+        expect(p1Block![0]).toContain(`fileID: ${child.transform_id}`);
+
+        // Reparent child from Parent1 to Parent2
+        const result = reparentGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'TransferChild',
+            new_parent: 'Parent2'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.old_parent_transform_id).toBe(parent1.transform_id);
+        expect(result.new_parent_transform_id).toBe(parent2.transform_id);
+
+        // Verify child is now under Parent2
+        content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const childBlock = content.match(new RegExp(`--- !u!4 &${child.transform_id}[\\s\\S]*?(?=--- !u!|$)`));
+        expect(childBlock![0]).toContain(`m_Father: {fileID: ${parent2.transform_id}}`);
+
+        // Parent1 should no longer list the child
+        const p1Updated = content.match(new RegExp(`--- !u!4 &${parent1.transform_id}[\\s\\S]*?(?=--- !u!|$)`));
+        expect(p1Updated![0]).not.toContain(`fileID: ${child.transform_id}`);
+
+        // Parent2 should now list the child
+        const p2Updated = content.match(new RegExp(`--- !u!4 &${parent2.transform_id}[\\s\\S]*?(?=--- !u!|$)`));
+        expect(p2Updated![0]).toContain(`fileID: ${child.transform_id}`);
+    });
+
+    it('should fail for nonexistent child', () => {
+        const result = reparentGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'NonExistent',
+            new_parent: 'Player'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+
+    it('should fail for nonexistent new parent', () => {
+        const result = reparentGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'Player',
+            new_parent: 'NonExistent'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+});
+
+// ========== Create .meta File Tests ==========
+
+describe('createMetaFile', () => {
+    const scriptDir = join(tmpdir(), 'test-meta-gen');
+    const scriptPath = join(scriptDir, 'TestScript.cs');
+
+    beforeEach(() => {
+        mkdirSync(scriptDir, { recursive: true });
+        writeFileSync(scriptPath, 'public class TestScript : MonoBehaviour {}');
+    });
+
+    afterEach(() => {
+        rmSync(scriptDir, { recursive: true, force: true });
+    });
+
+    it('should create a valid .meta file', () => {
+        const result = createMetaFile({ script_path: scriptPath });
+
+        expect(result.success).toBe(true);
+        expect(result.guid).toBeDefined();
+        expect(result.meta_path).toBe(scriptPath + '.meta');
+
+        const content = readFileSync(result.meta_path, 'utf-8');
+        expect(content).toContain('fileFormatVersion: 2');
+        expect(content).toContain(`guid: ${result.guid}`);
+        expect(content).toContain('MonoImporter:');
+        expect(content).toContain('serializedVersion: 2');
+        expect(content).toContain('executionOrder: 0');
+    });
+
+    it('should generate a 32-char lowercase hex GUID', () => {
+        const result = createMetaFile({ script_path: scriptPath });
+
+        expect(result.success).toBe(true);
+        expect(result.guid).toMatch(/^[a-f0-9]{32}$/);
+    });
+
+    it('should not overwrite existing .meta file', () => {
+        // Create the first .meta
+        const result1 = createMetaFile({ script_path: scriptPath });
+        expect(result1.success).toBe(true);
+
+        // Try to create again — should fail
+        const result2 = createMetaFile({ script_path: scriptPath });
+        expect(result2.success).toBe(false);
+        expect(result2.error).toContain('already exists');
+    });
+
+    it('should generate unique GUIDs across calls', () => {
+        const script2 = join(scriptDir, 'Script2.cs');
+        writeFileSync(script2, 'public class Script2 : MonoBehaviour {}');
+
+        const result1 = createMetaFile({ script_path: scriptPath });
+        const result2 = createMetaFile({ script_path: script2 });
+
+        expect(result1.success).toBe(true);
+        expect(result2.success).toBe(true);
+        expect(result1.guid).not.toBe(result2.guid);
     });
 });

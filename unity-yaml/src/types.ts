@@ -67,6 +67,27 @@ export interface ScanOptions {
   verbose?: boolean;
 }
 
+// Pagination types
+export interface PaginationOptions {
+  file: string;
+  include_properties?: boolean;
+  verbose?: boolean;
+  page_size?: number;
+  cursor?: number;
+  max_depth?: number;
+}
+
+export interface PaginatedInspection {
+  file: string;
+  total: number;
+  cursor: number;
+  next_cursor?: number;
+  truncated: boolean;
+  page_size: number;
+  gameobjects: GameObjectDetail[];
+  prefabInstances?: PrefabInstanceInfo[];
+}
+
 // Creation types
 export interface Vector3 {
   x: number;
@@ -151,6 +172,14 @@ export interface NativeScannerInstance {
     verbose?: boolean;
   }): GameObjectDetail | null;
   inspectAll(file: string, includeProperties: boolean, verbose: boolean): SceneInspection;
+  inspectAllPaginated(options: {
+    file: string;
+    includeProperties?: boolean;
+    verbose?: boolean;
+    pageSize?: number;
+    cursor?: number;
+    maxDepth?: number;
+  }): PaginatedInspection;
 }
 
 // Remove Component types
@@ -239,6 +268,34 @@ export interface UnpackPrefabResult {
   file_path: string;
   unpacked_count?: number;
   root_game_object_id?: number;
+  error?: string;
+}
+
+// Reparent GameObject types
+export interface ReparentGameObjectOptions {
+  file_path: string;
+  object_name: string;
+  new_parent: string;  // Parent name or "root" for scene root
+}
+
+export interface ReparentGameObjectResult {
+  success: boolean;
+  file_path: string;
+  child_transform_id?: number;
+  old_parent_transform_id?: number;
+  new_parent_transform_id?: number;
+  error?: string;
+}
+
+// Create .meta file types
+export interface CreateMetaFileOptions {
+  script_path: string;
+}
+
+export interface CreateMetaFileResult {
+  success: boolean;
+  meta_path: string;
+  guid?: string;
   error?: string;
 }
 
