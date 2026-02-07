@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve, join } from 'path';
 import { readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile } from '../src/editor';
+import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile, createScene } from '../src/editor';
 import { create_temp_fixture } from './test-utils';
 import type { TempFixture } from './test-utils';
 
@@ -2707,5 +2707,87 @@ describe('createMetaFile', () => {
         expect(result1.success).toBe(true);
         expect(result2.success).toBe(true);
         expect(result1.guid).not.toBe(result2.guid);
+    });
+});
+
+describe('createScene', () => {
+    const sceneDir = join(tmpdir(), `unity-scene-test-${Date.now()}`);
+
+    beforeEach(() => {
+        mkdirSync(sceneDir, { recursive: true });
+    });
+
+    afterEach(() => {
+        rmSync(sceneDir, { recursive: true, force: true });
+    });
+
+    it('should create minimal scene with 4 global blocks', () => {
+        const scenePath = join(sceneDir, 'TestScene.unity');
+        const result = createScene({ output_path: scenePath });
+
+        expect(result.success).toBe(true);
+        expect(result.scene_guid).toBeDefined();
+        expect(result.meta_path).toBe(scenePath + '.meta');
+
+        const content = readFileSync(scenePath, 'utf-8');
+        expect(content).toContain('%YAML 1.1');
+        expect(content).toContain('OcclusionCullingSettings:');
+        expect(content).toContain('RenderSettings:');
+        expect(content).toContain('LightmapSettings:');
+        expect(content).toContain('NavMeshSettings:');
+        // Minimal scene should NOT have GameObjects
+        expect(content).not.toContain('m_Name: Main Camera');
+    });
+
+    it('should create scene with defaults (Camera + Light)', () => {
+        const scenePath = join(sceneDir, 'DefaultScene.unity');
+        const result = createScene({ output_path: scenePath, include_defaults: true });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(scenePath, 'utf-8');
+        expect(content).toContain('m_Name: Main Camera');
+        expect(content).toContain('m_Name: Directional Light');
+        expect(content).toContain('Camera:');
+        expect(content).toContain('AudioListener:');
+        expect(content).toContain('Light:');
+    });
+
+    it('should generate valid .meta file', () => {
+        const scenePath = join(sceneDir, 'MetaTest.unity');
+        const result = createScene({ output_path: scenePath });
+
+        expect(result.success).toBe(true);
+
+        const metaContent = readFileSync(scenePath + '.meta', 'utf-8');
+        expect(metaContent).toContain('fileFormatVersion: 2');
+        expect(metaContent).toContain(`guid: ${result.scene_guid}`);
+        expect(metaContent).toContain('DefaultImporter:');
+    });
+
+    it('should reject non-.unity extension', () => {
+        const result = createScene({ output_path: join(sceneDir, 'test.prefab') });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('.unity');
+    });
+
+    it('should use provided scene GUID', () => {
+        const customGuid = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4';
+        const scenePath = join(sceneDir, 'CustomGuid.unity');
+        const result = createScene({ output_path: scenePath, scene_guid: customGuid });
+
+        expect(result.success).toBe(true);
+        expect(result.scene_guid).toBe(customGuid);
+
+        const metaContent = readFileSync(scenePath + '.meta', 'utf-8');
+        expect(metaContent).toContain(`guid: ${customGuid}`);
+    });
+
+    it('should produce valid YAML that passes validation', () => {
+        const scenePath = join(sceneDir, 'ValidScene.unity');
+        createScene({ output_path: scenePath, include_defaults: true });
+
+        const content = readFileSync(scenePath, 'utf-8');
+        expect(validateUnityYAML(content)).toBe(true);
     });
 });

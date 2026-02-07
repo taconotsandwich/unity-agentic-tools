@@ -387,6 +387,155 @@ program.command('create-meta <script_path>')
     console.log(JSON.stringify(result, null, 2));
   });
 
+// Settings commands
+import { read_settings, edit_settings, edit_tag, edit_layer, edit_sorting_layer } from './settings';
+
+program.command('read-settings <project_path>')
+  .description('Read Unity project settings (TagManager, DynamicsManager, QualitySettings, TimeManager, etc.)')
+  .option('-s, --setting <name>', 'Setting name or alias (tags, physics, quality, time)', 'TagManager')
+  .option('-j, --json', 'Output as JSON')
+  .action((project_path, options) => {
+    const result = read_settings({
+      project_path,
+      setting: options.setting,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+program.command('edit-settings <project_path>')
+  .description('Edit a property in any ProjectSettings/*.asset file')
+  .option('-s, --setting <name>', 'Setting name or alias')
+  .option('--property <name>', 'Property name to edit')
+  .option('--value <value>', 'New value')
+  .option('-j, --json', 'Output as JSON')
+  .action((project_path, options) => {
+    if (!options.setting || !options.property || !options.value) {
+      console.error(JSON.stringify({ success: false, error: 'Required: --setting, --property, --value' }, null, 2));
+      process.exit(1);
+    }
+
+    const result = edit_settings({
+      project_path,
+      setting: options.setting,
+      property: options.property,
+      value: options.value,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+program.command('edit-tag <project_path> <action> <tag>')
+  .description('Add or remove a tag in the TagManager')
+  .option('-j, --json', 'Output as JSON')
+  .action((project_path, action, tag, _options) => {
+    if (action !== 'add' && action !== 'remove') {
+      console.error(JSON.stringify({ success: false, error: 'Action must be "add" or "remove"' }, null, 2));
+      process.exit(1);
+    }
+
+    const result = edit_tag({
+      project_path,
+      action: action as 'add' | 'remove',
+      tag,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+program.command('edit-layer <project_path> <index> <name>')
+  .description('Set a named layer at a specific index (3-31)')
+  .option('-j, --json', 'Output as JSON')
+  .action((project_path, index, name, _options) => {
+    const result = edit_layer({
+      project_path,
+      index: parseInt(index, 10),
+      name,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+program.command('edit-sorting-layer <project_path> <action> <name>')
+  .description('Add or remove a sorting layer')
+  .option('-j, --json', 'Output as JSON')
+  .action((project_path, action, name, _options) => {
+    if (action !== 'add' && action !== 'remove') {
+      console.error(JSON.stringify({ success: false, error: 'Action must be "add" or "remove"' }, null, 2));
+      process.exit(1);
+    }
+
+    const result = edit_sorting_layer({
+      project_path,
+      action: action as 'add' | 'remove',
+      name,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Create scene command
+import { createScene } from './editor';
+
+program.command('create-scene <output_path>')
+  .description('Create a new Unity scene file with required global blocks')
+  .option('-d, --defaults', 'Include default Main Camera and Directional Light')
+  .option('-j, --json', 'Output as JSON')
+  .action((output_path, options) => {
+    const result = createScene({
+      output_path,
+      include_defaults: options.defaults === true,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+// Project search commands
+import { search_project, grep_project } from './project-search';
+
+program.command('search <project_path>')
+  .description('Search across all scene/prefab files in a Unity project')
+  .option('-n, --name <pattern>', 'Search by GameObject name (supports wildcards)')
+  .option('-c, --component <type>', 'Filter by component type')
+  .option('-t, --tag <tag>', 'Filter by tag')
+  .option('-l, --layer <index>', 'Filter by layer index')
+  .option('--type <type>', 'File type filter: scene, prefab, all', 'all')
+  .option('--page-size <n>', 'Max files per page', '50')
+  .option('--cursor <n>', 'Start offset for pagination', '0')
+  .option('-j, --json', 'Output as JSON')
+  .action((project_path, options) => {
+    const result = search_project({
+      project_path,
+      name: options.name,
+      component: options.component,
+      tag: options.tag,
+      layer: options.layer !== undefined ? parseInt(options.layer, 10) : undefined,
+      file_type: options.type as 'scene' | 'prefab' | 'all',
+      page_size: parseInt(options.pageSize, 10) || 50,
+      cursor: parseInt(options.cursor, 10) || 0,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+program.command('grep <project_path> <pattern>')
+  .description('Search for a regex pattern across project files')
+  .option('--type <type>', 'File type filter: cs, yaml, unity, prefab, asset, all', 'all')
+  .option('-m, --max <n>', 'Max results', '100')
+  .option('-C, --context <n>', 'Context lines around matches', '0')
+  .option('-j, --json', 'Output as JSON')
+  .action((project_path, pattern, options) => {
+    const result = grep_project({
+      project_path,
+      pattern,
+      file_type: options.type as any,
+      max_results: parseInt(options.max, 10) || 100,
+      context_lines: parseInt(options.context, 10) || 0,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
 // Search docs command (uses doc-indexer CLI)
 program.command('search-docs <query>')
   .description('Search Unity documentation')
@@ -425,6 +574,93 @@ program.command('index-docs <path>')
 
       console.log(stdout);
     });
+  });
+
+// Build settings bridge commands
+import { get_build_settings, add_scene, remove_scene, enable_scene, disable_scene, move_scene, read_project_version } from '../../unity-build-settings/src/index';
+
+program.command('build-settings <project_path>')
+  .description('Read build settings (scene list, build profiles)')
+  .option('-j, --json', 'Output as JSON')
+  .action((project_path, _options) => {
+    try {
+      const result = get_build_settings(project_path);
+      console.log(JSON.stringify(result, null, 2));
+    } catch (err) {
+      console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+    }
+  });
+
+program.command('build-add-scene <project_path> <scene_path>')
+  .description('Add a scene to build settings')
+  .option('-j, --json', 'Output as JSON')
+  .action((project_path, scene_path, _options) => {
+    try {
+      const result = add_scene(project_path, scene_path);
+      console.log(JSON.stringify(result, null, 2));
+    } catch (err) {
+      console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+    }
+  });
+
+program.command('build-remove-scene <project_path> <scene_path>')
+  .description('Remove a scene from build settings')
+  .option('-j, --json', 'Output as JSON')
+  .action((project_path, scene_path, _options) => {
+    try {
+      const result = remove_scene(project_path, scene_path);
+      console.log(JSON.stringify(result, null, 2));
+    } catch (err) {
+      console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+    }
+  });
+
+program.command('build-enable-scene <project_path> <scene_path>')
+  .description('Enable a scene in build settings')
+  .option('-j, --json', 'Output as JSON')
+  .action((project_path, scene_path, _options) => {
+    try {
+      const result = enable_scene(project_path, scene_path);
+      console.log(JSON.stringify(result, null, 2));
+    } catch (err) {
+      console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+    }
+  });
+
+program.command('build-disable-scene <project_path> <scene_path>')
+  .description('Disable a scene in build settings')
+  .option('-j, --json', 'Output as JSON')
+  .action((project_path, scene_path, _options) => {
+    try {
+      const result = disable_scene(project_path, scene_path);
+      console.log(JSON.stringify(result, null, 2));
+    } catch (err) {
+      console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+    }
+  });
+
+program.command('build-move-scene <project_path> <scene_path> <new_index>')
+  .description('Move a scene to a new position in build settings')
+  .option('-j, --json', 'Output as JSON')
+  .action((project_path, scene_path, new_index, _options) => {
+    try {
+      const result = move_scene(project_path, scene_path, parseInt(new_index, 10));
+      console.log(JSON.stringify(result, null, 2));
+    } catch (err) {
+      console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+    }
+  });
+
+program.command('project-version <project_path>')
+  .description('Read Unity project version')
+  .option('-j, --json', 'Output as JSON')
+  .action((project_path, _options) => {
+    try {
+      const version = read_project_version(project_path);
+      console.log(JSON.stringify(version, null, 2));
+    } catch (err) {
+      console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+    }
   });
 
 // Setup command
