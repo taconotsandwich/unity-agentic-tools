@@ -2113,7 +2113,7 @@ var require_commander = __commonJS((exports2) => {
 
 // ../rust-core/unity-agentic-core.darwin-arm64.node
 var require_unity_agentic_core_darwin_arm64 = __commonJS((exports2, module2) => {
-  module2.exports = require("./unity-agentic-core.darwin-arm64-6nfgz1jg.node");
+  module2.exports = require("./unity-agentic-core.darwin-arm64-eb5qd13r.node");
 });
 
 // ../rust-core/index.js
@@ -2502,6 +2502,16 @@ class UnityScanner {
   }
   inspect_all(file, include_properties = false, verbose = false) {
     return this.scanner.inspectAll(file, include_properties, verbose);
+  }
+  inspect_all_paginated(options) {
+    return this.scanner.inspectAllPaginated({
+      file: options.file,
+      includeProperties: options.include_properties,
+      verbose: options.verbose,
+      pageSize: options.page_size,
+      cursor: options.cursor,
+      maxDepth: options.max_depth
+    });
   }
 }
 
@@ -2965,7 +2975,17 @@ function editComponentByFileId(options) {
       error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`
     };
   }
-  const normalizedProperty = property.startsWith("m_") ? property.slice(2) : property;
+  let normalizedProperty;
+  if (property.includes(".") || property.includes("Array")) {
+    const rootSegment = property.split(".")[0];
+    if (rootSegment.startsWith("m_")) {
+      normalizedProperty = property;
+    } else {
+      normalizedProperty = "m_" + property;
+    }
+  } else {
+    normalizedProperty = property.startsWith("m_") ? property : "m_" + property;
+  }
   const blockPattern = new RegExp(`--- !u!(\\d+) &${file_id}\\b`);
   const blockMatch = content.match(blockPattern);
   if (!blockMatch) {
@@ -2993,18 +3013,15 @@ function editComponentByFileId(options) {
     };
   }
   const targetBlock = blocks[targetBlockIndex];
-  const propertyPattern = new RegExp(`(^\\s*m_${normalizedProperty}:\\s*)([^\\n]*)`, "m");
-  let updatedBlock;
-  if (propertyPattern.test(targetBlock)) {
-    updatedBlock = targetBlock.replace(propertyPattern, `$1${new_value}`);
-  } else {
-    const altPropertyPattern = new RegExp(`(^\\s*${normalizedProperty}:\\s*)([^\\n]*)`, "m");
-    if (altPropertyPattern.test(targetBlock)) {
-      updatedBlock = targetBlock.replace(altPropertyPattern, `$1${new_value}`);
-    } else {
-      updatedBlock = targetBlock.replace(/(\n)(--- !u!|$)/, `
-  m_${normalizedProperty}: ${new_value}$1$2`);
-    }
+  let updatedBlock = applyModification(targetBlock, normalizedProperty, new_value, "{fileID: 0}");
+  if (updatedBlock === targetBlock) {
+    const withoutPrefix = property.startsWith("m_") ? property.slice(2) : property;
+    updatedBlock = applyModification(targetBlock, withoutPrefix, new_value, "{fileID: 0}");
+  }
+  if (updatedBlock === targetBlock && !property.includes(".") && !property.includes("Array")) {
+    const addProp = property.startsWith("m_") ? property : "m_" + property;
+    updatedBlock = targetBlock.replace(/(\n)(--- !u!|$)/, `
+  ${addProp}: ${new_value}$1$2`);
   }
   blocks[targetBlockIndex] = updatedBlock;
   const finalContent = blocks.join("");
@@ -4331,6 +4348,133 @@ function unpackPrefab(options) {
     root_game_object_id: newRootGoId
   };
 }
+function isAncestor(content, childTransformId, candidateAncestorTransformId) {
+  const blocks = content.split(/(?=--- !u!)/);
+  let currentId = candidateAncestorTransformId;
+  const visited = new Set;
+  while (currentId !== 0) {
+    if (currentId === childTransformId)
+      return true;
+    if (visited.has(currentId))
+      return false;
+    visited.add(currentId);
+    const pattern = new RegExp(`^--- !u!4 &${currentId}\\b`);
+    let fatherId = 0;
+    for (const block of blocks) {
+      if (pattern.test(block)) {
+        const fatherMatch = block.match(/m_Father:\s*\{fileID:\s*(\d+)\}/);
+        if (fatherMatch) {
+          fatherId = parseInt(fatherMatch[1], 10);
+        }
+        break;
+      }
+    }
+    currentId = fatherId;
+  }
+  return false;
+}
+function reparentGameObject(options) {
+  const { file_path, object_name, new_parent } = options;
+  if (!import_fs4.existsSync(file_path)) {
+    return { success: false, file_path, error: `File not found: ${file_path}` };
+  }
+  let content;
+  try {
+    content = import_fs4.readFileSync(file_path, "utf-8");
+  } catch (err) {
+    return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const childTransformId = findTransformIdByName(content, object_name);
+  if (childTransformId === null) {
+    return { success: false, file_path, error: `GameObject "${object_name}" not found` };
+  }
+  const blocks = content.split(/(?=--- !u!)/);
+  const childTransformPattern = new RegExp(`^--- !u!4 &${childTransformId}\\b`);
+  let oldParentTransformId = 0;
+  for (const block of blocks) {
+    if (childTransformPattern.test(block)) {
+      const fatherMatch = block.match(/m_Father:\s*\{fileID:\s*(\d+)\}/);
+      if (fatherMatch) {
+        oldParentTransformId = parseInt(fatherMatch[1], 10);
+      }
+      break;
+    }
+  }
+  let newParentTransformId = 0;
+  if (new_parent.toLowerCase() !== "root") {
+    const foundId = findTransformIdByName(content, new_parent);
+    if (foundId === null) {
+      return { success: false, file_path, error: `New parent GameObject "${new_parent}" not found` };
+    }
+    newParentTransformId = foundId;
+    if (newParentTransformId === childTransformId) {
+      return { success: false, file_path, error: "Cannot reparent a GameObject under itself" };
+    }
+    if (isAncestor(content, childTransformId, newParentTransformId)) {
+      return { success: false, file_path, error: "Cannot reparent: would create circular hierarchy" };
+    }
+  }
+  if (oldParentTransformId !== 0) {
+    content = removeChildFromParent(content, oldParentTransformId, childTransformId);
+  }
+  const fatherPattern = new RegExp(`(--- !u!4 &${childTransformId}\\b[\\s\\S]*?m_Father:\\s*)\\{fileID:\\s*\\d+\\}`);
+  content = content.replace(fatherPattern, `$1{fileID: ${newParentTransformId}}`);
+  if (newParentTransformId !== 0) {
+    content = addChildToParent(content, newParentTransformId, childTransformId);
+  }
+  if (!validateUnityYAML(content)) {
+    return { success: false, file_path, error: "Validation failed after reparent" };
+  }
+  const writeResult = atomicWrite(file_path, content);
+  if (!writeResult.success) {
+    return { success: false, file_path, error: writeResult.error };
+  }
+  return {
+    success: true,
+    file_path,
+    child_transform_id: childTransformId,
+    old_parent_transform_id: oldParentTransformId,
+    new_parent_transform_id: newParentTransformId
+  };
+}
+function createMetaFile(options) {
+  const { script_path } = options;
+  const metaPath = script_path + ".meta";
+  if (import_fs4.existsSync(metaPath)) {
+    return {
+      success: false,
+      meta_path: metaPath,
+      error: `.meta file already exists: ${metaPath}`
+    };
+  }
+  const guid = generateGuid();
+  const metaContent = `fileFormatVersion: 2
+guid: ${guid}
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+`;
+  try {
+    import_fs4.writeFileSync(metaPath, metaContent, "utf-8");
+  } catch (err) {
+    return {
+      success: false,
+      meta_path: metaPath,
+      error: `Failed to write .meta file: ${err instanceof Error ? err.message : String(err)}`
+    };
+  }
+  return {
+    success: true,
+    meta_path: metaPath,
+    guid
+  };
+}
 
 // src/cli.ts
 var __dirname = "/Users/taco/Documents/Projects/unity-agentic-tools/unity-yaml/src";
@@ -4353,18 +4497,18 @@ function getScanner() {
   return _scanner;
 }
 program.name("unity-yaml").description("Fast, token-efficient Unity YAML parser").version("1.0.0");
-program.command("list <file>").description("List GameObject hierarchy in Unity file").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, options) => {
-  const result = getScanner().scan_scene_with_components(file, { verbose: options.verbose });
-  const prefabCount = result.filter((r) => r.type === "PrefabInstance").length;
-  const output = {
+program.command("list <file>").description("List GameObject hierarchy in Unity file").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").option("--page-size <n>", "Max objects per page (default 200, max 1000)", "200").option("--cursor <n>", "Start offset for pagination (default 0)", "0").option("--max-depth <n>", "Max hierarchy depth (default 10, max 50)", "10").action((file, options) => {
+  const pageSize = Math.min(parseInt(options.pageSize, 10) || 200, 1000);
+  const cursor = parseInt(options.cursor, 10) || 0;
+  const maxDepth = Math.min(parseInt(options.maxDepth, 10) || 10, 50);
+  const result = getScanner().inspect_all_paginated({
     file,
-    count: result.length,
-    objects: result
-  };
-  if (prefabCount > 0) {
-    output.prefab_instance_count = prefabCount;
-  }
-  console.log(JSON.stringify(output, null, 2));
+    verbose: options.verbose === true,
+    page_size: pageSize,
+    cursor,
+    max_depth: maxDepth
+  });
+  console.log(JSON.stringify(result, null, 2));
 });
 program.command("find <file> <pattern>").description("Find GameObjects by name pattern").option("-e, --exact", "Use exact matching").option("-j, --json", "Output as JSON").action((file, pattern, options) => {
   const fuzzy = options.exact !== true;
@@ -4398,9 +4542,16 @@ program.command("get <file> <object_id>").description("Get GameObject details by
   }
   console.log(JSON.stringify({ file, object: result }, null, 2));
 });
-program.command("inspect <file> [identifier]").description("Inspect Unity file or specific GameObject").option("-p, --properties", "Include component properties").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, identifier, options) => {
+program.command("inspect <file> [identifier]").description("Inspect Unity file or specific GameObject").option("-p, --properties", "Include component properties").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").option("--page-size <n>", "Max objects per page when no identifier (default 200)").option("--cursor <n>", "Start offset for pagination (default 0)").option("--max-depth <n>", "Max hierarchy depth (default 10)").action((file, identifier, options) => {
   if (!identifier) {
-    const result2 = getScanner().inspect_all(file, options.properties === true, options.verbose === true);
+    const result2 = getScanner().inspect_all_paginated({
+      file,
+      include_properties: options.properties === true,
+      verbose: options.verbose === true,
+      page_size: options.pageSize ? Math.min(parseInt(options.pageSize, 10), 1000) : undefined,
+      cursor: options.cursor ? parseInt(options.cursor, 10) : undefined,
+      max_depth: options.maxDepth ? Math.min(parseInt(options.maxDepth, 10), 50) : undefined
+    });
     console.log(JSON.stringify(result2, null, 2));
     return;
   }
@@ -4416,8 +4567,15 @@ program.command("inspect <file> [identifier]").description("Inspect Unity file o
   }
   console.log(JSON.stringify(result, null, 2));
 });
-program.command("inspect-all <file>").description("Inspect entire Unity file with all details").option("-p, --properties", "Include component properties").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").action((file, options) => {
-  const result = getScanner().inspect_all(file, options.properties === true, options.verbose === true);
+program.command("inspect-all <file>").description("Inspect entire Unity file with all details").option("-p, --properties", "Include component properties").option("-j, --json", "Output as JSON").option("-v, --verbose", "Show internal Unity IDs").option("--page-size <n>", "Max objects per page (default 200, max 1000)").option("--cursor <n>", "Start offset for pagination (default 0)").option("--max-depth <n>", "Max hierarchy depth (default 10, max 50)").action((file, options) => {
+  const result = getScanner().inspect_all_paginated({
+    file,
+    include_properties: options.properties === true,
+    verbose: options.verbose === true,
+    page_size: options.pageSize ? Math.min(parseInt(options.pageSize, 10), 1000) : undefined,
+    cursor: options.cursor ? parseInt(options.cursor, 10) : undefined,
+    max_depth: options.maxDepth ? Math.min(parseInt(options.maxDepth, 10), 50) : undefined
+  });
   console.log(JSON.stringify(result, null, 2));
 });
 program.command("edit <file> <object_name> <property> <value>").description("Edit GameObject property value safely").option("-j, --json", "Output as JSON").action((file, object_name, property, value, _options) => {
@@ -4469,7 +4627,7 @@ program.command("add-component <file> <object_name> <component>").description("A
   });
   console.log(JSON.stringify(result, null, 2));
 });
-program.command("edit-component <file> <file_id> <property> <value>").description("Edit any component property by file ID (works with any Unity class type)").option("-j, --json", "Output as JSON").action((file, file_id, property, value, _options) => {
+program.command("edit-component <file> <file_id> <property> <value>").description("Edit any component property by file ID. Supports dotted paths (m_LocalPosition.x) and array paths (m_Materials.Array.data[0])").option("-j, --json", "Output as JSON").action((file, file_id, property, value, _options) => {
   const result = editComponentByFileId({
     file_path: file,
     file_id,
@@ -4529,6 +4687,20 @@ program.command("unpack-prefab <file> <prefab_instance>").description("Unpack a 
     file_path: file,
     prefab_instance,
     project_path: options.project
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("reparent <file> <object_name> <new_parent>").description('Move a GameObject under a new parent. Use "root" to move to scene root').option("-j, --json", "Output as JSON").action((file, object_name, new_parent, _options) => {
+  const result = reparentGameObject({
+    file_path: file,
+    object_name,
+    new_parent
+  });
+  console.log(JSON.stringify(result, null, 2));
+});
+program.command("create-meta <script_path>").description("Generate a Unity .meta file for a script (MonoImporter)").option("-j, --json", "Output as JSON").action((script_path, _options) => {
+  const result = createMetaFile({
+    script_path
   });
   console.log(JSON.stringify(result, null, 2));
 });

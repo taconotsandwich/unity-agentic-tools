@@ -34,7 +34,7 @@ describeIfNative('CLI', () => {
     });
 
     describe('list command', () => {
-        it('should list all GameObjects', () => {
+        it('should list all GameObjects with pagination metadata', () => {
             const result = run_cli([
                 'list',
                 resolve(fixtures_dir, 'TestSample.unity'),
@@ -42,9 +42,77 @@ describeIfNative('CLI', () => {
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('file');
-            expect(json).toHaveProperty('count');
-            expect(json).toHaveProperty('objects');
-            expect(Array.isArray(json.objects)).toBe(true);
+            expect(json).toHaveProperty('total');
+            expect(json).toHaveProperty('gameobjects');
+            expect(json).toHaveProperty('pageSize');
+            expect(json).toHaveProperty('truncated');
+            expect(Array.isArray(json.gameobjects)).toBe(true);
+        });
+
+        it('should limit results with --page-size', () => {
+            // SampleScene has 4 GameObjects; page-size 2 should truncate
+            const result = run_cli([
+                'list',
+                resolve(fixtures_dir, 'SampleScene.unity'),
+                '--page-size', '2',
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json.total).toBe(4);
+            expect(json.gameobjects).toHaveLength(2);
+            expect(json.truncated).toBe(true);
+            expect(json.nextCursor).toBe(2);
+            expect(json.pageSize).toBe(2);
+        });
+
+        it('should return second page via --cursor', () => {
+            // Fetch page 2 (cursor=2, page-size=2)
+            const result = run_cli([
+                'list',
+                resolve(fixtures_dir, 'SampleScene.unity'),
+                '--page-size', '2',
+                '--cursor', '2',
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json.total).toBe(4);
+            expect(json.gameobjects).toHaveLength(2);
+            expect(json.truncated).toBe(false);
+            expect(json.cursor).toBe(2);
+        });
+
+        it('should return empty page when cursor beyond total', () => {
+            const result = run_cli([
+                'list',
+                resolve(fixtures_dir, 'SampleScene.unity'),
+                '--cursor', '999',
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json.total).toBe(4);
+            expect(json.gameobjects).toHaveLength(0);
+            expect(json.truncated).toBe(false);
+        });
+
+        it('should return different objects on page 1 vs page 2', () => {
+            const page1 = JSON.parse(run_cli([
+                'list',
+                resolve(fixtures_dir, 'SampleScene.unity'),
+                '--page-size', '2', '--cursor', '0', '--json'
+            ]));
+            const page2 = JSON.parse(run_cli([
+                'list',
+                resolve(fixtures_dir, 'SampleScene.unity'),
+                '--page-size', '2', '--cursor', '2', '--json'
+            ]));
+            const names1 = page1.gameobjects.map((g: any) => g.name);
+            const names2 = page2.gameobjects.map((g: any) => g.name);
+            // No overlap between pages
+            for (const name of names1) {
+                expect(names2).not.toContain(name);
+            }
+            // Together they should cover all 4 objects
+            expect(names1.length + names2.length).toBe(4);
         });
     });
 
@@ -61,6 +129,37 @@ describeIfNative('CLI', () => {
             expect(json).toHaveProperty('pattern');
             expect(json).toHaveProperty('matches');
             expect(json.matches.length).toBeGreaterThan(0);
+        });
+    });
+
+    describe('inspect-all command', () => {
+        it('should return paginated output', () => {
+            const result = run_cli([
+                'inspect-all',
+                resolve(fixtures_dir, 'SampleScene.unity'),
+                '--page-size', '2',
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('total');
+            expect(json).toHaveProperty('truncated', true);
+            expect(json.gameobjects).toHaveLength(2);
+            expect(json.total).toBe(4);
+        });
+    });
+
+    describe('inspect command without identifier', () => {
+        it('should return paginated output', () => {
+            const result = run_cli([
+                'inspect',
+                resolve(fixtures_dir, 'SampleScene.unity'),
+                '--page-size', '2',
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json.total).toBe(4);
+            expect(json.gameobjects).toHaveLength(2);
+            expect(json.truncated).toBe(true);
         });
     });
 

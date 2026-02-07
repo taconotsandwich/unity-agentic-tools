@@ -30,7 +30,7 @@ var __export = (target, all) => {
 
 // ../rust-core/unity-agentic-core.darwin-arm64.node
 var require_unity_agentic_core_darwin_arm64 = __commonJS((exports2, module2) => {
-  module2.exports = require("./unity-agentic-core.darwin-arm64-6nfgz1jg.node");
+  module2.exports = require("./unity-agentic-core.darwin-arm64-eb5qd13r.node");
 });
 
 // ../rust-core/index.js
@@ -414,6 +414,16 @@ class UnityScanner {
   }
   inspect_all(file, include_properties = false, verbose = false) {
     return this.scanner.inspectAll(file, include_properties, verbose);
+  }
+  inspect_all_paginated(options) {
+    return this.scanner.inspectAllPaginated({
+      file: options.file,
+      includeProperties: options.include_properties,
+      verbose: options.verbose,
+      pageSize: options.page_size,
+      cursor: options.cursor,
+      maxDepth: options.max_depth
+    });
   }
 }
 // src/setup.ts
