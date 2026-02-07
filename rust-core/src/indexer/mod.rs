@@ -170,3 +170,106 @@ impl Indexer {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// Create a unique temp directory for each test (cleaned up on Drop).
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            let count = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+            let dir = std::env::temp_dir().join(format!("rust_indexer_test_{}_{}", std::process::id(), count));
+            let _ = fs::remove_dir_all(&dir);
+            fs::create_dir_all(&dir).expect("Failed to create temp dir");
+            TempDir(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn test_index_nonexistent_file_returns_zero_chunks() {
+        let mut indexer = Indexer {
+            storage: IndexStorage::new(),
+        };
+        let result = indexer.index_file("/nonexistent/path/to/file.md".to_string());
+        assert_eq!(result.chunks_indexed, 0);
+        assert_eq!(result.files_processed, 0);
+    }
+
+    #[test]
+    fn test_index_real_temp_md_file() {
+        let dir = TempDir::new();
+        let file_path = dir.path().join("test.md");
+        fs::write(&file_path, "## Test\n\nThis is test content for indexing.\n").unwrap();
+
+        let mut indexer = Indexer {
+            storage: IndexStorage::new(),
+        };
+        let result = indexer.index_file(file_path.to_string_lossy().to_string());
+        assert!(result.chunks_indexed > 0);
+        assert_eq!(result.files_processed, 1);
+    }
+
+    #[test]
+    fn test_index_empty_directory() {
+        let dir = TempDir::new();
+
+        let mut indexer = Indexer {
+            storage: IndexStorage::new(),
+        };
+        let result = indexer.index_directory(dir.path().to_string_lossy().to_string());
+        assert_eq!(result.files_processed, 0);
+        assert_eq!(result.chunks_indexed, 0);
+    }
+
+    #[test]
+    fn test_index_directory_with_two_md_files() {
+        let dir = TempDir::new();
+        fs::write(dir.path().join("a.md"), "## First\n\nContent one.\n").unwrap();
+        fs::write(dir.path().join("b.md"), "## Second\n\nContent two.\n").unwrap();
+
+        let mut indexer = Indexer {
+            storage: IndexStorage::new(),
+        };
+        let result = indexer.index_directory(dir.path().to_string_lossy().to_string());
+        assert_eq!(result.files_processed, 2);
+        assert!(result.chunks_indexed > 0);
+    }
+
+    #[test]
+    fn test_search_after_index_returns_results() {
+        let dir = TempDir::new();
+        // Use content where every word in the query appears in the chunk
+        // to ensure Jaccard score exceeds 0.3 threshold
+        fs::write(
+            dir.path().join("unity.md"),
+            "## Unity\n\nunity monobehaviour scripting guide\n",
+        )
+        .unwrap();
+
+        let mut indexer = Indexer {
+            storage: IndexStorage::new(),
+        };
+        indexer.index_file(dir.path().join("unity.md").to_string_lossy().to_string());
+
+        let results = indexer.search("unity monobehaviour scripting".to_string());
+        assert!(!results.is_empty(), "Search should find indexed content");
+    }
+}

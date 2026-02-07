@@ -21,12 +21,17 @@ const STORAGE_PATH = resolve(process.cwd(), '.unity-docs-index.json');
 export class DocStorage {
   private chunks: Map<string, StoredChunk> = new Map();
   private loaded: boolean = false;
+  private storagePath: string;
+
+  constructor(storagePath?: string) {
+    this.storagePath = storagePath ?? STORAGE_PATH;
+  }
 
   async init(): Promise<void> {
     if (this.loaded) return;
 
-    if (existsSync(STORAGE_PATH)) {
-      const data = readFileSync(STORAGE_PATH, 'utf-8');
+    if (existsSync(this.storagePath)) {
+      const data = readFileSync(this.storagePath, 'utf-8');
       const parsed = JSON.parse(data);
       for (const [id, chunk] of Object.entries(parsed.chunks || {})) {
         this.chunks.set(id, chunk as StoredChunk);
@@ -54,7 +59,7 @@ export class DocStorage {
       chunks: Object.fromEntries(this.chunks),
       last_updated: Date.now()
     };
-    writeFileSync(STORAGE_PATH, JSON.stringify(data, null, 2));
+    writeFileSync(this.storagePath, JSON.stringify(data, null, 2));
   }
 
   async semanticSearch(queryEmbedding: EmbeddingVector): Promise<SearchResult[]> {

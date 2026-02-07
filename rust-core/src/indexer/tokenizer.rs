@@ -29,4 +29,27 @@ mod tests {
         let tokens = estimate_tokens(text);
         assert!(tokens > 10);
     }
+
+    #[test]
+    fn test_estimate_tokens_single_char() {
+        // Single char: len=1, (1/4).max(1) = 1
+        assert_eq!(estimate_tokens("x"), 1);
+    }
+
+    #[test]
+    fn test_estimate_tokens_exact_boundaries() {
+        // 4 bytes: 4/4 = 1
+        assert_eq!(estimate_tokens("abcd"), 1);
+        // 8 bytes: 8/4 = 2
+        assert_eq!(estimate_tokens("abcdefgh"), 2);
+    }
+
+    #[test]
+    fn test_estimate_tokens_multibyte_utf8() {
+        // Rust str::len() returns byte count, not char count
+        // '€' is 3 bytes in UTF-8, so "€€" is 6 bytes -> 6/4 = 1 (max(1))
+        let text = "€€";
+        let tokens = estimate_tokens(text);
+        assert_eq!(tokens, text.len() as u32 / 4);
+    }
 }
