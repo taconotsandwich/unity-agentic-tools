@@ -659,6 +659,10 @@ function generateGuid() {
 }
 
 // src/settings.ts
+function read_setting_file(file_path) {
+  return import_fs5.readFileSync(file_path, "utf-8").replace(/\r\n/g, `
+`);
+}
 var SETTING_ALIASES = {
   tags: "TagManager",
   tagmanager: "TagManager",
@@ -827,7 +831,7 @@ function read_settings(options) {
   }
   let content;
   try {
-    content = import_fs5.readFileSync(file_path, "utf-8");
+    content = read_setting_file(file_path);
   } catch (err) {
     return {
       success: false,
@@ -876,7 +880,7 @@ function edit_settings(options) {
   }
   let content;
   try {
-    content = import_fs5.readFileSync(file_path, "utf-8");
+    content = read_setting_file(file_path);
   } catch (err) {
     return {
       success: false,
@@ -930,7 +934,7 @@ function edit_tag(options) {
   }
   let content;
   try {
-    content = import_fs5.readFileSync(file_path, "utf-8");
+    content = read_setting_file(file_path);
   } catch (err) {
     return {
       success: false,
@@ -1016,7 +1020,7 @@ function edit_layer(options) {
   }
   let content;
   try {
-    content = import_fs5.readFileSync(file_path, "utf-8");
+    content = read_setting_file(file_path);
   } catch (err) {
     return {
       success: false,
@@ -1079,7 +1083,7 @@ function edit_sorting_layer(options) {
   }
   let content;
   try {
-    content = import_fs5.readFileSync(file_path, "utf-8");
+    content = read_setting_file(file_path);
   } catch (err) {
     return {
       success: false,
