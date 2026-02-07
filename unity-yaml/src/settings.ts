@@ -15,6 +15,11 @@ import type {
     SortingLayerEditOptions,
 } from './types';
 
+/** Read a settings file and normalise line-endings so regexes work on Windows. */
+function read_setting_file(file_path: string): string {
+    return readFileSync(file_path, 'utf-8').replace(/\r\n/g, '\n');
+}
+
 /** Map friendly aliases to actual file names (without .asset). */
 const SETTING_ALIASES: Record<string, string> = {
     tags: 'TagManager',
@@ -230,7 +235,7 @@ export function read_settings(options: ReadSettingsOptions): ReadSettingsResult 
 
     let content: string;
     try {
-        content = readFileSync(file_path, 'utf-8');
+        content = read_setting_file(file_path);
     } catch (err) {
         return {
             success: false,
@@ -290,7 +295,7 @@ export function edit_settings(options: EditSettingsOptions): EditSettingsResult 
 
     let content: string;
     try {
-        content = readFileSync(file_path, 'utf-8');
+        content = read_setting_file(file_path);
     } catch (err) {
         return {
             success: false,
@@ -357,7 +362,7 @@ export function edit_tag(options: TagEditOptions): EditSettingsResult {
 
     let content: string;
     try {
-        content = readFileSync(file_path, 'utf-8');
+        content = read_setting_file(file_path);
     } catch (err) {
         return {
             success: false,
@@ -464,7 +469,7 @@ export function edit_layer(options: LayerEditOptions): EditSettingsResult {
 
     let content: string;
     try {
-        content = readFileSync(file_path, 'utf-8');
+        content = read_setting_file(file_path);
     } catch (err) {
         return {
             success: false,
@@ -541,7 +546,7 @@ export function edit_sorting_layer(options: SortingLayerEditOptions): EditSettin
 
     let content: string;
     try {
-        content = readFileSync(file_path, 'utf-8');
+        content = read_setting_file(file_path);
     } catch (err) {
         return {
             success: false,

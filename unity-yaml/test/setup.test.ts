@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { setup } from '../src/setup';
 
@@ -14,7 +14,7 @@ function create_temp_unity_project(metaFiles?: { path: string; guid: string }[])
     if (metaFiles) {
         for (const { path: relPath, guid } of metaFiles) {
             const fullPath = join(dir, relPath);
-            const parentDir = fullPath.substring(0, fullPath.lastIndexOf('/'));
+            const parentDir = dirname(fullPath);
             mkdirSync(parentDir, { recursive: true });
             writeFileSync(fullPath, `fileFormatVersion: 2\nguid: ${guid}\n`);
         }
