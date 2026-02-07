@@ -1,7 +1,7 @@
 {
   "name": "unity-agentic-tools",
   "version": "0.1.0",
-  "description": "Parse, inspect, and edit Unity YAML files (.unity, .prefab, .asset) using a native Rust backend. Use when working with Unity scenes, prefabs, or assets — returns structured data instead of raw YAML to minimize token usage. Do NOT use for non-Unity files or C# source code.",
+  "description": "Token-efficient CLI for Unity YAML files (.unity, .prefab, .asset). Use instead of raw Read for Unity files.",
   "author": {
     "name": "taconotsandwich"
   },

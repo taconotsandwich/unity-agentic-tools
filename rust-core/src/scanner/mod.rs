@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::common::{Component, GameObject, GameObjectDetail, InspectOptions, PrefabInstanceInfo, SceneInspection, ScanOptions};
+use crate::common::{Component, GameObject, GameObjectDetail, InspectOptions, PrefabInstanceInfo, SceneInspection, ScanOptions, PaginationOptions, PaginatedInspection};
 use parser::UnityYamlParser;
 use config::ComponentConfig;
 
@@ -271,6 +271,147 @@ impl Scanner {
             count: detailed.len() as u32,
             gameobjects: detailed,
             prefab_instances: prefab_opt,
+        }
+    }
+
+    /// Inspect entire file with pagination support
+    #[napi]
+    pub fn inspect_all_paginated(&mut self, options: PaginationOptions) -> PaginatedInspection {
+        let file = options.file;
+        let include_properties = options.include_properties.unwrap_or(false);
+        let verbose = options.verbose.unwrap_or(false);
+        let page_size = options.page_size.unwrap_or(200).min(1000);
+        let cursor = options.cursor.unwrap_or(0);
+        let max_depth = options.max_depth.unwrap_or(10).min(50);
+
+        let path = Path::new(&file);
+        if !path.exists() {
+            return PaginatedInspection {
+                file,
+                total: 0,
+                cursor,
+                next_cursor: None,
+                truncated: false,
+                page_size,
+                gameobjects: Vec::new(),
+                prefab_instances: None,
+            };
+        }
+
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => {
+                return PaginatedInspection {
+                    file,
+                    total: 0,
+                    cursor,
+                    next_cursor: None,
+                    truncated: false,
+                    page_size,
+                    gameobjects: Vec::new(),
+                    prefab_instances: None,
+                }
+            }
+        };
+
+        self.ensure_guid_resolver(&file);
+
+        let gameobjects = UnityYamlParser::extract_gameobjects(&content);
+        let mut detailed: Vec<GameObjectDetail> = gameobjects
+            .iter()
+            .map(|obj| {
+                let components = self.get_components_for_gameobject(&content, &obj.file_id, &file);
+                let mut detail = self.extract_gameobject_details(&content, obj, &components);
+
+                if !include_properties {
+                    for comp in &mut detail.components {
+                        comp.properties = None;
+                    }
+                }
+
+                if !verbose {
+                    for comp in &mut detail.components {
+                        comp.script_guid = None;
+                    }
+                }
+
+                detail
+            })
+            .collect();
+
+        // Apply max_depth filter: compute depth from parent_transform_id chains
+        if max_depth < 50 {
+            // Build a map of transform_id → parent_transform_id
+            let mut parent_map: HashMap<String, String> = HashMap::new();
+            for detail in &detailed {
+                if let Some(ref parent_id) = detail.parent_transform_id {
+                    // Find this object's transform file_id from its components
+                    for comp in &detail.components {
+                        if comp.class_id == 4 || comp.class_id == 224 {
+                            parent_map.insert(comp.file_id.clone(), parent_id.clone());
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Compute depth for each object
+            detailed.retain(|detail| {
+                let transform_id = detail.components.iter()
+                    .find(|c| c.class_id == 4 || c.class_id == 224)
+                    .map(|c| c.file_id.clone());
+
+                if let Some(tid) = transform_id {
+                    let mut depth = 0u32;
+                    let mut current = tid;
+                    loop {
+                        match parent_map.get(&current) {
+                            Some(parent) if parent != "0" && !parent.is_empty() => {
+                                depth += 1;
+                                if depth > max_depth {
+                                    return false;
+                                }
+                                current = parent.clone();
+                            }
+                            _ => break,
+                        }
+                    }
+                }
+                true
+            });
+        }
+
+        let total = detailed.len() as u32;
+
+        // Extract prefab instances (only on first page)
+        let prefab_instances = if cursor == 0 {
+            let pis = prefab::extract_prefab_instances(&content, &self.guid_cache);
+            if pis.is_empty() { None } else { Some(pis) }
+        } else {
+            None
+        };
+
+        // Apply pagination
+        let start = cursor as usize;
+        let end = (start + page_size as usize).min(detailed.len());
+        let truncated = end < detailed.len();
+        let next_cursor = if truncated { Some(end as u32) } else { None };
+
+        let page = if start < detailed.len() {
+            detailed[start..end].to_vec()
+        } else {
+            Vec::new()
+        };
+
+        PaginatedInspection {
+            file,
+            total,
+            cursor,
+            next_cursor,
+            truncated,
+            page_size,
+            gameobjects: page,
+            prefab_instances,
         }
     }
 

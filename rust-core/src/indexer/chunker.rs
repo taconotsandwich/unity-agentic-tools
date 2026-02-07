@@ -233,4 +233,45 @@ It should be chunked properly.
         assert!(!chunks.is_empty());
         assert!(chunks.iter().any(|c| c.chunk_type == ChunkType::Prose));
     }
+
+    #[test]
+    fn test_chunk_markdown_empty() {
+        let chunks = MarkdownChunker::chunk_markdown("", "empty.md");
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn test_chunk_markdown_no_headings() {
+        let content = "Just plain text without any headings or structure.";
+        let chunks = MarkdownChunker::chunk_markdown(content, "plain.md");
+        // Content without headings should still produce chunks (falls through to last section)
+        assert!(!chunks.is_empty());
+    }
+
+    #[test]
+    fn test_code_block_produces_chunks() {
+        let content = "## Code\n\n```csharp\nvoid Start() {}\n```\n";
+        let chunks = MarkdownChunker::chunk_markdown(content, "test.md");
+        let code_chunks: Vec<_> = chunks.iter().filter(|c| c.chunk_type == ChunkType::Code).collect();
+        assert!(!code_chunks.is_empty(), "Should extract at least one code chunk");
+        // Code content should contain the function
+        assert!(code_chunks[0].content.contains("Start"));
+    }
+
+    #[test]
+    fn test_multiple_sections_produce_multiple_chunks() {
+        let content = "## Section One\n\nFirst section content.\n\n## Section Two\n\nSecond section content.\n";
+        let chunks = MarkdownChunker::chunk_markdown(content, "test.md");
+        let prose_chunks: Vec<_> = chunks.iter().filter(|c| c.chunk_type == ChunkType::Prose).collect();
+        assert!(prose_chunks.len() >= 2, "Two sections should produce at least 2 prose chunks, got {}", prose_chunks.len());
+    }
+
+    #[test]
+    fn test_section_title_in_metadata() {
+        // Use two sections so the second one has a heading before it
+        let content = "## First\n\nFirst content.\n\n## My Section\n\nSome content under the section.\n";
+        let chunks = MarkdownChunker::chunk_markdown(content, "test.md");
+        // At least one chunk should have a section in its metadata
+        assert!(chunks.iter().any(|c| c.metadata.section.is_some()), "At least one chunk should have section metadata");
+    }
 }
