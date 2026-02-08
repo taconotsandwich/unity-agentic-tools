@@ -1,10 +1,10 @@
 ---
-description: "Download and install the native Rust binary (.node) required by the unity-yaml CLI. Run this once after installing the plugin — all CLI commands will fail without it. Detects your platform automatically (macOS/Linux/Windows) and builds the TypeScript CLI. Do NOT re-run unless upgrading the plugin or switching platforms."
+description: "Download and install the native Rust binary (.node) required by the unity-yaml CLI. The binary is auto-installed on first session start, so you typically don't need to run this manually. Use /initial-install to force a reinstall, upgrade to the latest release, or recover a missing binary."
 ---
 
 # Initial Install Command
 
-This command downloads the pre-built native binary for your platform from GitHub releases.
+The native binary is **auto-installed** on first session start via the `SessionStart` hook. Use this command to manually reinstall, upgrade, or recover the binary.
 
 ## Instructions
 
