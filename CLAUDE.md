@@ -11,10 +11,9 @@ A Claude Code plugin providing token-efficient CLI tools for parsing, analyzing,
 ## Build & Test
 
 ```bash
-bun install           # Install deps (root, unity-yaml, rust-core, doc-indexer)
-bun run build         # Build TypeScript
+bun install           # Install all deps (workspaces resolve native module)
 bun run build:rust    # Build Rust native module
-bun run build:all     # Build everything
+bun run build         # Build TypeScript
 bun run test          # Unit tests
 bun run test:integration  # CLI integration tests (bash)
 ```
@@ -34,7 +33,7 @@ doc-indexer/        Documentation indexing module
 
 ## Key Design Patterns
 
-- **Native Module on Host**: Binary stored at `~/.claude/unity-agentic-tools/bin/`, loaded by `scanner.ts`. Run `/initial-install` to download.
+- **Native Module via npm**: Published as `unity-agentic-tool` with platform-specific `optionalDependencies`. `bun install` auto-downloads the correct binary. Workspace link resolves in dev.
 - **Safe YAML Editing**: `editor.ts` preserves GUIDs, comments, class IDs. Uses temp files for atomic writes.
 - **GUID Cache**: `setup.ts` creates `.unity-agentic/` mapping script GUIDs to file paths.
 - **Token Efficiency**: `inspect` without `--properties` returns structure only. Use `--properties` when component values are needed.

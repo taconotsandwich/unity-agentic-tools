@@ -35,36 +35,12 @@ jobs:
         with:
           workspaces: rust-core -> target
 
-      - name: Install root dependencies
-        run: bun install
-
-      - name: Install unity-yaml dependencies
-        working-directory: ./unity-yaml
-        run: bun install
-
-      - name: Install doc-indexer dependencies
-        working-directory: ./doc-indexer
-        run: bun install
-
-      - name: Install unity-build-settings dependencies
-        working-directory: ./unity-build-settings
-        run: bun install
-
-      - name: Install rust-core dependencies
-        working-directory: ./rust-core
+      - name: Install dependencies
         run: bun install
 
       - name: Build native module
         working-directory: ./rust-core
         run: bun run build
-
-      - name: Copy native binary to host location
-        shell: bash
-        run: |
-          mkdir -p ~/.claude/unity-agentic-tools/bin
-          find rust-core -name "*.node" -exec cp {} ~/.claude/unity-agentic-tools/bin/ \;
-          echo "Copied binary to host location:"
-          ls -la ~/.claude/unity-agentic-tools/bin/
 
       - name: Build TypeScript packages
         run: bun run build
@@ -104,12 +80,12 @@ jobs:
             cat .claude-plugin/plugin.json | jq .
           fi
 
-      - name: Test CLI with native module from host location (Unix)
+      - name: Test CLI with native module (Unix)
         if: runner.os != 'Windows'
         run: |
-          echo "Testing CLI with native module from host location..."
+          echo "Testing CLI with native module via workspace..."
           bun unity-yaml/dist/cli.js status
-          echo "Native module loaded successfully from ~/.claude/unity-agentic-tools/bin/"
+          echo "Native module loaded successfully via workspace resolution"
 
       - name: Generate test coverage
         if: matrix.os == 'ubuntu-latest'

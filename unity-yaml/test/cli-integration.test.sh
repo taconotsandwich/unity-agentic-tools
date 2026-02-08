@@ -8,7 +8,7 @@ echo "=== Testing Unity CLI Integration ==="
 status_output=$(bun dist/cli.js status 2>&1)
 if echo "$status_output" | grep -q '"native_module": false'; then
     echo "⚠ Native Rust module not available - skipping integration tests"
-    echo "  Run /initial-install to download the pre-built binary"
+    echo "  Run bun install in the project root"
     exit 0
 fi
 

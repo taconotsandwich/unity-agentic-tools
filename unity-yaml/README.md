@@ -21,10 +21,7 @@ See the main plugin README for available commands:
 
 ### Slow on large scenes
 
-The Rust backend may not be installed. Re-run:
-```
-/unity-agentic-tools:initial-install
-```
+The Rust backend may not be installed. Run `bun install` in the project root to resolve the native module.
 
 ### Script names show as GUIDs
 

@@ -22,9 +22,6 @@ https://github.com/taconotsandwich/unity-agentic-tools
 
 # Then install the plugin
 /plugin install unity-agentic-tools@unity-agentic-tools-marketplace
-
-# Install the native binary
-/unity-agentic-tools:initial-install
 ```
 
 ### From Source
@@ -33,11 +30,14 @@ https://github.com/taconotsandwich/unity-agentic-tools
 git clone https://github.com/taconotsandwich/unity-agentic-tools.git
 cd unity-agentic-tools
 
+# Install all dependencies (workspace resolves native module)
+bun install
+
 # Build Rust core (requires Rust toolchain)
-cd rust-core && bun install && bun run build && cd ..
+bun run build:rust
 
 # Build TypeScript CLI
-cd unity-yaml && bun install && bun run build && cd ..
+bun run build
 
 # Load plugin locally
 claude --plugin-dir ./

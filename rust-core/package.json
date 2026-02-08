@@ -1,19 +1,27 @@
 {
-  "name": "unity-agentic-core",
+  "name": "unity-agentic-tool",
   "version": "0.1.0",
   "description": "High-performance Unity YAML parser - Rust native module",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
-    "name": "unity-agentic-core",
+    "name": "unity-agentic-tool",
     "triples": {
-      "defaults": true,
-      "additional": []
+      "defaults": false,
+      "additional": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc"
+      ]
     }
   },
   "scripts": {
     "build": "napi build --platform --release",
-    "build:debug": "napi build --platform"
+    "build:debug": "napi build --platform",
+    "artifacts": "napi artifacts",
+    "prepublishOnly": "napi prepublish -t npm",
+    "version": "napi version"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0"
@@ -21,7 +29,12 @@
   "license": "Apache-2.0",
   "files": [
     "index.js",
-    "index.d.ts",
-    "*.node"
-  ]
+    "index.d.ts"
+  ],
+  "optionalDependencies": {
+    "unity-agentic-tool-darwin-arm64": "0.1.0",
+    "unity-agentic-tool-darwin-x64": "0.1.0",
+    "unity-agentic-tool-linux-x64-gnu": "0.1.0",
+    "unity-agentic-tool-win32-x64-msvc": "0.1.0"
+  }
 }

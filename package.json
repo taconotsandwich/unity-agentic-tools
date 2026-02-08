@@ -1,11 +1,12 @@
 {
   "packageManager": "bun@latest",
+  "workspaces": ["rust-core", "unity-yaml", "doc-indexer", "unity-build-settings"],
   "scripts": {
     "build": "bun run build:unity-yaml && bun run build:doc-indexer && bun run build:build-settings",
     "build:unity-yaml": "cd unity-yaml && bun run build",
     "build:doc-indexer": "cd doc-indexer && bun run build",
     "build:build-settings": "cd unity-build-settings && bun run build",
-    "build:rust": "cd rust-core && bun install && bun run build",
+    "build:rust": "cd rust-core && bun run build",
     "build:all": "bun run build:rust || echo 'Rust build skipped' && bun run build",
     "test": "bun run test:unity-yaml && bun run test:build-settings && bun run test:doc-indexer",
     "test:unity-yaml": "cd unity-yaml && bun run test",
