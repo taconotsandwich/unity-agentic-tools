@@ -73,22 +73,79 @@ rust-core/        Native Rust module (napi-rs)
 
 ## Development
 
+Requires: Rust toolchain, Bun runtime.
+
+### First-time setup
+
 ```bash
-# Run tests
-bun run test
-
-# Run CLI integration tests
-bun run test:integration
-
-# Type check
-bun run type-check
+git clone https://github.com/taconotsandwich/unity-agentic-tools.git
+cd unity-agentic-tools
+bun install                # workspace links + dev deps
+bun run build:rust         # compile native .node binary (requires Rust)
+bun run build              # build TypeScript
 ```
 
-## Requirements
+### Testing in Claude Code
 
-- Claude Code CLI
-- Bun runtime (bundled with Claude Code)
-- Rust toolchain (for building from source)
+```bash
+# Load the plugin from your local checkout
+claude --plugin-dir /path/to/unity-agentic-tools
+```
+
+The SessionStart hook checks for `node_modules/` and `dist/cli.js` and runs
+`bun install` + `bun run build` if missing. Since you already built locally,
+the hook exits instantly.
+
+The native module resolves via the workspace link to `rust-core/`, which finds
+your locally-built `.node` file directly -- no npm download needed.
+
+### Rebuild after changes
+
+```bash
+bun run build:rust         # after Rust code changes
+bun run build              # after TypeScript changes
+bun run test               # unit tests (294 + 50 + 37)
+bun run test:integration   # CLI integration tests
+bun run type-check         # tsc --noEmit
+```
+
+### How users differ from devs
+
+| | User (marketplace) | Dev (local) |
+|-|-------------------|-------------|
+| Install | git clone via marketplace | git clone manually |
+| Native binary | `bun install` downloads from npm | `bun run build:rust` compiles locally |
+| Setup | SessionStart hook runs automatically | Manual `bun install` + `bun run build:rust` + `bun run build` |
+| Rust toolchain | Not needed | Required |
+
+Both resolve the native module through the same `rust-core/index.js` loader.
+It checks for a local `.node` file first (dev path), then falls back to the
+npm platform package (user path).
+
+### Testing npm package changes
+
+After changing `rust-core/package.json`, `rust-core/npm/*/package.json`, or
+`rust-core/index.js`:
+
+```bash
+# Verify main package contents (should list index.js, index.d.ts, package.json)
+cd rust-core && npm publish --dry-run
+
+# Create tarballs to test install from scratch
+cd rust-core && npm pack                          # -> unity-agentic-tool-0.1.0.tgz
+cd rust-core/npm/darwin-arm64 && npm pack         # -> unity-agentic-tool-darwin-arm64-0.1.0.tgz
+
+# Test in an isolated directory
+mkdir /tmp/npm-test && cd /tmp/npm-test
+npm init -y
+npm install /path/to/rust-core/unity-agentic-tool-0.1.0.tgz
+npm install /path/to/rust-core/npm/darwin-arm64/unity-agentic-tool-darwin-arm64-0.1.0.tgz
+bun -e "const m = require('unity-agentic-tool'); console.log(typeof m.Scanner)"
+# Should print: function
+```
+
+The `npm pack` + install-from-tarball flow simulates what a real npm consumer
+gets, without publishing anything.
 
 ## License
 
