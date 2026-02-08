@@ -2330,11 +2330,15 @@ var STORAGE_PATH = import_path2.resolve(process.cwd(), ".unity-docs-index.json")
 class DocStorage {
   chunks = new Map;
   loaded = false;
+  storagePath;
+  constructor(storagePath) {
+    this.storagePath = storagePath ?? STORAGE_PATH;
+  }
   async init() {
     if (this.loaded)
       return;
-    if (import_fs2.existsSync(STORAGE_PATH)) {
-      const data = import_fs2.readFileSync(STORAGE_PATH, "utf-8");
+    if (import_fs2.existsSync(this.storagePath)) {
+      const data = import_fs2.readFileSync(this.storagePath, "utf-8");
       const parsed = JSON.parse(data);
       for (const [id, chunk] of Object.entries(parsed.chunks || {})) {
         this.chunks.set(id, chunk);
@@ -2359,7 +2363,7 @@ class DocStorage {
       chunks: Object.fromEntries(this.chunks),
       last_updated: Date.now()
     };
-    import_fs2.writeFileSync(STORAGE_PATH, JSON.stringify(data, null, 2));
+    import_fs2.writeFileSync(this.storagePath, JSON.stringify(data, null, 2));
   }
   async semanticSearch(queryEmbedding) {
     await this.init();
@@ -2488,7 +2492,7 @@ class DocSearch {
 // src/cli.ts
 var program2 = new Command;
 program2.name("unity-doc-indexer").description("Fast Unity documentation indexer with RAG").version("1.0.0");
-program2.command("index <path>", "Index documentation").action(async (path) => {
+program2.command("index <path>").description("Index documentation").action(async (path) => {
   console.log(`Indexing: ${path}`);
   const stat = require("fs").statSync(path);
   if (stat.isDirectory()) {
@@ -2508,7 +2512,7 @@ program2.command("index <path>", "Index documentation").action(async (path) => {
     process.exit(1);
   }
 });
-program2.command("search <query>", "Search documentation").action(async (query) => {
+program2.command("search <query>").description("Search documentation").action(async (query) => {
   const storage = new DocStorage;
   const searcher = new DocSearch(storage);
   const results = await searcher.search({
@@ -2527,7 +2531,7 @@ program2.command("search <query>", "Search documentation").action(async (query) 
     console.log(`Score: ${result.score.toFixed(4)}`);
   }
 });
-program2.command("clear", "Clear old indices").action(async () => {
+program2.command("clear").description("Clear old indices").action(async () => {
   const storage = new DocStorage;
   await storage.clearOldChunks();
   console.log("Cleared old chunks");

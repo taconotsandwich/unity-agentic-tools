@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::common::{Component, GameObject, GameObjectDetail, InspectOptions, PrefabInstanceInfo, SceneInspection, ScanOptions, PaginationOptions, PaginatedInspection};
+use crate::common::{Component, FindResult, GameObject, GameObjectDetail, InspectOptions, PrefabInstanceInfo, SceneInspection, ScanOptions, PaginationOptions, PaginatedInspection};
 use parser::UnityYamlParser;
 use config::ComponentConfig;
 
@@ -119,25 +119,44 @@ impl Scanner {
         results
     }
 
-    /// Find GameObjects by name pattern
+    /// Find GameObjects and PrefabInstances by name pattern
     #[napi]
-    pub fn find_by_name(&self, file: String, pattern: String, fuzzy: bool) -> Vec<GameObject> {
-        let gameobjects = self.scan_scene_minimal(file);
+    pub fn find_by_name(&mut self, file: String, pattern: String, fuzzy: bool) -> Vec<FindResult> {
+        let path = Path::new(&file);
+        if !path.exists() {
+            return Vec::new();
+        }
+
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+
+        let gameobjects = UnityYamlParser::extract_gameobjects(&content);
+
+        self.ensure_guid_resolver(&file);
+        let prefab_instances = prefab::extract_prefab_instances(&content, &self.guid_cache);
 
         if fuzzy {
             let lower_pattern = pattern.to_lowercase();
-            let mut matches: Vec<GameObject> = gameobjects
-                .into_iter()
-                .filter_map(|mut obj| {
-                    let lower_name = obj.name.to_lowercase();
-                    if lower_name.contains(&lower_pattern) {
-                        obj.match_score = Some(calculate_fuzzy_score(&lower_pattern, &lower_name));
-                        Some(obj)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+
+            let mut matches: Vec<FindResult> = Vec::new();
+
+            for go in &gameobjects {
+                let lower_name = go.name.to_lowercase();
+                if lower_name.contains(&lower_pattern) {
+                    let score = calculate_fuzzy_score(&lower_pattern, &lower_name);
+                    matches.push(FindResult::from_game_object(go, Some(score)));
+                }
+            }
+
+            for pi in &prefab_instances {
+                let lower_name = pi.name.to_lowercase();
+                if lower_name.contains(&lower_pattern) {
+                    let score = calculate_fuzzy_score(&lower_pattern, &lower_name);
+                    matches.push(FindResult::from_prefab_instance(pi, Some(score)));
+                }
+            }
 
             matches.sort_by(|a, b| {
                 b.match_score
@@ -148,10 +167,21 @@ impl Scanner {
 
             matches
         } else {
-            gameobjects
-                .into_iter()
-                .filter(|obj| obj.name == pattern)
-                .collect()
+            let mut matches: Vec<FindResult> = Vec::new();
+
+            for go in &gameobjects {
+                if go.name == pattern {
+                    matches.push(FindResult::from_game_object(go, None));
+                }
+            }
+
+            for pi in &prefab_instances {
+                if pi.name == pattern {
+                    matches.push(FindResult::from_prefab_instance(pi, None));
+                }
+            }
+
+            matches
         }
     }
 
@@ -177,16 +207,7 @@ impl Scanner {
             identifier.clone()
         } else {
             let matches = self.find_by_name(options.file.clone(), identifier.clone(), true);
-            match matches.first() {
-                Some(m) => m.file_id.clone(),
-                None => {
-                    // Fallback: search PrefabInstances by name
-                    let prefabs = prefab::extract_prefab_instances(&content, &self.guid_cache);
-                    let lower = identifier.to_lowercase();
-                    let pi = prefabs.iter().find(|p| p.name.to_lowercase().contains(&lower))?;
-                    return Some(self.build_prefab_instance_output(pi));
-                }
-            }
+            matches.first()?.file_id.clone()
         };
 
         // Check if target_file_id matches a PrefabInstance
