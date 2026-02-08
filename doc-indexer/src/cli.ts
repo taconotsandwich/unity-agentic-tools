@@ -9,25 +9,30 @@ const program = new Command();
 
 program
   .name('unity-doc-indexer')
-  .description('Fast Unity documentation indexer with RAG')
+  .description('Fast Unity documentation indexer with local embeddings')
   .version('1.0.0');
 
 program
-  .command('index <path>', 'Index documentation')
+  .command('index <path>')
+  .description('Index documentation')
   .action(async (path) => {
     console.log(`Indexing: ${path}`);
+    const storage = new DocStorage();
 
     const stat = require('fs').statSync(path);
     if (stat.isDirectory()) {
-      const result = await indexDocsDirectory(path);
+      const result = await indexDocsDirectory(path, ['.md', '.txt'], storage);
       console.log(`Indexed ${result.chunks_indexed} chunks (${result.total_tokens} tokens)`);
+      if (result.embeddings_generated > 0) {
+        console.log(`Generated ${result.embeddings_generated} embeddings`);
+      }
       console.log(`Processed ${result.files_processed} files in ${result.elapsed_ms}ms`);
     } else if (path.endsWith('.md')) {
-      const result = indexMarkdownFile(path);
+      const result = indexMarkdownFile(path, storage);
       console.log(`Indexed ${result.chunks_indexed} chunks (${result.total_tokens} tokens)`);
       console.log(`Processed in ${result.elapsed_ms}ms`);
     } else if (path.endsWith('.asset')) {
-      const result = await indexScriptableObject(path);
+      const result = indexScriptableObject(path, storage);
       console.log(`Indexed ${result.chunks_indexed} chunks (${result.total_tokens} tokens)`);
       console.log(`Processed in ${result.elapsed_ms}ms`);
     } else {
@@ -37,7 +42,8 @@ program
   });
 
 program
-  .command('search <query>', 'Search documentation')
+  .command('search <query>')
+  .description('Search documentation')
   .action(async (query) => {
     const storage = new DocStorage();
     const searcher = new DocSearch(storage);
@@ -61,7 +67,8 @@ program
   });
 
 program
-  .command('clear', 'Clear old indices')
+  .command('clear')
+  .description('Clear old indices')
   .action(async () => {
     const storage = new DocStorage();
     await storage.clearOldChunks();

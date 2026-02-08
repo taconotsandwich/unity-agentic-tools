@@ -2184,7 +2184,6 @@ export function unpackPrefab(options: UnpackPrefabOptions): UnpackPrefabResult {
  * Check if candidateAncestorTransformId is an ancestor of childTransformId
  * by walking up the m_Father chain. Prevents circular parenting.
  *
- * TODO(human): Implement the ancestor walk logic
  */
 function isAncestor(content: string, childTransformId: number, candidateAncestorTransformId: number): boolean {
   // Walk up from candidateAncestorTransformId's m_Father chain.

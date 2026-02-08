@@ -104,6 +104,14 @@ fn extract_single_component_with_config(
                     // Try to resolve GUID to path
                     if let Some(path) = guid_cache.get(&guid) {
                         component.script_path = Some(path.clone());
+
+                        // Derive script_name from file stem
+                        if let Some(stem) = std::path::Path::new(path)
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                        {
+                            component.script_name = Some(stem.to_string());
+                        }
                     }
                 }
             }
@@ -111,7 +119,7 @@ fn extract_single_component_with_config(
     }
 
     // Extract properties
-    component.properties = Some(extract_properties(content, file_id, class_id));
+    component.properties = Some(extract_properties(content, file_id, class_id, guid_cache));
 
     Some(component)
 }
@@ -126,7 +134,25 @@ const METADATA_PROPERTIES: &[&str] = &[
     "PrefabInternal",
 ];
 
-fn extract_properties(content: &str, file_id: &str, class_id: u32) -> serde_json::Value {
+/// Resolve GUID references in a property value string.
+/// Matches `{fileID: X, guid: <32hex>, type: N}` and appends ` -> resolved/path` when found in cache.
+fn resolve_guid_in_value(value: &str, guid_cache: &HashMap<String, String>) -> String {
+    if !value.contains("guid:") {
+        return value.to_string();
+    }
+    let guid_re = Regex::new(r"guid:\s*([a-f0-9]{32})").unwrap();
+    if let Some(caps) = guid_re.captures(value) {
+        if let Some(guid_match) = caps.get(1) {
+            let guid = guid_match.as_str();
+            if let Some(path) = guid_cache.get(guid) {
+                return format!("{} -> {}", value, path);
+            }
+        }
+    }
+    value.to_string()
+}
+
+fn extract_properties(content: &str, file_id: &str, class_id: u32, guid_cache: &HashMap<String, String>) -> serde_json::Value {
     // Find the start of this block
     let header = format!("--- !u!{} &{}", class_id, file_id);
     let start_pos = match content.find(&header) {
@@ -151,7 +177,8 @@ fn extract_properties(content: &str, file_id: &str, class_id: u32) -> serde_json
                     continue;
                 }
                 let clean_value = value.as_str().trim().to_string();
-                props.insert(clean_name, serde_json::json!(clean_value));
+                let resolved_value = resolve_guid_in_value(&clean_value, guid_cache);
+                props.insert(clean_name, serde_json::json!(resolved_value));
             }
         }
     }
@@ -166,7 +193,7 @@ mod tests {
     #[test]
     fn test_extract_properties() {
         let content = "--- !u!4 &123\nTransform:\n  m_ObjectHideFlags: 0\n  m_LocalPosition: {x: 0, y: 0, z: 0}\n  m_LocalScale: {x: 1, y: 1, z: 1}\n";
-        let props = extract_properties(content, "123", 4);
+        let props = extract_properties(content, "123", 4, &HashMap::new());
         assert!(props.is_object());
         let obj = props.as_object().unwrap();
         assert!(obj.contains_key("LocalPosition"));
@@ -176,7 +203,7 @@ mod tests {
     #[test]
     fn test_metadata_properties_filtered() {
         let content = "--- !u!4 &456\nTransform:\n  m_ObjectHideFlags: 0\n  m_CorrespondingSourceObject: {fileID: 0}\n  m_PrefabInstance: {fileID: 0}\n  m_PrefabAsset: {fileID: 0}\n  m_LocalPosition: {x: 1, y: 2, z: 3}\n";
-        let props = extract_properties(content, "456", 4);
+        let props = extract_properties(content, "456", 4, &HashMap::new());
         let obj = props.as_object().unwrap();
         // Metadata should be filtered out
         assert!(!obj.contains_key("ObjectHideFlags"));
@@ -185,5 +212,126 @@ mod tests {
         assert!(!obj.contains_key("PrefabAsset"));
         // Real properties should remain
         assert!(obj.contains_key("LocalPosition"));
+    }
+
+    #[test]
+    fn test_script_name_populated_from_path() {
+        // MonoBehaviour with GUID in cache -> script_name derived from path
+        let content = "\
+--- !u!1 &100\nGameObject:\n  m_Component:\n  - component: {fileID: 200}\n\
+--- !u!114 &200\nMonoBehaviour:\n  m_Script: {fileID: 11500000, guid: aabbccdd11223344aabbccdd11223344, type: 3}\n  m_Enabled: 1\n";
+        let mut cache = HashMap::new();
+        cache.insert(
+            "aabbccdd11223344aabbccdd11223344".to_string(),
+            "Assets/Scripts/PlayerController.cs".to_string(),
+        );
+        let result = extract_single_component(content, "200", &cache);
+        let comp = result.expect("should find component");
+        assert_eq!(comp.script_name, Some("PlayerController".to_string()));
+        assert_eq!(comp.script_path, Some("Assets/Scripts/PlayerController.cs".to_string()));
+    }
+
+    #[test]
+    fn test_script_name_none_when_guid_not_in_cache() {
+        let content = "\
+--- !u!1 &100\nGameObject:\n  m_Component:\n  - component: {fileID: 300}\n\
+--- !u!114 &300\nMonoBehaviour:\n  m_Script: {fileID: 11500000, guid: ffffffffffffffffffffffffffffffff, type: 3}\n";
+        let cache = HashMap::new(); // empty
+        let result = extract_single_component(content, "300", &cache);
+        let comp = result.expect("should find component");
+        assert!(comp.script_name.is_none());
+        assert!(comp.script_path.is_none());
+        assert_eq!(comp.script_guid, Some("ffffffffffffffffffffffffffffffff".to_string()));
+    }
+
+    #[test]
+    fn test_script_name_handles_nested_path() {
+        let content = "\
+--- !u!1 &100\nGameObject:\n  m_Component:\n  - component: {fileID: 400}\n\
+--- !u!114 &400\nMonoBehaviour:\n  m_Script: {fileID: 11500000, guid: 11111111222222223333333344444444, type: 3}\n";
+        let mut cache = HashMap::new();
+        cache.insert(
+            "11111111222222223333333344444444".to_string(),
+            "Assets/Scripts/UI/Panels/HealthBarUI.cs".to_string(),
+        );
+        let result = extract_single_component(content, "400", &cache);
+        let comp = result.expect("should find component");
+        assert_eq!(comp.script_name, Some("HealthBarUI".to_string()));
+    }
+
+    #[test]
+    fn test_non_script_component_has_no_script_name() {
+        let content = "\
+--- !u!1 &100\nGameObject:\n  m_Component:\n  - component: {fileID: 500}\n\
+--- !u!4 &500\nTransform:\n  m_LocalPosition: {x: 0, y: 0, z: 0}\n";
+        let cache = HashMap::new();
+        let result = extract_single_component(content, "500", &cache);
+        let comp = result.expect("should find component");
+        assert_eq!(comp.type_name, "Transform");
+        assert!(comp.script_name.is_none());
+        assert!(comp.script_guid.is_none());
+        assert!(comp.script_path.is_none());
+    }
+
+    // --- GUID resolution in property values ---
+
+    #[test]
+    fn test_resolve_guid_in_value_with_known_guid() {
+        let mut cache = HashMap::new();
+        cache.insert(
+            "aabbccdd11223344aabbccdd11223344".to_string(),
+            "Assets/Scripts/PlayerController.cs".to_string(),
+        );
+        let input = "{fileID: 11500000, guid: aabbccdd11223344aabbccdd11223344, type: 3}";
+        let result = resolve_guid_in_value(input, &cache);
+        assert!(result.contains("-> Assets/Scripts/PlayerController.cs"));
+        assert!(result.starts_with("{fileID:"));
+    }
+
+    #[test]
+    fn test_resolve_guid_in_value_unknown_guid() {
+        let cache = HashMap::new();
+        let input = "{fileID: 11500000, guid: ffffffffffffffffffffffffffffffff, type: 3}";
+        let result = resolve_guid_in_value(input, &cache);
+        assert_eq!(result, input); // unchanged
+    }
+
+    #[test]
+    fn test_resolve_guid_in_value_no_guid() {
+        let cache = HashMap::new();
+        let input = "{x: 1, y: 2}";
+        let result = resolve_guid_in_value(input, &cache);
+        assert_eq!(result, input); // fast path, no "guid:" substring
+    }
+
+    #[test]
+    fn test_resolve_guid_in_value_null_reference() {
+        let cache = HashMap::new();
+        let input = "{fileID: 0}";
+        let result = resolve_guid_in_value(input, &cache);
+        assert_eq!(result, input); // no guid field at all
+    }
+
+    #[test]
+    fn test_extract_properties_with_guid_resolution() {
+        let mut cache = HashMap::new();
+        cache.insert(
+            "aabbccdd11223344aabbccdd11223344".to_string(),
+            "Assets/Scripts/PlayerController.cs".to_string(),
+        );
+        let content = "--- !u!114 &600\nMonoBehaviour:\n  m_Script: {fileID: 11500000, guid: aabbccdd11223344aabbccdd11223344, type: 3}\n  m_Enabled: 1\n";
+        let props = extract_properties(content, "600", 114, &cache);
+        let obj = props.as_object().unwrap();
+        let script_val = obj.get("Script").unwrap().as_str().unwrap();
+        assert!(script_val.contains("-> Assets/Scripts/PlayerController.cs"));
+    }
+
+    #[test]
+    fn test_extract_properties_preserves_non_guid_values() {
+        let content = "--- !u!4 &700\nTransform:\n  m_LocalPosition: {x: 0, y: 0, z: 0}\n  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}\n";
+        let props = extract_properties(content, "700", 4, &HashMap::new());
+        let obj = props.as_object().unwrap();
+        assert_eq!(obj.get("LocalPosition").unwrap().as_str().unwrap(), "{x: 0, y: 0, z: 0}");
+        assert_eq!(obj.get("LocalRotation").unwrap().as_str().unwrap(), "{x: 0, y: 0, z: 0, w: 1}");
     }
 }

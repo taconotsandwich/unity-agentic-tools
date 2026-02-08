@@ -5,7 +5,7 @@ capabilities: ["yaml-editing", "property-modification", "hierarchy-management"]
 
 # Unity Editor
 
-Run: `bun unity-yaml/dist/cli.js <command>`
+Run: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js <command>`
 
 - **inspect** `<file>` `<id>` `--properties` — check state before editing
 - **edit** `<file>` `<name>` `<prop>` `<value>` — modify property
