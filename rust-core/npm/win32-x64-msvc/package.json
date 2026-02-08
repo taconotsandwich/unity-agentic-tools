@@ -1,0 +1,19 @@
+{
+  "name": "unity-agentic-tool-win32-x64-msvc",
+  "version": "0.1.0",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "unity-agentic-tool.win32-x64-msvc.node",
+  "files": [
+    "unity-agentic-tool.win32-x64-msvc.node"
+  ],
+  "description": "Native binary for unity-agentic-tool (Windows x64)",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 10"
+  }
+}

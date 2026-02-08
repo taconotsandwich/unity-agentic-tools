@@ -18,9 +18,9 @@
   ],
   "scripts": {
     "build": "bun run build:lib && bun run build:cli",
-    "build:lib": "bun build src/index.ts --outdir=dist --target=bun --format=cjs",
-    "build:cli": "bun build src/cli.ts --outdir=dist --target=bun --format=cjs",
-    "build:rust": "cd ../rust-core && bun install && bun run build",
+    "build:lib": "bun build src/index.ts --outdir=dist --target=bun --format=cjs --external unity-agentic-tool",
+    "build:cli": "bun build src/cli.ts --outdir=dist --target=bun --format=cjs --external unity-agentic-tool",
+    "build:rust": "cd ../rust-core && bun run build",
     "build:all": "bun run build:rust || echo 'Rust build skipped' && bun run build",
     "dev": "bun build src/index.ts --watch",
     "clean": "rm -rf dist",
@@ -30,7 +30,8 @@
     "test:coverage": "bun test --coverage"
   },
   "dependencies": {
-    "commander": "^14.0.2"
+    "commander": "^14.0.2",
+    "unity-agentic-tool": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.0.0",

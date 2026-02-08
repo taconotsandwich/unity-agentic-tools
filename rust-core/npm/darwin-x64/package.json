@@ -1,0 +1,19 @@
+{
+  "name": "unity-agentic-tool-darwin-x64",
+  "version": "0.1.0",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "unity-agentic-tool.darwin-x64.node",
+  "files": [
+    "unity-agentic-tool.darwin-x64.node"
+  ],
+  "description": "Native binary for unity-agentic-tool (macOS x64)",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 10"
+  }
+}

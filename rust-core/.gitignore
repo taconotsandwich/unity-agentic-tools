@@ -1,10 +1,11 @@
 # Rust build artifacts
 target/
 
-# napi-rs build output
+# napi-rs build output (local .node files in root)
 *.node
-index.js
-index.d.ts
+
+# Platform package binaries (populated by napi artifacts during CI)
+npm/*/*.node
 
 # Node.js
 node_modules/

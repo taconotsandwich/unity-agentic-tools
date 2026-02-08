@@ -122,7 +122,7 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
             cursor: 0,
             truncated: false,
             matches: [],
-            error: 'Native scanner module not available. Run /initial-install first.',
+            error: 'Native scanner module not available. Run bun install in the project root.',
         };
     }
 

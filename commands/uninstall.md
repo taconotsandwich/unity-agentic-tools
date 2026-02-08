@@ -1,19 +1,13 @@
 ---
-description: "Remove the native Rust binary and clean up all host artifacts created by /initial-install. Run this before removing the plugin to leave nothing behind."
+description: "Remove the unity-agentic-tools plugin. Since native binaries are managed by npm, no manual cleanup is needed."
 ---
 
 # Uninstall Command
 
-This command removes every file the installer wrote to the host machine, using a manifest to track exactly what was created.
+The native binary is installed as an npm package via `bun install`. Removing the plugin removes everything.
 
 ## Instructions
 
-Run the uninstall script:
+To remove the plugin, simply uninstall it from Claude Code. No host artifacts remain.
 
-```bash
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/install-binary.ts uninstall
-```
-
-This reads `~/.claude/unity-agentic-tools/manifest.json` and removes every file listed, then cleans up the manifest and any empty parent directories.
-
-After running this, the plugin can be safely removed with no host artifacts remaining.
+If you installed from source, delete the cloned directory.

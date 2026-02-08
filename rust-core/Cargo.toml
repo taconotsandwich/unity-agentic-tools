@@ -1,5 +1,5 @@
 [package]
-name = "unity-agentic-core"
+name = "unity-agentic-tool"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"

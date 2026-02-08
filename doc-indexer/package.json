@@ -9,13 +9,14 @@
     "unity-doc-indexer": "./dist/cli.js"
   },
   "scripts": {
-    "build": "bun build src/cli.ts --outfile=dist/cli.js --target=bun --format=cjs",
+    "build": "bun build src/cli.ts --outfile=dist/cli.js --target=bun --format=cjs --external unity-agentic-tool",
     "start": "bun dist/cli.js",
     "dev": "bun src/cli.ts",
     "test": "vitest run"
   },
   "dependencies": {
-    "commander": "^14.0.0"
+    "commander": "^14.0.0",
+    "unity-agentic-tool": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.0.0",
