@@ -50,9 +50,11 @@ function getVersions() {
     versions.plugin = plugin.version;
   }
 
-  const marketplace = readJSON(FILES.marketplace);
-  if (marketplace && marketplace.plugins && marketplace.plugins[0]) {
-    versions.marketplace = marketplace.plugins[0].version;
+  if (fs.existsSync(FILES.marketplace)) {
+    const marketplace = readJSON(FILES.marketplace);
+    if (marketplace && marketplace.plugins && marketplace.plugins[0]) {
+      versions.marketplace = marketplace.plugins[0].version;
+    }
   }
 
   return versions;
@@ -109,12 +111,14 @@ function syncVersions(targetVersion) {
     console.log(`  Updated: .claude-plugin/plugin.json`);
   }
 
-  // Update marketplace.json
-  const marketplace = readJSON(FILES.marketplace);
-  if (marketplace && marketplace.plugins && marketplace.plugins[0]) {
-    marketplace.plugins[0].version = version;
-    writeJSON(FILES.marketplace, marketplace);
-    console.log(`  Updated: marketplace.json`);
+  // Update marketplace.json (optional — may not exist yet)
+  if (fs.existsSync(FILES.marketplace)) {
+    const marketplace = readJSON(FILES.marketplace);
+    if (marketplace && marketplace.plugins && marketplace.plugins[0]) {
+      marketplace.plugins[0].version = version;
+      writeJSON(FILES.marketplace, marketplace);
+      console.log(`  Updated: marketplace.json`);
+    }
   }
 
   console.log('\nVersion synchronization complete!');

@@ -5,7 +5,7 @@ capabilities: ["project-scanning", "asset-discovery", "structure-verification"]
 
 # Unity Scanner
 
-Read-only. Run: `bun unity-yaml/dist/cli.js <command>`
+Read-only. Run: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js <command>`
 
 - **list** `<file>` — hierarchy tree
 - **find** `<file>` `<pattern>` `[--exact]` — search by name

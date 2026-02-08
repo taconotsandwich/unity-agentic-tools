@@ -49,12 +49,12 @@ fn extract_prefab_block(content: &str, file_id: &str) -> Option<String> {
 
 /// Extract the display name from m_Modifications (looks for propertyPath: m_Name)
 pub fn extract_name_from_modifications(block: &str) -> Option<String> {
+    let value_re = Regex::new(r"value:\s*(.+)").ok()?;
     let lines: Vec<&str> = block.lines().collect();
     for (i, line) in lines.iter().enumerate() {
         if line.contains("propertyPath: m_Name") {
             // The value is on the next line
             if let Some(next_line) = lines.get(i + 1) {
-                let value_re = Regex::new(r"value:\s*(.+)").ok()?;
                 if let Some(caps) = value_re.captures(next_line) {
                     let name = caps.get(1)?.as_str().trim().to_string();
                     if !name.is_empty() {

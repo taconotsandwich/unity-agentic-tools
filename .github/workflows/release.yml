@@ -19,13 +19,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          cache: true
-          cache-dependency-path: |
-            bun.lock
-            unity-yaml/bun.lock
-            doc-indexer/bun.lock
+        uses: oven-sh/setup-bun@v2
 
       - name: Install root dependencies
         run: bun install

@@ -25,14 +25,7 @@ jobs:
           submodules: true
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          cache: true
-          cache-dependency-path: |
-            bun.lock
-            unity-yaml/bun.lock
-            doc-indexer/bun.lock
-            unity-build-settings/bun.lock
+        uses: oven-sh/setup-bun@v2
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
