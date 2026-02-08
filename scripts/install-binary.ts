@@ -4,7 +4,7 @@
  * Binary is stored on the host machine at ~/.claude/unity-agentic-tools/bin/
  */
 
-import { existsSync, mkdirSync, writeFileSync, chmodSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, chmodSync, rmSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 
@@ -108,36 +108,38 @@ async function buildTypeScript(pluginRoot: string): Promise<void> {
   console.log('Build complete!');
 }
 
-async function installCliWrapper(pluginRoot: string): Promise<void> {
-  if (process.platform === 'win32') {
-    console.log('CLI wrapper: skipped (Windows not yet supported)');
+function uninstall(): void {
+  console.log('=== Unity Agentic Tools - Uninstall ===\n');
+
+  const binDir = getBinaryDir();                          // ~/.claude/unity-agentic-tools/bin/
+  const pluginDir = join(homedir(), '.claude', 'unity-agentic-tools');
+
+  if (!existsSync(binDir)) {
+    console.log('Nothing to remove -- binary directory does not exist.');
     return;
   }
 
-  const wrapperDir = join(homedir(), '.local', 'bin');
-  const wrapperPath = join(wrapperDir, 'unity-yaml');
-  const cliPath = join(pluginRoot, 'unity-yaml', 'dist', 'cli.js');
-
-  // Create ~/.local/bin if missing
-  if (!existsSync(wrapperDir)) {
-    mkdirSync(wrapperDir, { recursive: true });
+  // Remove all .node binaries and any other files we created
+  const files = readdirSync(binDir);
+  for (const file of files) {
+    const filePath = join(binDir, file);
+    rmSync(filePath);
+    console.log(`Removed: ${filePath}`);
   }
 
-  const wrapperContent = `#!/usr/bin/env bash
-exec bun "${cliPath}" "$@"
-`;
-  writeFileSync(wrapperPath, wrapperContent);
-  chmodSync(wrapperPath, 0o755);
-
-  console.log(`CLI wrapper installed: ${wrapperPath}`);
-
-  // Check if ~/.local/bin is on PATH and print hint if not
-  const pathDirs = process.env.PATH?.split(':') ?? [];
-  if (!pathDirs.includes(wrapperDir)) {
-    console.log(`\nNote: ${wrapperDir} is not on your PATH.`);
-    console.log('Add it with:\n  export PATH="$HOME/.local/bin:$PATH"');
-    console.log('(Add that line to ~/.bashrc or ~/.zshrc to make it permanent.)');
+  // Remove bin/ directory if now empty
+  if (readdirSync(binDir).length === 0) {
+    rmSync(binDir, { recursive: true });
+    console.log(`Removed: ${binDir}`);
   }
+
+  // Remove unity-agentic-tools/ directory if now empty
+  if (existsSync(pluginDir) && readdirSync(pluginDir).length === 0) {
+    rmSync(pluginDir, { recursive: true });
+    console.log(`Removed: ${pluginDir}`);
+  }
+
+  console.log('\nUninstall complete. No host artifacts remain.');
 }
 
 async function main() {
@@ -170,9 +172,6 @@ async function main() {
     // Build TypeScript
     await buildTypeScript(pluginRoot);
 
-    // Install CLI wrapper to ~/.local/bin
-    await installCliWrapper(pluginRoot);
-
     console.log('\n=== Installation Complete ===');
     console.log('You can now use the Unity Agentic Tools commands.');
     console.log(`Binary location: ${destPath}`);
@@ -187,4 +186,8 @@ async function main() {
   }
 }
 
-main();
+if (process.argv.includes('uninstall')) {
+  uninstall();
+} else {
+  main();
+}
