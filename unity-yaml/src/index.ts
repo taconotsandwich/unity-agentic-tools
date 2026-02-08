@@ -6,6 +6,7 @@ export { search_project, grep_project, walk_project_files } from './project-sear
 export { createScene } from './editor';
 export { atomicWrite, generateGuid } from './utils';
 export type {
+  FindResult,
   GameObject,
   GameObjectWithComponents,
   GameObjectDetail,

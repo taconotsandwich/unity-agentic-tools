@@ -1,6 +1,6 @@
 import { createRequire } from 'module';
 import { existsSync } from 'fs';
-import { GameObject, GameObjectDetail, GameObjectWithComponents, SceneInspection, InspectOptions, ScanOptions, NativeScanner, NativeScannerInstance, PaginationOptions, PaginatedInspection } from './types';
+import { FindResult, GameObject, GameObjectDetail, GameObjectWithComponents, SceneInspection, InspectOptions, ScanOptions, NativeScanner, NativeScannerInstance, PaginationOptions, PaginatedInspection } from './types';
 import { getBinaryPath, getBinaryDir } from './binary-path';
 
 // Load the native Rust module from host machine
@@ -77,9 +77,9 @@ export class UnityScanner {
   }
 
   /**
-   * Find GameObjects by name pattern
+   * Find GameObjects and PrefabInstances by name pattern
    */
-  find_by_name(file: string, pattern: string, fuzzy: boolean = true): GameObject[] {
+  find_by_name(file: string, pattern: string, fuzzy: boolean = true): FindResult[] {
     return this.scanner.findByName(file, pattern, fuzzy);
   }
 

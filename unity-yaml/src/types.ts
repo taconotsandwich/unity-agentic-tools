@@ -49,6 +49,17 @@ export interface PrefabInstanceInfo {
   modificationsCount: number;
 }
 
+export interface FindResult {
+    name: string;
+    fileId: string;
+    resultType: string;  // "GameObject" | "PrefabInstance"
+    active?: boolean;
+    matchScore?: number;
+    sourceGuid?: string;
+    sourcePrefab?: string;
+    modificationsCount?: number;
+}
+
 export interface SceneInspection {
   file: string;
   count: number;
@@ -164,7 +175,7 @@ export interface NativeScannerInstance {
   setProjectRoot(path: string): void;
   scanSceneMinimal(file: string): GameObject[];
   scanSceneWithComponents(file: string, options?: ScanOptions): GameObjectWithComponents[];
-  findByName(file: string, pattern: string, fuzzy: boolean): GameObject[];
+  findByName(file: string, pattern: string, fuzzy: boolean): FindResult[];
   inspect(options: {
     file: string;
     identifier?: string;

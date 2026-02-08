@@ -56,7 +56,7 @@ program.command('list <file>')
 
 // Find command
 program.command('find <file> <pattern>')
-  .description('Find GameObjects by name pattern')
+  .description('Find GameObjects and PrefabInstances by name pattern')
   .option('-e, --exact', 'Use exact matching')
   .option('-j, --json', 'Output as JSON')
   .action((file, pattern, options) => {

@@ -159,11 +159,19 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
 
             // Apply filters
             for (const go of gameObjects) {
+                // When using name search, results are FindResult union type.
+                // Tag/layer/component filters only apply to GameObjects (not PrefabInstances).
+                const goAny = go as any;
+                const isPrefab = goAny.resultType === 'PrefabInstance';
+
+                if (isPrefab && (component || tag || layer !== undefined)) {
+                    continue;
+                }
+
                 // Component filter
                 if (component) {
-                    const goWithComps = go as any;
-                    if (goWithComps.components) {
-                        const hasComponent = goWithComps.components.some(
+                    if (goAny.components) {
+                        const hasComponent = goAny.components.some(
                             (c: any) => c.type.toLowerCase() === component.toLowerCase()
                         );
                         if (!hasComponent) continue;
@@ -173,23 +181,22 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
                 }
 
                 // Tag filter
-                if (tag && go.tag !== tag) continue;
+                if (tag && goAny.tag !== tag) continue;
 
                 // Layer filter
-                if (layer !== undefined && go.layer !== layer) continue;
+                if (layer !== undefined && goAny.layer !== layer) continue;
 
                 const relPath = path.relative(project_path, file);
 
                 const match: ProjectSearchMatch = {
                     file: relPath,
                     game_object: go.name,
-                    file_id: go.file_id,
-                    tag: go.tag,
-                    layer: go.layer,
+                    file_id: goAny.fileId || goAny.file_id,
+                    tag: goAny.tag,
+                    layer: goAny.layer,
                 };
 
                 // Include component types if available
-                const goAny = go as any;
                 if (goAny.components) {
                     match.components = goAny.components.map((c: any) => c.type);
                 }

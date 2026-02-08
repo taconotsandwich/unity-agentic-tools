@@ -13,7 +13,8 @@ program
   .version('1.0.0');
 
 program
-  .command('index <path>', 'Index documentation')
+  .command('index <path>')
+  .description('Index documentation')
   .action(async (path) => {
     console.log(`Indexing: ${path}`);
 
@@ -37,7 +38,8 @@ program
   });
 
 program
-  .command('search <query>', 'Search documentation')
+  .command('search <query>')
+  .description('Search documentation')
   .action(async (query) => {
     const storage = new DocStorage();
     const searcher = new DocSearch(storage);
@@ -61,7 +63,8 @@ program
   });
 
 program
-  .command('clear', 'Clear old indices')
+  .command('clear')
+  .description('Clear old indices')
   .action(async () => {
     const storage = new DocStorage();
     await storage.clearOldChunks();
