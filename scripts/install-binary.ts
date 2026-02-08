@@ -4,16 +4,53 @@
  * Binary is stored on the host machine at ~/.claude/unity-agentic-tools/bin/
  */
 
-import { existsSync, mkdirSync, writeFileSync, chmodSync, rmSync, readdirSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, rmSync, rmdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 
 const REPO = 'taconotsandwich/unity-agentic-tools';
 const BINARY_NAME = 'unity-agentic-core';
 
+// Base directory for all host artifacts
+function getPluginDir(): string {
+  return join(homedir(), '.claude', 'unity-agentic-tools');
+}
+
 // Get the directory where native binaries are stored on the host machine
 function getBinaryDir(): string {
-  return join(homedir(), '.claude', 'unity-agentic-tools', 'bin');
+  return join(getPluginDir(), 'bin');
+}
+
+// Manifest records every file written to the host so uninstall can clean up exactly
+function getManifestPath(): string {
+  return join(getPluginDir(), 'manifest.json');
+}
+
+function readManifest(): string[] {
+  const manifestPath = getManifestPath();
+  if (!existsSync(manifestPath)) return [];
+  try {
+    return JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+function writeManifest(paths: string[]): void {
+  const manifestPath = getManifestPath();
+  const dir = dirname(manifestPath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  writeFileSync(manifestPath, JSON.stringify(paths, null, 2) + '\n');
+}
+
+function recordPath(filePath: string): void {
+  const paths = readManifest();
+  if (!paths.includes(filePath)) {
+    paths.push(filePath);
+    writeManifest(paths);
+  }
 }
 
 // Map platform/arch to binary filename
@@ -111,35 +148,41 @@ async function buildTypeScript(pluginRoot: string): Promise<void> {
 function uninstall(): void {
   console.log('=== Unity Agentic Tools - Uninstall ===\n');
 
-  const binDir = getBinaryDir();                          // ~/.claude/unity-agentic-tools/bin/
-  const pluginDir = join(homedir(), '.claude', 'unity-agentic-tools');
+  const manifestPath = getManifestPath();
+  const paths = readManifest();
 
-  if (!existsSync(binDir)) {
-    console.log('Nothing to remove -- binary directory does not exist.');
+  if (paths.length === 0 && !existsSync(manifestPath)) {
+    console.log('Nothing to remove -- no manifest found.');
     return;
   }
 
-  // Remove all .node binaries and any other files we created
-  const files = readdirSync(binDir);
-  for (const file of files) {
-    const filePath = join(binDir, file);
-    rmSync(filePath);
-    console.log(`Removed: ${filePath}`);
+  // Remove every file recorded in the manifest
+  for (const filePath of paths) {
+    if (existsSync(filePath)) {
+      rmSync(filePath);
+      console.log(`Removed: ${filePath}`);
+    }
   }
 
-  // Remove bin/ directory if now empty
-  if (readdirSync(binDir).length === 0) {
-    rmSync(binDir, { recursive: true });
-    console.log(`Removed: ${binDir}`);
+  // Remove the manifest itself
+  if (existsSync(manifestPath)) {
+    rmSync(manifestPath);
+    console.log(`Removed: ${manifestPath}`);
   }
 
-  // Remove unity-agentic-tools/ directory if now empty
-  if (existsSync(pluginDir) && readdirSync(pluginDir).length === 0) {
-    rmSync(pluginDir, { recursive: true });
-    console.log(`Removed: ${pluginDir}`);
+  // Clean up empty directories bottom-up (rmdirSync only removes empty dirs)
+  const pluginDir = getPluginDir();
+  const binDir = getBinaryDir();
+  for (const dir of [binDir, pluginDir]) {
+    try {
+      rmdirSync(dir);
+      console.log(`Removed: ${dir}`);
+    } catch {
+      // Directory not empty or doesn't exist -- leave it
+    }
   }
 
-  console.log('\nUninstall complete. No host artifacts remain.');
+  console.log('\nUninstall complete.');
 }
 
 async function main() {
@@ -168,6 +211,9 @@ async function main() {
       await downloadBinary(downloadUrl, destPath);
       console.log('\nBinary installed successfully!');
     }
+
+    // Record the binary path in the manifest
+    recordPath(destPath);
 
     // Build TypeScript
     await buildTypeScript(pluginRoot);
