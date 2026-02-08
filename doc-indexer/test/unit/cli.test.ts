@@ -29,14 +29,13 @@ describe('doc-indexer CLI integration', () => {
     it('search subcommand should execute without "does not exist" error', () => {
         // The bug: 2-arg .command('search <query>', 'desc') made Commander
         // look for a 'unity-doc-indexer-search' binary instead of running inline.
-        // Without OPENAI_API_KEY the search will fail with an API error,
-        // but that proves the action handler ran (not "binary not found").
+        // Now uses local embeddings — no API key needed.
         const result = runCli('search "Rigidbody"');
         expect(result.stderr).not.toContain('does not exist');
         expect(result.stderr).not.toContain('is not recognized');
-        // Either succeeds with "Found" or fails with an API/embedding error
+        // Should succeed with "Found" (keyword search always works)
         const output = result.stdout + result.stderr;
-        expect(output).toMatch(/Found|OpenAI|API|error/i);
+        expect(output).toMatch(/Found|error/i);
     });
 
     it('index subcommand should execute against a nonexistent path gracefully', () => {
