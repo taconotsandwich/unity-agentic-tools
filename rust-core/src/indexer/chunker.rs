@@ -148,8 +148,20 @@ impl MarkdownChunker {
         position: usize,
     ) -> Vec<Chunk> {
         let mut chunks = Vec::new();
-        let sentence_pattern = Regex::new(r"(?<=[.!?])\s+").expect("Invalid regex");
-        let sentences: Vec<&str> = sentence_pattern.split(text).collect();
+        // Split after sentence-ending punctuation followed by whitespace.
+        // Rust regex doesn't support lookbehind, so we find boundaries manually.
+        let boundary = Regex::new(r"[.!?]\s+").expect("Invalid regex");
+        let mut sentences = Vec::new();
+        let mut last = 0;
+        for m in boundary.find_iter(text) {
+            // Include the punctuation char with the preceding sentence
+            let end = m.start() + 1;
+            sentences.push(&text[last..end]);
+            last = m.end();
+        }
+        if last < text.len() {
+            sentences.push(&text[last..]);
+        }
 
         let mut current_chunk = String::new();
         let mut current_tokens = 0u32;

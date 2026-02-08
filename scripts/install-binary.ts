@@ -133,15 +133,18 @@ async function buildTypeScript(pluginRoot: string): Promise<void> {
 
   const { execSync } = await import('child_process');
 
-  // Install dependencies if needed
-  const unityYamlDir = join(pluginRoot, 'unity-yaml');
-  if (!existsSync(join(unityYamlDir, 'node_modules'))) {
-    console.log('Installing dependencies...');
-    execSync('bun install', { cwd: unityYamlDir, stdio: 'inherit' });
+  // Install dependencies for each package that needs them
+  const packages = ['unity-yaml', 'doc-indexer', 'unity-build-settings'];
+  for (const pkg of packages) {
+    const pkgDir = join(pluginRoot, pkg);
+    if (existsSync(pkgDir) && !existsSync(join(pkgDir, 'node_modules'))) {
+      console.log(`Installing ${pkg} dependencies...`);
+      execSync('bun install', { cwd: pkgDir, stdio: 'inherit' });
+    }
   }
 
-  // Build
-  execSync('bun run build', { cwd: unityYamlDir, stdio: 'inherit' });
+  // Build all packages from root
+  execSync('bun run build', { cwd: pluginRoot, stdio: 'inherit' });
   console.log('Build complete!');
 }
 

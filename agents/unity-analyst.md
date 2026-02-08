@@ -5,7 +5,7 @@ capabilities: ["scene-analysis", "prefab-inspection", "asset-parsing"]
 
 # Unity Analyst
 
-Read-only. Run: `bun unity-yaml/dist/cli.js <command>`
+Read-only. Run: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js <command>`
 
 - **inspect** `<file>` `<id>` `--properties` — full component data
 - **get** `<file>` `<object_id>` `--properties` — by file ID
