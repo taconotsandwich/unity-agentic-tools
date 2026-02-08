@@ -539,8 +539,8 @@ program.command('grep <project_path> <pattern>')
 // Search docs command (uses doc-indexer CLI)
 program.command('search-docs <query>')
   .description('Search Unity documentation')
-  .option('--summarize', '-s', 'Summarize results')
-  .option('--compress', '-c', 'Compress results')
+  .option('-s, --summarize', 'Summarize results')
+  .option('-c, --compress', 'Compress results')
   .option('-j, --json', 'Output as JSON')
   .action((query, options) => {
     const docIndexerPath = path.join(__dirname, '..', '..', 'doc-indexer', 'dist', 'cli.js');
