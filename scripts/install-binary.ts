@@ -71,8 +71,12 @@ function getBinaryFilename(): string {
   }
 }
 
-async function getLatestReleaseUrl(filename: string): Promise<string> {
-  // Get latest release info from GitHub API
+interface ReleaseInfo {
+  tag_name: string;
+  assets: Array<{ name: string; browser_download_url: string }>;
+}
+
+async function getLatestRelease(): Promise<ReleaseInfo> {
   const apiUrl = `https://api.github.com/repos/${REPO}/releases/latest`;
 
   console.log('Fetching latest release info...');
@@ -87,7 +91,10 @@ async function getLatestReleaseUrl(filename: string): Promise<string> {
     throw new Error(`Failed to fetch release info: ${response.status} ${response.statusText}`);
   }
 
-  const release = await response.json() as { assets: Array<{ name: string; browser_download_url: string }> };
+  return await response.json() as ReleaseInfo;
+}
+
+function getLatestReleaseUrl(release: ReleaseInfo, filename: string): string {
   const asset = release.assets.find((a: { name: string }) => a.name === filename);
 
   if (!asset) {
@@ -95,6 +102,30 @@ async function getLatestReleaseUrl(filename: string): Promise<string> {
   }
 
   return asset.browser_download_url;
+}
+
+function getVersionPath(): string {
+  return join(getPluginDir(), 'version');
+}
+
+function getInstalledVersion(): string | null {
+  const versionPath = getVersionPath();
+  if (!existsSync(versionPath)) return null;
+  try {
+    return readFileSync(versionPath, 'utf-8').trim();
+  } catch {
+    return null;
+  }
+}
+
+function writeInstalledVersion(version: string): void {
+  const versionPath = getVersionPath();
+  const dir = dirname(versionPath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  writeFileSync(versionPath, version + '\n');
+  recordPath(versionPath);
 }
 
 async function downloadBinary(url: string, destPath: string): Promise<void> {
@@ -210,13 +241,22 @@ async function main() {
 
     const destPath = join(binaryDir, filename);
 
-    // Check if already installed
-    if (existsSync(destPath)) {
-      console.log('Binary already exists. Skipping download.');
+    // Check latest release and compare with installed version
+    const release = await getLatestRelease();
+    const latestVersion = release.tag_name;
+    const installedVersion = getInstalledVersion();
+
+    if (existsSync(destPath) && installedVersion === latestVersion) {
+      console.log(`Already up to date (${latestVersion}). Skipping download.`);
     } else {
-      // Get download URL and download
-      const downloadUrl = await getLatestReleaseUrl(filename);
+      if (installedVersion) {
+        console.log(`Updating: ${installedVersion} -> ${latestVersion}`);
+      } else {
+        console.log(`Installing ${latestVersion}...`);
+      }
+      const downloadUrl = getLatestReleaseUrl(release, filename);
       await downloadBinary(downloadUrl, destPath);
+      writeInstalledVersion(latestVersion);
       console.log('\nBinary installed successfully!');
     }
 
