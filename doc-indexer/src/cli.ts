@@ -44,7 +44,10 @@ program
 program
   .command('search <query>')
   .description('Search documentation')
-  .action(async (query) => {
+  .option('-s, --summarize', 'Summarize results (truncate content)')
+  .option('-c, --compress', 'Compress results (minimal output)')
+  .option('-j, --json', 'Output as JSON')
+  .action(async (query, options) => {
     const storage = new DocStorage();
     const searcher = new DocSearch(storage);
 
@@ -55,13 +58,33 @@ program
       keyword_weight: 0.4
     });
 
+    if (options.json) {
+      const output = options.summarize
+        ? { ...results, results: results.results.map(r => ({ ...r, content: r.content.slice(0, 200) })) }
+        : options.compress
+          ? { ...results, results: results.results.map(({ content, ...r }) => r) }
+          : results;
+      console.log(JSON.stringify(output, null, 2));
+      return;
+    }
+
+    if (options.compress) {
+      for (const result of results.results) {
+        const title = result.metadata?.section || result.metadata?.unity_class || result.metadata?.file_path;
+        console.log(`${title} (${result.score.toFixed(4)})`);
+      }
+      return;
+    }
+
     console.log(`Found ${results.results.length} results in ${results.elapsed_ms}ms`);
     console.log(`Semantic: ${results.semantic_count}, Keyword: ${results.keyword_count}`);
 
     for (let i = 0; i < results.results.length; i++) {
       const result = results.results[i];
-      console.log(`\n[${i + 1}] ${result.metadata?.section || result.metadata?.unity_class || result.metadata?.file_path}`);
-      console.log(result.content);
+      const title = result.metadata?.section || result.metadata?.unity_class || result.metadata?.file_path;
+      const content = options.summarize ? result.content.slice(0, 200) + '...' : result.content;
+      console.log(`\n[${i + 1}] ${title}`);
+      console.log(content);
       console.log(`Score: ${result.score.toFixed(4)}`);
     }
   });
