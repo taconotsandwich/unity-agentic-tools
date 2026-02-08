@@ -3,6 +3,7 @@
 pub mod common;
 pub mod scanner;
 pub mod indexer;
+pub mod embeddings;
 
 use napi_derive::napi;
 
@@ -10,6 +11,7 @@ use napi_derive::napi;
 pub use common::*;
 pub use scanner::Scanner;
 pub use indexer::Indexer;
+pub use embeddings::EmbeddingGenerator;
 
 /// Get the version of the native module
 #[napi]

@@ -159,10 +159,15 @@ function uninstall(): void {
     return;
   }
 
-  // Remove every file recorded in the manifest
+  // Remove every file/directory recorded in the manifest
   for (const filePath of paths) {
     if (existsSync(filePath)) {
-      rmSync(filePath);
+      const stat = require('fs').statSync(filePath);
+      if (stat.isDirectory()) {
+        rmSync(filePath, { recursive: true, force: true });
+      } else {
+        rmSync(filePath);
+      }
       console.log(`Removed: ${filePath}`);
     }
   }
@@ -215,8 +220,9 @@ async function main() {
       console.log('\nBinary installed successfully!');
     }
 
-    // Record the binary path in the manifest
+    // Record the binary path and model cache directory in the manifest
     recordPath(destPath);
+    recordPath(join(getPluginDir(), 'models'));
 
     // Build TypeScript
     await buildTypeScript(pluginRoot);
