@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { existsSync } from 'fs';
 import { UnityScanner, isNativeModuleAvailable } from '../src/scanner';
 
 // Skip all tests if native module is not available
@@ -43,6 +44,7 @@ describeIfNative('UnityScanner', () => {
       expect(result).toBeDefined();
       expect(result.length).toBe(1);
       expect(result[0].name).toBe('Instruction');
+      expect(result[0].resultType).toBe('GameObject');
     });
 
     it('should find GameObject by fuzzy match', () => {
@@ -51,6 +53,50 @@ describeIfNative('UnityScanner', () => {
       expect(result.length).toBeGreaterThan(0);
       result.forEach(go => {
         expect(go.name.toLowerCase()).toContain('ame');
+        expect(go.resultType).toBe('GameObject');
+      });
+    });
+
+    it('should find PrefabInstance by exact name', () => {
+      const result = scanner.find_by_name('test/fixtures/SceneWithPrefab.unity', 'MyEnemy', false);
+
+      expect(result.length).toBeGreaterThanOrEqual(1);
+      const prefab = result.find(r => r.resultType === 'PrefabInstance');
+      expect(prefab).toBeDefined();
+      expect(prefab!.name).toBe('MyEnemy');
+      expect(prefab!.sourceGuid).toBe('a1b2c3d4e5f6789012345678abcdef12');
+      expect(prefab!.modificationsCount).toBe(4);
+    });
+
+    it('should find PrefabInstance by fuzzy match', () => {
+      const result = scanner.find_by_name('test/fixtures/SceneWithPrefab.unity', 'enemy', true);
+
+      expect(result.length).toBeGreaterThanOrEqual(1);
+      const prefab = result.find(r => r.resultType === 'PrefabInstance');
+      expect(prefab).toBeDefined();
+      expect(prefab!.name).toBe('MyEnemy');
+      expect(prefab!.matchScore).toBeDefined();
+      expect(prefab!.matchScore).toBeGreaterThan(0);
+    });
+
+    it('should return mixed results sorted by score', () => {
+      const result = scanner.find_by_name('test/fixtures/SceneWithPrefab.unity', 'ma', true);
+
+      // Should match "Main Camera" (GameObject) and potentially others
+      expect(result.length).toBeGreaterThan(0);
+      // Verify scores are in descending order
+      for (let i = 1; i < result.length; i++) {
+        expect(result[i - 1].matchScore).toBeGreaterThanOrEqual(result[i].matchScore!);
+      }
+    });
+
+    it('should set correct resultType discriminator', () => {
+      const result = scanner.find_by_name('test/fixtures/SceneWithPrefab.unity', 'Camera', true);
+      const goResults = result.filter(r => r.resultType === 'GameObject');
+      expect(goResults.length).toBeGreaterThan(0);
+      goResults.forEach(r => {
+        expect(r.active).toBeDefined();
+        expect(r.sourceGuid).toBeUndefined();
       });
     });
   });
@@ -183,6 +229,81 @@ describeIfNative('UnityScanner', () => {
     });
   });
 
+  describe('GUID resolution', () => {
+    const guidProjectRoot = 'test/fixtures/guid-project';
+    const guidSceneFile = 'test/fixtures/guid-project/Assets/Scenes/TestScene.unity';
+
+    it('should populate script_name from resolved script_path', () => {
+      scanner.setProjectRoot(guidProjectRoot);
+      const result = scanner.inspect({
+        file: guidSceneFile,
+        identifier: 'Player',
+        verbose: true,
+      });
+
+      expect(result).toBeDefined();
+      const components = (result as any).components;
+      const monoBehaviour = components.find((c: any) => c.type === 'MonoBehaviour');
+      expect(monoBehaviour).toBeDefined();
+      expect(monoBehaviour.script_name).toBe('PlayerController');
+      expect(monoBehaviour.script_path).toContain('PlayerController.cs');
+    });
+
+    it('should resolve GUID references in property values', () => {
+      scanner.setProjectRoot(guidProjectRoot);
+      const result = scanner.inspect({
+        file: guidSceneFile,
+        identifier: 'Player',
+        include_properties: true,
+        verbose: true,
+      });
+
+      expect(result).toBeDefined();
+      const components = (result as any).components;
+      const monoBehaviour = components.find((c: any) => c.type === 'MonoBehaviour');
+      expect(monoBehaviour).toBeDefined();
+      // The m_Script property references PlayerController.cs via GUID
+      const script = monoBehaviour.properties?.Script;
+      expect(script).toBeDefined();
+      expect(script).toContain('-> Assets/Scripts/PlayerController.cs');
+    });
+
+    it('should preserve non-GUID property values unchanged', () => {
+      scanner.setProjectRoot(guidProjectRoot);
+      const result = scanner.inspect({
+        file: guidSceneFile,
+        identifier: 'MainCamera',
+        include_properties: true,
+        verbose: true,
+      });
+
+      expect(result).toBeDefined();
+      const components = (result as any).components;
+      const transform = components.find((c: any) => c.type === 'Transform');
+      expect(transform).toBeDefined();
+      // Non-GUID values should not be altered
+      const pos = transform.properties?.LocalPosition;
+      expect(pos).toBeDefined();
+      expect(pos).not.toContain('->');
+    });
+
+    it('should not set script_name for non-script components', () => {
+      scanner.setProjectRoot(guidProjectRoot);
+      const result = scanner.inspect({
+        file: guidSceneFile,
+        identifier: 'Player',
+        verbose: true,
+      });
+
+      expect(result).toBeDefined();
+      const components = (result as any).components;
+      const transform = components.find((c: any) => c.type === 'Transform');
+      expect(transform).toBeDefined();
+      expect(transform.script_name).toBeUndefined();
+      expect(transform.script_guid).toBeUndefined();
+    });
+  });
+
   describe('inspect_all', () => {
     it('should exclude properties by default', () => {
       const result = scanner.inspect_all('test/fixtures/Main.unity', false, false);
@@ -219,6 +340,18 @@ describeIfNative('UnityScanner', () => {
           }
         }
       }
+    });
+  });
+
+  describe('CLI distribution', () => {
+    it('dist/cli.js should exist', () => {
+      expect(existsSync('dist/cli.js')).toBe(true);
+    });
+
+    it('package.json bin field should point to dist/cli.js', async () => {
+      const pkg = await import('../package.json');
+      expect(pkg.bin).toBeDefined();
+      expect(pkg.bin['unity-yaml']).toBe('./dist/cli.js');
     });
   });
 });

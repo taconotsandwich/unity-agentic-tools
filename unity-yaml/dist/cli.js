@@ -2113,7 +2113,7 @@ var require_commander = __commonJS((exports2) => {
 
 // ../rust-core/unity-agentic-core.darwin-arm64.node
 var require_unity_agentic_core_darwin_arm64 = __commonJS((exports2, module2) => {
-  module2.exports = require("./unity-agentic-core.darwin-arm64-eb5qd13r.node");
+  module2.exports = require("./unity-agentic-core.darwin-arm64-a15zks6a.node");
 });
 
 // ../rust-core/index.js
@@ -5481,29 +5481,32 @@ function search_project(options) {
         }
       }
       for (const go of gameObjects) {
+        const goAny = go;
+        const isPrefab = goAny.resultType === "PrefabInstance";
+        if (isPrefab && (component || tag || layer !== undefined)) {
+          continue;
+        }
         if (component) {
-          const goWithComps = go;
-          if (goWithComps.components) {
-            const hasComponent = goWithComps.components.some((c) => c.type.toLowerCase() === component.toLowerCase());
+          if (goAny.components) {
+            const hasComponent = goAny.components.some((c) => c.type.toLowerCase() === component.toLowerCase());
             if (!hasComponent)
               continue;
           } else {
             continue;
           }
         }
-        if (tag && go.tag !== tag)
+        if (tag && goAny.tag !== tag)
           continue;
-        if (layer !== undefined && go.layer !== layer)
+        if (layer !== undefined && goAny.layer !== layer)
           continue;
         const relPath = path3.relative(project_path, file);
         const match = {
           file: relPath,
           game_object: go.name,
-          file_id: go.file_id,
-          tag: go.tag,
-          layer: go.layer
+          file_id: goAny.fileId || goAny.file_id,
+          tag: goAny.tag,
+          layer: goAny.layer
         };
-        const goAny = go;
         if (goAny.components) {
           match.components = goAny.components.map((c) => c.type);
         }
@@ -6002,7 +6005,7 @@ program.command("list <file>").description("List GameObject hierarchy in Unity f
   });
   console.log(JSON.stringify(result, null, 2));
 });
-program.command("find <file> <pattern>").description("Find GameObjects by name pattern").option("-e, --exact", "Use exact matching").option("-j, --json", "Output as JSON").action((file, pattern, options) => {
+program.command("find <file> <pattern>").description("Find GameObjects and PrefabInstances by name pattern").option("-e, --exact", "Use exact matching").option("-j, --json", "Output as JSON").action((file, pattern, options) => {
   const fuzzy = options.exact !== true;
   const result = getScanner().find_by_name(file, pattern, fuzzy);
   const output = {

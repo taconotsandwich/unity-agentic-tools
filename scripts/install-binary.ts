@@ -108,6 +108,38 @@ async function buildTypeScript(pluginRoot: string): Promise<void> {
   console.log('Build complete!');
 }
 
+async function installCliWrapper(pluginRoot: string): Promise<void> {
+  if (process.platform === 'win32') {
+    console.log('CLI wrapper: skipped (Windows not yet supported)');
+    return;
+  }
+
+  const wrapperDir = join(homedir(), '.local', 'bin');
+  const wrapperPath = join(wrapperDir, 'unity-yaml');
+  const cliPath = join(pluginRoot, 'unity-yaml', 'dist', 'cli.js');
+
+  // Create ~/.local/bin if missing
+  if (!existsSync(wrapperDir)) {
+    mkdirSync(wrapperDir, { recursive: true });
+  }
+
+  const wrapperContent = `#!/usr/bin/env bash
+exec bun "${cliPath}" "$@"
+`;
+  writeFileSync(wrapperPath, wrapperContent);
+  chmodSync(wrapperPath, 0o755);
+
+  console.log(`CLI wrapper installed: ${wrapperPath}`);
+
+  // Check if ~/.local/bin is on PATH and print hint if not
+  const pathDirs = process.env.PATH?.split(':') ?? [];
+  if (!pathDirs.includes(wrapperDir)) {
+    console.log(`\nNote: ${wrapperDir} is not on your PATH.`);
+    console.log('Add it with:\n  export PATH="$HOME/.local/bin:$PATH"');
+    console.log('(Add that line to ~/.bashrc or ~/.zshrc to make it permanent.)');
+  }
+}
+
 async function main() {
   console.log('=== Unity Agentic Tools - Binary Installer ===\n');
 
@@ -137,6 +169,9 @@ async function main() {
 
     // Build TypeScript
     await buildTypeScript(pluginRoot);
+
+    // Install CLI wrapper to ~/.local/bin
+    await installCliWrapper(pluginRoot);
 
     console.log('\n=== Installation Complete ===');
     console.log('You can now use the Unity Agentic Tools commands.');
