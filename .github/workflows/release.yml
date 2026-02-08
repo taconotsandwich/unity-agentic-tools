@@ -9,7 +9,58 @@ permissions:
   contents: write
 
 jobs:
+  build-native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+            binary: unity-agentic-core.darwin-arm64.node
+          - os: macos-13
+            target: x86_64-apple-darwin
+            binary: unity-agentic-core.darwin-x64.node
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: unity-agentic-core.linux-x64-gnu.node
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: unity-agentic-core.win32-x64-msvc.node
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core -> target
+
+      - name: Install rust-core dependencies
+        working-directory: ./rust-core
+        run: bun install
+
+      - name: Build native module
+        working-directory: ./rust-core
+        run: bun run build
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}
+          path: rust-core/${{ matrix.binary }}
+          if-no-files-found: error
+
   release:
+    needs: build-native
     runs-on: ubuntu-latest
 
     steps:
@@ -21,28 +72,54 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Install root dependencies
-        run: bun install
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Install unity-yaml dependencies
-        working-directory: ./unity-yaml
-        run: bun install
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-core -> target
 
-      - name: Install doc-indexer dependencies
-        working-directory: ./doc-indexer
-        run: bun install
+      - name: Install dependencies
+        run: |
+          bun install
+          cd unity-yaml && bun install
+          cd ../doc-indexer && bun install
+          cd ../unity-build-settings && bun install
+          cd ../rust-core && bun install
 
-      - name: Build packages
+      - name: Build native module
+        working-directory: ./rust-core
+        run: bun run build
+
+      - name: Copy native binary to host location
+        run: |
+          mkdir -p ~/.claude/unity-agentic-tools/bin
+          cp rust-core/*.node ~/.claude/unity-agentic-tools/bin/
+
+      - name: Build TypeScript packages
         run: bun run build
 
       - name: Run tests
         run: bun run test
+
+      - name: Run Rust tests
+        working-directory: ./rust-core
+        run: cargo test
 
       - name: Validate extensions
         run: .github/scripts/validate-extensions.sh
 
       - name: Check version sync
         run: bun scripts/sync-version.js --check
+
+      - name: Download all native binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: binaries
+
+      - name: List binaries
+        run: find binaries -name "*.node" -ls
 
       - name: Extract version from tag
         id: version
@@ -51,7 +128,6 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
-          # Get commits since last tag
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           if [ -n "$PREV_TAG" ]; then
             CHANGELOG=$(git log --pretty=format:"- %s" $PREV_TAG..HEAD)
@@ -78,20 +154,24 @@ jobs:
             /plugin marketplace add taconotsandwich/unity-agentic-tools
             /plugin install unity-agentic-tools@unity-agentic-tools-marketplace
             ```
+            Then run `/initial-install` to download the native binary for your platform.
 
             ### Direct CLI Usage
             ```bash
             git clone https://github.com/taconotsandwich/unity-agentic-tools.git
             bun unity-agentic-tools/unity-yaml/dist/cli.js --help
             ```
+
+            ## Native Binaries
+
+            | Platform | File |
+            |----------|------|
+            | macOS ARM64 (Apple Silicon) | `unity-agentic-core.darwin-arm64.node` |
+            | macOS x64 (Intel) | `unity-agentic-core.darwin-x64.node` |
+            | Linux x64 | `unity-agentic-core.linux-x64-gnu.node` |
+            | Windows x64 | `unity-agentic-core.win32-x64-msvc.node` |
+          files: binaries/**/*.node
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Optional: Publish to npm (uncomment when ready)
-      # - name: Publish to npm
-      #   working-directory: unity-yaml
-      #   run: npm publish --access public
-      #   env:
-      #     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
