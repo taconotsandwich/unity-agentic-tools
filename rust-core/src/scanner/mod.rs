@@ -464,7 +464,9 @@ impl Scanner {
                             // Remove .meta extension
                             let asset_path = path.with_extension("");
                             if let Ok(relative) = asset_path.strip_prefix(project_root) {
-                                self.guid_cache.insert(guid, relative.to_string_lossy().into_owned());
+                                // Normalize to forward slashes (Unity convention)
+                                let normalized = relative.to_string_lossy().replace('\\', "/");
+                                self.guid_cache.insert(guid, normalized);
                             }
                         }
                     }
