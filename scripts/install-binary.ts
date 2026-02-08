@@ -4,16 +4,53 @@
  * Binary is stored on the host machine at ~/.claude/unity-agentic-tools/bin/
  */
 
-import { existsSync, mkdirSync, writeFileSync, chmodSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync, rmSync, rmdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 
 const REPO = 'taconotsandwich/unity-agentic-tools';
 const BINARY_NAME = 'unity-agentic-core';
 
+// Base directory for all host artifacts
+function getPluginDir(): string {
+  return join(homedir(), '.claude', 'unity-agentic-tools');
+}
+
 // Get the directory where native binaries are stored on the host machine
 function getBinaryDir(): string {
-  return join(homedir(), '.claude', 'unity-agentic-tools', 'bin');
+  return join(getPluginDir(), 'bin');
+}
+
+// Manifest records every file written to the host so uninstall can clean up exactly
+function getManifestPath(): string {
+  return join(getPluginDir(), 'manifest.json');
+}
+
+function readManifest(): string[] {
+  const manifestPath = getManifestPath();
+  if (!existsSync(manifestPath)) return [];
+  try {
+    return JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+function writeManifest(paths: string[]): void {
+  const manifestPath = getManifestPath();
+  const dir = dirname(manifestPath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  writeFileSync(manifestPath, JSON.stringify(paths, null, 2) + '\n');
+}
+
+function recordPath(filePath: string): void {
+  const paths = readManifest();
+  if (!paths.includes(filePath)) {
+    paths.push(filePath);
+    writeManifest(paths);
+  }
 }
 
 // Map platform/arch to binary filename
@@ -34,8 +71,12 @@ function getBinaryFilename(): string {
   }
 }
 
-async function getLatestReleaseUrl(filename: string): Promise<string> {
-  // Get latest release info from GitHub API
+interface ReleaseInfo {
+  tag_name: string;
+  assets: Array<{ name: string; browser_download_url: string }>;
+}
+
+async function getLatestRelease(): Promise<ReleaseInfo> {
   const apiUrl = `https://api.github.com/repos/${REPO}/releases/latest`;
 
   console.log('Fetching latest release info...');
@@ -50,7 +91,10 @@ async function getLatestReleaseUrl(filename: string): Promise<string> {
     throw new Error(`Failed to fetch release info: ${response.status} ${response.statusText}`);
   }
 
-  const release = await response.json() as { assets: Array<{ name: string; browser_download_url: string }> };
+  return await response.json() as ReleaseInfo;
+}
+
+function getLatestReleaseUrl(release: ReleaseInfo, filename: string): string {
   const asset = release.assets.find((a: { name: string }) => a.name === filename);
 
   if (!asset) {
@@ -58,6 +102,30 @@ async function getLatestReleaseUrl(filename: string): Promise<string> {
   }
 
   return asset.browser_download_url;
+}
+
+function getVersionPath(): string {
+  return join(getPluginDir(), 'version');
+}
+
+function getInstalledVersion(): string | null {
+  const versionPath = getVersionPath();
+  if (!existsSync(versionPath)) return null;
+  try {
+    return readFileSync(versionPath, 'utf-8').trim();
+  } catch {
+    return null;
+  }
+}
+
+function writeInstalledVersion(version: string): void {
+  const versionPath = getVersionPath();
+  const dir = dirname(versionPath);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  writeFileSync(versionPath, version + '\n');
+  recordPath(versionPath);
 }
 
 async function downloadBinary(url: string, destPath: string): Promise<void> {
@@ -96,16 +164,64 @@ async function buildTypeScript(pluginRoot: string): Promise<void> {
 
   const { execSync } = await import('child_process');
 
-  // Install dependencies if needed
-  const unityYamlDir = join(pluginRoot, 'unity-yaml');
-  if (!existsSync(join(unityYamlDir, 'node_modules'))) {
-    console.log('Installing dependencies...');
-    execSync('bun install', { cwd: unityYamlDir, stdio: 'inherit' });
+  // Install dependencies for each package that needs them
+  const packages = ['unity-yaml', 'doc-indexer', 'unity-build-settings'];
+  for (const pkg of packages) {
+    const pkgDir = join(pluginRoot, pkg);
+    if (existsSync(pkgDir) && !existsSync(join(pkgDir, 'node_modules'))) {
+      console.log(`Installing ${pkg} dependencies...`);
+      execSync('bun install', { cwd: pkgDir, stdio: 'inherit' });
+    }
   }
 
-  // Build
-  execSync('bun run build', { cwd: unityYamlDir, stdio: 'inherit' });
+  // Build all packages from root
+  execSync('bun run build', { cwd: pluginRoot, stdio: 'inherit' });
   console.log('Build complete!');
+}
+
+function uninstall(): void {
+  console.log('=== Unity Agentic Tools - Uninstall ===\n');
+
+  const manifestPath = getManifestPath();
+  const paths = readManifest();
+
+  if (paths.length === 0 && !existsSync(manifestPath)) {
+    console.log('Nothing to remove -- no manifest found.');
+    return;
+  }
+
+  // Remove every file/directory recorded in the manifest
+  for (const filePath of paths) {
+    if (existsSync(filePath)) {
+      const stat = require('fs').statSync(filePath);
+      if (stat.isDirectory()) {
+        rmSync(filePath, { recursive: true, force: true });
+      } else {
+        rmSync(filePath);
+      }
+      console.log(`Removed: ${filePath}`);
+    }
+  }
+
+  // Remove the manifest itself
+  if (existsSync(manifestPath)) {
+    rmSync(manifestPath);
+    console.log(`Removed: ${manifestPath}`);
+  }
+
+  // Clean up empty directories bottom-up (rmdirSync only removes empty dirs)
+  const pluginDir = getPluginDir();
+  const binDir = getBinaryDir();
+  for (const dir of [binDir, pluginDir]) {
+    try {
+      rmdirSync(dir);
+      console.log(`Removed: ${dir}`);
+    } catch {
+      // Directory not empty or doesn't exist -- leave it
+    }
+  }
+
+  console.log('\nUninstall complete.');
 }
 
 async function main() {
@@ -125,15 +241,28 @@ async function main() {
 
     const destPath = join(binaryDir, filename);
 
-    // Check if already installed
-    if (existsSync(destPath)) {
-      console.log('Binary already exists. Skipping download.');
+    // Check latest release and compare with installed version
+    const release = await getLatestRelease();
+    const latestVersion = release.tag_name;
+    const installedVersion = getInstalledVersion();
+
+    if (existsSync(destPath) && installedVersion === latestVersion) {
+      console.log(`Already up to date (${latestVersion}). Skipping download.`);
     } else {
-      // Get download URL and download
-      const downloadUrl = await getLatestReleaseUrl(filename);
+      if (installedVersion) {
+        console.log(`Updating: ${installedVersion} -> ${latestVersion}`);
+      } else {
+        console.log(`Installing ${latestVersion}...`);
+      }
+      const downloadUrl = getLatestReleaseUrl(release, filename);
       await downloadBinary(downloadUrl, destPath);
+      writeInstalledVersion(latestVersion);
       console.log('\nBinary installed successfully!');
     }
+
+    // Record the binary path and model cache directory in the manifest
+    recordPath(destPath);
+    recordPath(join(getPluginDir(), 'models'));
 
     // Build TypeScript
     await buildTypeScript(pluginRoot);
@@ -152,4 +281,8 @@ async function main() {
   }
 }
 
-main();
+if (process.argv.includes('uninstall')) {
+  uninstall();
+} else {
+  main();
+}

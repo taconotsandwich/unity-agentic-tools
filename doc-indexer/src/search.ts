@@ -1,5 +1,6 @@
 import { DocStorage } from './storage';
-import type { EmbeddingVector, OpenAIEmbeddingResponse } from './types';
+import { load_embedding_generator } from './native';
+import type { EmbeddingVector } from './types';
 
 export interface SearchOptions {
   query: string;
@@ -8,9 +9,6 @@ export interface SearchOptions {
   semantic_weight?: number;
   keyword_weight?: number;
 }
-
-// Removed generateEmbedding and hybridSearch for brevity
-// Full RAG implementation can be added when embedding service is configured
 
 export interface SearchResults {
   results: Array<{
@@ -25,72 +23,70 @@ export interface SearchResults {
 }
 
 export class DocSearch {
-  private storage: DocStorage;
+    private storage: DocStorage;
+    private embedder: any | null;
 
-  constructor(storage: DocStorage) {
-    this.storage = storage;
-  }
-
-  async search(options: SearchOptions): Promise<SearchResults> {
-    const startTime = Date.now();
-    const topK = options.top_k || 5;
-    const semanticWeight = options.semantic_weight ?? 0.6;
-    const keywordWeight = options.keyword_weight ?? 0.4;
-
-    let queryEmbedding: EmbeddingVector | null = null;
-
-    if (options.query.length > 0) {
-      queryEmbedding = await this.generateEmbedding(options.query);
+    constructor(storage: DocStorage) {
+        this.storage = storage;
+        this.embedder = load_embedding_generator();
     }
 
-    const semanticResults = await this.storage.semanticSearch(queryEmbedding || []);
-    const keywordResults = await this.storage.keywordSearch(options.query);
+    async search(options: SearchOptions): Promise<SearchResults> {
+        const startTime = Date.now();
+        const topK = options.top_k || 5;
+        const semanticWeight = options.semantic_weight ?? 0.6;
+        const keywordWeight = options.keyword_weight ?? 0.4;
 
-    const combined = new Map<string, number>();
+        let queryEmbedding: EmbeddingVector | null = null;
 
-    for (const result of semanticResults) {
-      combined.set(result.id, (combined.get(result.id) || 0) + result.score * semanticWeight);
+        if (this.embedder && options.query.length > 0) {
+            try {
+                queryEmbedding = this.embedder.generate(options.query);
+            } catch {
+                // Embedding failed — fall back to keyword-only
+            }
+        }
+
+        const keywordResults = await this.storage.keywordSearch(options.query);
+
+        if (queryEmbedding) {
+            const semanticResults = await this.storage.semanticSearch(queryEmbedding);
+            const combined = new Map<string, number>();
+
+            for (const result of semanticResults) {
+                combined.set(result.id, (combined.get(result.id) || 0) + result.score * semanticWeight);
+            }
+
+            for (const result of keywordResults) {
+                combined.set(result.id, (combined.get(result.id) || 0) + result.score * keywordWeight);
+            }
+
+            const sorted = Array.from(combined.entries())
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, topK)
+                .map(([id, score]) => {
+                    const found = [...semanticResults, ...keywordResults].find(r => r.id === id);
+                    return found || { id, content: '', score, metadata: {} };
+                });
+
+            return {
+                results: sorted,
+                semantic_count: semanticResults.length,
+                keyword_count: keywordResults.length,
+                elapsed_ms: Date.now() - startTime
+            };
+        }
+
+        // Keyword-only fallback (no embedder or empty query)
+        const sorted = keywordResults
+            .sort((a, b) => b.score - a.score)
+            .slice(0, topK);
+
+        return {
+            results: sorted,
+            semantic_count: 0,
+            keyword_count: keywordResults.length,
+            elapsed_ms: Date.now() - startTime
+        };
     }
-
-    for (const result of keywordResults) {
-      combined.set(result.id, (combined.get(result.id) || 0) + result.score * keywordWeight);
-    }
-
-    const sorted = Array.from(combined.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, topK)
-      .map(([id, score]) => {
-        const found = [...semanticResults, ...keywordResults].find(r => r.id === id);
-        return found || { id, content: '', score, metadata: {} };
-      });
-
-    return {
-      results: sorted,
-      semantic_count: Math.floor(topK * semanticWeight * 2),
-      keyword_count: Math.floor(topK * keywordWeight * 2),
-      elapsed_ms: Date.now() - startTime
-    };
-  }
-
-  async generateEmbedding(text: string): Promise<EmbeddingVector> {
-    const response = await fetch('https://api.openai.com/v1/embeddings', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY || ''}`
-      },
-      body: JSON.stringify({
-        model: 'text-embedding-3-small',
-        input: text,
-        encoding_format: 'float'
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.statusText}`);
-    }
-
-    const data = await response.json() as OpenAIEmbeddingResponse;
-    return data.data[0].embedding;
-  }
 }

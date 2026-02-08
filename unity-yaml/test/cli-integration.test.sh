@@ -179,9 +179,35 @@ else
     failures=$((failures + 1))
 fi
 
-# Test 10: Full workflow - create, add components, edit transform
+# Test 10: Find PrefabInstance by name
 echo ""
-echo "Test 10: Full workflow (create → add components → edit transform)"
+echo "Test 10: Find PrefabInstance by name"
+find_prefab_output=$(bun dist/cli.js find test/fixtures/SceneWithPrefab.unity "MyEnemy" --json 2>&1)
+if echo "$find_prefab_output" | grep -q '"resultType": "PrefabInstance"'; then
+    echo "✓ Find returns PrefabInstance results"
+else
+    echo "✗ Find did not return PrefabInstance results"
+    cat <<< "$find_prefab_output"
+    failures=$((failures + 1))
+fi
+
+# Test 11: Find returns mixed results (GO + PrefabInstance)
+echo ""
+echo "Test 11: Find mixed results (GameObject + PrefabInstance)"
+find_mixed_output=$(bun dist/cli.js find test/fixtures/SceneWithPrefab.unity "m" --json 2>&1)
+has_go=$(echo "$find_mixed_output" | grep -c '"resultType": "GameObject"' || true)
+has_pi=$(echo "$find_mixed_output" | grep -c '"resultType": "PrefabInstance"' || true)
+if [ "$has_go" -gt 0 ] && [ "$has_pi" -gt 0 ]; then
+    echo "✓ Find returns both GameObjects and PrefabInstances"
+else
+    echo "✗ Find did not return both types (GO=$has_go, PI=$has_pi)"
+    cat <<< "$find_mixed_output"
+    failures=$((failures + 1))
+fi
+
+# Test 12: Full workflow - create, add components, edit transform
+echo ""
+echo "Test 12: Full workflow (create → add components → edit transform)"
 cp "$fixture_path" "$tmp_dir/workflow-test.unity"
 
 # Create object

@@ -58,6 +58,53 @@ pub struct PrefabInstanceInfo {
     pub modifications_count: u32,
 }
 
+/// Union result from find_by_name: either a GameObject or PrefabInstance
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FindResult {
+    pub name: String,
+    pub file_id: String,
+    pub result_type: String,  // "GameObject" or "PrefabInstance"
+    #[napi(ts_type = "boolean | undefined")]
+    pub active: Option<bool>,
+    #[napi(ts_type = "number | undefined")]
+    pub match_score: Option<f64>,
+    #[napi(ts_type = "string | undefined")]
+    pub source_guid: Option<String>,
+    #[napi(ts_type = "string | undefined")]
+    pub source_prefab: Option<String>,
+    #[napi(ts_type = "number | undefined")]
+    pub modifications_count: Option<u32>,
+}
+
+impl FindResult {
+    pub fn from_game_object(go: &GameObject, score: Option<f64>) -> Self {
+        FindResult {
+            name: go.name.clone(),
+            file_id: go.file_id.clone(),
+            result_type: "GameObject".to_string(),
+            active: Some(go.active),
+            match_score: score,
+            source_guid: None,
+            source_prefab: None,
+            modifications_count: None,
+        }
+    }
+
+    pub fn from_prefab_instance(pi: &PrefabInstanceInfo, score: Option<f64>) -> Self {
+        FindResult {
+            name: pi.name.clone(),
+            file_id: pi.file_id.clone(),
+            result_type: "PrefabInstance".to_string(),
+            active: None,
+            match_score: score,
+            source_guid: Some(pi.source_guid.clone()),
+            source_prefab: pi.source_prefab.clone(),
+            modifications_count: Some(pi.modifications_count),
+        }
+    }
+}
+
 /// Full scene inspection result
 #[napi(object)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,4 +225,76 @@ pub struct SearchResult {
     pub content: String,
     pub score: f64,
     pub metadata: ChunkMetadata,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_result_from_game_object() {
+        let go = GameObject {
+            name: "Player".to_string(),
+            file_id: "12345".to_string(),
+            active: true,
+            match_score: None,
+        };
+        let result = FindResult::from_game_object(&go, Some(85.0));
+        assert_eq!(result.name, "Player");
+        assert_eq!(result.file_id, "12345");
+        assert_eq!(result.result_type, "GameObject");
+        assert_eq!(result.active, Some(true));
+        assert_eq!(result.match_score, Some(85.0));
+        assert!(result.source_guid.is_none());
+        assert!(result.source_prefab.is_none());
+        assert!(result.modifications_count.is_none());
+    }
+
+    #[test]
+    fn test_find_result_from_game_object_no_score() {
+        let go = GameObject {
+            name: "Camera".to_string(),
+            file_id: "999".to_string(),
+            active: false,
+            match_score: None,
+        };
+        let result = FindResult::from_game_object(&go, None);
+        assert_eq!(result.active, Some(false));
+        assert!(result.match_score.is_none());
+    }
+
+    #[test]
+    fn test_find_result_from_prefab_instance() {
+        let pi = PrefabInstanceInfo {
+            name: "Enemy".to_string(),
+            file_id: "700000".to_string(),
+            source_guid: "aabbccdd".to_string(),
+            source_prefab: Some("Assets/Prefabs/Enemy.prefab".to_string()),
+            modifications_count: 3,
+        };
+        let result = FindResult::from_prefab_instance(&pi, Some(70.0));
+        assert_eq!(result.name, "Enemy");
+        assert_eq!(result.file_id, "700000");
+        assert_eq!(result.result_type, "PrefabInstance");
+        assert!(result.active.is_none());
+        assert_eq!(result.match_score, Some(70.0));
+        assert_eq!(result.source_guid, Some("aabbccdd".to_string()));
+        assert_eq!(result.source_prefab, Some("Assets/Prefabs/Enemy.prefab".to_string()));
+        assert_eq!(result.modifications_count, Some(3));
+    }
+
+    #[test]
+    fn test_find_result_from_prefab_instance_no_source_prefab() {
+        let pi = PrefabInstanceInfo {
+            name: "Ally".to_string(),
+            file_id: "800000".to_string(),
+            source_guid: "11223344".to_string(),
+            source_prefab: None,
+            modifications_count: 0,
+        };
+        let result = FindResult::from_prefab_instance(&pi, None);
+        assert!(result.source_prefab.is_none());
+        assert!(result.match_score.is_none());
+        assert_eq!(result.modifications_count, Some(0));
+    }
 }

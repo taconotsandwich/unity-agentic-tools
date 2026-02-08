@@ -17,7 +17,7 @@ yarn-debug.log*
 yarn-error.log*
 
 # Build artifacts
-# dist/
+dist/
 *.tsbuildinfo
 *.map
 *.min.js
@@ -48,6 +48,7 @@ bun.lockb
 *.tmp
 *.swp
 *.bak
+firebase-debug.log
 *~
 *.orig
 *.rej
@@ -67,3 +68,6 @@ ts/
 
 # Rust
 target/
+
+# Doc indexer artifacts
+.unity-docs-index.json

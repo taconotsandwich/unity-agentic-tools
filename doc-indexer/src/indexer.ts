@@ -1,6 +1,8 @@
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { resolve } from 'path';
 import { estimateTokens } from './tokenizer';
+import { load_embedding_generator } from './native';
+import type { DocStorage, StoredChunk } from './storage';
 
 /** Maximum tokens per chunk before splitting */
 const MAX_CHUNK_TOKENS = 1024;
@@ -24,6 +26,7 @@ export interface IndexResult {
   total_tokens: number;
   files_processed: number;
   elapsed_ms: number;
+  embeddings_generated: number;
 }
 
 function extractCodeBlocks(content: string, filePath: string = ''): Chunk[] {
@@ -204,7 +207,33 @@ function generateId(): string {
   return `chunk_${Date.now()}_${chunkId++}`;
 }
 
-export function indexMarkdownFile(filePath: string): IndexResult {
+async function store_chunks(chunks: Chunk[], storage?: DocStorage): Promise<number> {
+    if (!storage || chunks.length === 0) return 0;
+
+    const embedder = load_embedding_generator();
+    let embeddings: number[][] | null = null;
+
+    if (embedder) {
+        try {
+            const texts = chunks.map(c => c.content);
+            embeddings = embedder.generate_batch(texts);
+        } catch {
+            // Embedding generation failed — store without embeddings
+        }
+    }
+
+    const storedChunks: StoredChunk[] = chunks.map((chunk, i) => ({
+        id: chunk.id,
+        content: chunk.content,
+        metadata: chunk.metadata as Record<string, unknown>,
+        embedding: embeddings?.[i] ?? undefined,
+    }));
+
+    await storage.storeChunks(storedChunks);
+    return embeddings?.length ?? 0;
+}
+
+export function indexMarkdownFile(filePath: string, storage?: DocStorage): IndexResult {
   const startTime = Date.now();
   const content = readFileSync(filePath, 'utf-8');
 
@@ -213,19 +242,27 @@ export function indexMarkdownFile(filePath: string): IndexResult {
   chunks.push(...extractCodeBlocks(content, filePath));
   chunks.push(...chunkProse(content.replace(/```[\s\S]+?```/g, ''), filePath));
 
+  let embeddingsGenerated = 0;
+  if (storage) {
+    // store_chunks is async but we return sync — caller should use indexDocsDirectory for async
+    store_chunks(chunks, storage).then(n => { embeddingsGenerated = n; });
+  }
+
   const totalTokens = chunks.reduce((sum, chunk) => sum + chunk.tokens, 0);
 
   return {
     chunks_indexed: chunks.length,
     total_tokens: totalTokens,
     files_processed: 1,
-    elapsed_ms: Date.now() - startTime
+    elapsed_ms: Date.now() - startTime,
+    embeddings_generated: embeddingsGenerated
   };
 }
 
 export async function indexDocsDirectory(
   dirPath: string,
-  extensions: string[] = ['.md', '.txt']
+  extensions: string[] = ['.md', '.txt'],
+  storage?: DocStorage
 ): Promise<IndexResult> {
   const startTime = Date.now();
   const files = readdirSync(dirPath);
@@ -250,17 +287,19 @@ export async function indexDocsDirectory(
     filesProcessed++;
   }
 
+  const embeddingsGenerated = await store_chunks(allChunks, storage);
   const totalTokens = allChunks.reduce((sum, chunk) => sum + chunk.tokens, 0);
 
   return {
     chunks_indexed: allChunks.length,
     total_tokens: totalTokens,
     files_processed: filesProcessed,
-    elapsed_ms: Date.now() - startTime
+    elapsed_ms: Date.now() - startTime,
+    embeddings_generated: embeddingsGenerated
   };
 }
 
-export function indexScriptableObject(filePath: string): IndexResult {
+export function indexScriptableObject(filePath: string, storage?: DocStorage): IndexResult {
   const startTime = Date.now();
   const content = readFileSync(filePath, 'utf-8');
 
@@ -291,17 +330,23 @@ export function indexScriptableObject(filePath: string): IndexResult {
     chunks.push(...chunkProse(content, filePath));
   }
 
+  let embeddingsGenerated = 0;
+  if (storage) {
+    store_chunks(chunks, storage).then(n => { embeddingsGenerated = n; });
+  }
+
   const totalTokens = chunks.reduce((sum, chunk) => sum + chunk.tokens, 0);
 
   return {
     chunks_indexed: chunks.length,
     total_tokens: totalTokens,
     files_processed: 1,
-    elapsed_ms: Date.now() - startTime
+    elapsed_ms: Date.now() - startTime,
+    embeddings_generated: embeddingsGenerated
   };
 }
 
-export async function indexUnityPackage(packageName: string): Promise<IndexResult> {
+export async function indexUnityPackage(packageName: string, storage?: DocStorage): Promise<IndexResult> {
   const startTime = Date.now();
   const chunks: Chunk[] = [];
 
@@ -327,12 +372,14 @@ export async function indexUnityPackage(packageName: string): Promise<IndexResul
     chunks.push(...chunkProse(docsContent, `registry:${packageName}`));
   }
 
+  const embeddingsGenerated = await store_chunks(chunks, storage);
   const totalTokens = chunks.reduce((sum, chunk) => sum + chunk.tokens, 0);
 
   return {
     chunks_indexed: chunks.length,
     total_tokens: totalTokens,
     files_processed: 1,
-    elapsed_ms: Date.now() - startTime
+    elapsed_ms: Date.now() - startTime,
+    embeddings_generated: embeddingsGenerated
   };
 }
