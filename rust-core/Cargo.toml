@@ -17,6 +17,9 @@ napi-derive = "2"
 memmap2 = "0.9"
 rayon = "1.10"
 
+# File walking
+walkdir = "2"
+
 # Parsing
 regex = "1.11"
 
@@ -26,6 +29,9 @@ serde_json = "1.0"
 
 # Embeddings
 fastembed = "4"
+
+[dev-dependencies]
+tempfile = "3"
 
 [build-dependencies]
 napi-build = "2"

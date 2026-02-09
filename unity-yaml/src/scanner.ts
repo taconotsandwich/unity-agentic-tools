@@ -6,10 +6,18 @@ import { AssetObject, FindResult, GameObject, GameObjectDetail, GameObjectWithCo
 let RustScanner: NativeScanner | null = null;
 let nativeModuleError: string | null = null;
 
+// Native walker functions (standalone, not Scanner methods)
+let nativeWalkProjectFiles: ((projectPath: string, extensions: string[], excludeDirs?: string[] | null) => string[]) | null = null;
+let nativeGrepProject: ((options: any) => any) | null = null;
+let nativeBuildGuidCache: ((projectRoot: string) => any) | null = null;
+
 try {
   const nativeRequire = createRequire(import.meta.url || __filename);
   const rustModule = nativeRequire('unity-file-tools');
   RustScanner = rustModule.Scanner;
+  nativeWalkProjectFiles = rustModule.walkProjectFiles || null;
+  nativeGrepProject = rustModule.grepProject || null;
+  nativeBuildGuidCache = rustModule.buildGuidCache || null;
 } catch (err) {
   nativeModuleError =
     `Failed to load native Rust module.\n` +
@@ -111,4 +119,25 @@ export class UnityScanner {
   read_asset(file: string): AssetObject[] {
     return this.scanner.readAsset(file);
   }
+}
+
+/**
+ * Get native walk_project_files if available, or null
+ */
+export function getNativeWalkProjectFiles(): typeof nativeWalkProjectFiles {
+  return nativeWalkProjectFiles;
+}
+
+/**
+ * Get native grep_project if available, or null
+ */
+export function getNativeGrepProject(): typeof nativeGrepProject {
+  return nativeGrepProject;
+}
+
+/**
+ * Get native build_guid_cache if available, or null
+ */
+export function getNativeBuildGuidCache(): typeof nativeBuildGuidCache {
+  return nativeBuildGuidCache;
 }

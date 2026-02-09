@@ -132,6 +132,45 @@ export interface SearchResult {
   score: number
   metadata: ChunkMetadata
 }
+/**
+ * Walk a Unity project and collect files matching the given extensions.
+ *
+ * Walks `Assets/` (and `ProjectSettings/` when `.asset` is among extensions).
+ * Skips standard Unity noise directories (Library, Temp, etc.).
+ */
+export declare function walkProjectFiles(projectPath: string, extensions: Array<string>, excludeDirs?: Array<string> | undefined | null): Array<string>
+export interface NapiGrepOptions {
+  projectPath: string
+  pattern: string
+  fileType?: string
+  maxResults?: number
+  contextLines?: number
+}
+export interface NapiGrepMatch {
+  file: string
+  lineNumber: number
+  line: string
+  contextBefore?: Array<string>
+  contextAfter?: Array<string>
+}
+export interface NapiGrepResult {
+  success: boolean
+  projectPath: string
+  pattern: string
+  totalFilesScanned: number
+  totalMatches: number
+  truncated: boolean
+  matches: Array<NapiGrepMatch>
+  error?: string
+}
+/** Grep across Unity project files in parallel using Rayon. */
+export declare function grepProject(options: NapiGrepOptions): NapiGrepResult
+/**
+ * Build the GUID cache by scanning all .meta files under Assets/ in parallel.
+ *
+ * Returns a JSON object mapping `{ guid: relative_asset_path }`.
+ */
+export declare function buildGuidCache(projectRoot: string): any
 /** Get the version of the native module */
 export declare function getVersion(): string
 /** Check if the native module is available */
