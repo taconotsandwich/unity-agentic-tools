@@ -2,9 +2,8 @@
 /**
  * Hook: SessionStart
  * Ensures the plugin is ready: workspace deps installed and TypeScript built.
- * Creates an executable wrapper at bin/unity-yaml so Claude can invoke the CLI
- * by full path without needing bun prefix or PATH changes.
- * If deps/build missing: runs bun install + bun run build first.
+ * If already set up: exits immediately (fast path, no output).
+ * If missing: runs bun install + bun run build.
  */
 
 const readline = require('readline');
@@ -26,7 +25,7 @@ function ensureSetup() {
     const needsInstall = !fs.existsSync(path.join(pluginRoot, 'node_modules'));
     const needsBuild = !fs.existsSync(path.join(pluginRoot, 'unity-yaml', 'dist', 'cli.js'));
 
-    if (!needsInstall && !needsBuild) return { didSetup: false, pluginRoot };
+    if (!needsInstall && !needsBuild) return false;
 
     try {
         if (needsInstall) {
@@ -35,25 +34,11 @@ function ensureSetup() {
         if (needsBuild) {
             execSync('bun run build', { cwd: pluginRoot, stdio: 'inherit', timeout: 60000 });
         }
-        return { didSetup: true, pluginRoot };
+        return true;
     } catch (err) {
         process.stderr.write(`Auto-setup failed: ${err.message}. Run bun install && bun run build manually.\n`);
-        return { didSetup: false, pluginRoot };
+        return false;
     }
-}
-
-function ensureWrapper(pluginRoot) {
-    const binDir = path.join(pluginRoot, 'bin');
-    const wrapperPath = path.join(binDir, 'unity-yaml');
-    const cliPath = path.join(pluginRoot, 'unity-yaml', 'dist', 'cli.js');
-
-    if (!fs.existsSync(wrapperPath)) {
-        if (!fs.existsSync(binDir)) fs.mkdirSync(binDir);
-        fs.writeFileSync(wrapperPath, `#!/bin/sh\nexec bun "${cliPath}" "$@"\n`);
-        fs.chmodSync(wrapperPath, 0o755);
-    }
-
-    return wrapperPath;
 }
 
 async function main() {
@@ -61,15 +46,11 @@ async function main() {
         const input = await readStdin();
         const data = JSON.parse(input);
 
-        const { didSetup, pluginRoot } = ensureSetup();
-        const wrapperPath = ensureWrapper(pluginRoot);
-
-        // Always inject the resolved wrapper path so Claude can invoke directly
-        data.context = (data.context || '') +
-            `# unity-yaml CLI: ${wrapperPath}\n`;
+        const didSetup = ensureSetup();
 
         if (didSetup) {
-            data.context += '# Unity Agentic Tools: plugin dependencies installed and built.\n';
+            data.context = (data.context || '') +
+                '# Unity Agentic Tools: plugin dependencies installed and built.\n';
         }
 
         console.log(JSON.stringify(data));
