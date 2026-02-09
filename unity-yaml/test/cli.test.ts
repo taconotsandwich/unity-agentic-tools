@@ -21,25 +21,27 @@ function run_cli(args: string[]): string {
 }
 
 describeIfNative('CLI', () => {
-    describe('inspect command', () => {
-        it('should output valid JSON', () => {
+    describe('read gameobject command (single object)', () => {
+        it('should output valid JSON with file and object wrapper', () => {
             const result = run_cli([
-                'inspect',
+                'read', 'gameobject',
                 resolve(fixtures_dir, 'TestSample.unity'),
                 'TestObject',
                 '--json'
             ]);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('name');
-            expect(json).toHaveProperty('file_id');
-            expect(json).toHaveProperty('active');
+            expect(json).toHaveProperty('file');
+            expect(json).toHaveProperty('object');
+            expect(json.object).toHaveProperty('name');
+            expect(json.object).toHaveProperty('file_id');
+            expect(json.object).toHaveProperty('active');
         });
     });
 
-    describe('list command', () => {
+    describe('read scene command', () => {
         it('should list all GameObjects with pagination metadata', () => {
             const result = run_cli([
-                'list',
+                'read', 'scene',
                 resolve(fixtures_dir, 'TestSample.unity'),
                 '--json'
             ]);
@@ -55,7 +57,7 @@ describeIfNative('CLI', () => {
         it('should limit results with --page-size', () => {
             // SampleScene has 4 GameObjects; page-size 2 should truncate
             const result = run_cli([
-                'list',
+                'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--page-size', '2',
                 '--json'
@@ -71,7 +73,7 @@ describeIfNative('CLI', () => {
         it('should return second page via --cursor', () => {
             // Fetch page 2 (cursor=2, page-size=2)
             const result = run_cli([
-                'list',
+                'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--page-size', '2',
                 '--cursor', '2',
@@ -86,7 +88,7 @@ describeIfNative('CLI', () => {
 
         it('should return empty page when cursor beyond total', () => {
             const result = run_cli([
-                'list',
+                'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--cursor', '999',
                 '--json'
@@ -99,7 +101,7 @@ describeIfNative('CLI', () => {
 
         it('should return compact summary with --summary', () => {
             const result = run_cli([
-                'list',
+                'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--summary',
                 '--json'
@@ -113,12 +115,12 @@ describeIfNative('CLI', () => {
 
         it('should return different objects on page 1 vs page 2', () => {
             const page1 = JSON.parse(run_cli([
-                'list',
+                'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--page-size', '2', '--cursor', '0', '--json'
             ]));
             const page2 = JSON.parse(run_cli([
-                'list',
+                'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--page-size', '2', '--cursor', '2', '--json'
             ]));
@@ -149,10 +151,10 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('get command', () => {
+    describe('read gameobject command', () => {
         it('should return all matching components with -c filter', () => {
             const result = run_cli([
-                'get',
+                'read', 'gameobject',
                 resolve(fixtures_dir, 'Tiny3D.unity'),
                 'Directional Light',
                 '-c', 'MonoBehaviour',
@@ -167,7 +169,7 @@ describeIfNative('CLI', () => {
 
         it('should return single component when only one matches', () => {
             const result = run_cli([
-                'get',
+                'read', 'gameobject',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 'Player',
                 '-c', 'Transform',
@@ -182,7 +184,7 @@ describeIfNative('CLI', () => {
 
         it('should fall through to full object when component type not found', () => {
             const result = run_cli([
-                'get',
+                'read', 'gameobject',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 'Player',
                 '-c', 'FakeType',
@@ -194,38 +196,26 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('inspect-all command', () => {
-        it('should return paginated output', () => {
+    describe('read scene --properties command', () => {
+        it('should include component properties when --properties is set', () => {
             const result = run_cli([
-                'inspect-all',
+                'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
-                '--page-size', '2',
+                '--properties',
                 '--json'
             ]);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('total');
-            expect(json).toHaveProperty('truncated', true);
-            expect(json.gameobjects).toHaveLength(2);
-            expect(json.total).toBe(4);
+            expect(json).toHaveProperty('gameobjects');
+            expect(json.gameobjects.length).toBeGreaterThan(0);
+            // With --properties, components should have property data
+            const go = json.gameobjects.find((g: any) =>
+                g.components?.some((c: any) => c.properties)
+            );
+            expect(go).toBeTruthy();
         });
     });
 
-    describe('inspect command without identifier', () => {
-        it('should return paginated output', () => {
-            const result = run_cli([
-                'inspect',
-                resolve(fixtures_dir, 'SampleScene.unity'),
-                '--page-size', '2',
-                '--json'
-            ]);
-            const json = JSON.parse(result);
-            expect(json.total).toBe(4);
-            expect(json.gameobjects).toHaveLength(2);
-            expect(json.truncated).toBe(true);
-        });
-    });
-
-    describe('edit command', () => {
+    describe('update gameobject command', () => {
         it('should edit a property on a temp copy', () => {
             const temp_fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SampleScene.unity')
@@ -233,7 +223,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'edit',
+                    'update', 'gameobject',
                     temp_fixture.temp_path,
                     'Player',
                     'm_IsActive',
@@ -249,7 +239,7 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('create command', () => {
+    describe('create gameobject command', () => {
         it('should create a new GameObject', () => {
             const temp_fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SampleScene.unity')
@@ -257,7 +247,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'create',
+                    'create', 'gameobject',
                     temp_fixture.temp_path,
                     'NewObject',
                     '--json'
@@ -278,7 +268,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'create',
+                    'create', 'gameobject',
                     temp_fixture.temp_path,
                     'ChildObject',
                     '--parent', 'Player',
@@ -293,7 +283,7 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('edit-transform command', () => {
+    describe('update transform command', () => {
         it('should edit transform with valid vector', () => {
             const temp_fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SampleScene.unity')
@@ -302,13 +292,13 @@ describeIfNative('CLI', () => {
             try {
                 // Player's Transform fileID is known from the fixture
                 const listResult = JSON.parse(run_cli([
-                    'list', temp_fixture.temp_path, '--json'
+                    'read', 'scene', temp_fixture.temp_path, '--json'
                 ]));
                 const player = listResult.gameobjects.find((g: any) => g.name === 'Player');
                 const transformId = player.components.find((c: any) => c.type === 'Transform').fileId;
 
                 const result = run_cli([
-                    'edit-transform',
+                    'update', 'transform',
                     temp_fixture.temp_path,
                     transformId,
                     '--position', '1,2,3',
@@ -328,7 +318,7 @@ describeIfNative('CLI', () => {
 
             try {
                 run_cli([
-                    'edit-transform',
+                    'update', 'transform',
                     temp_fixture.temp_path,
                     '999999',
                     '--position', 'not,a,vector',
@@ -344,7 +334,7 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('add-component command', () => {
+    describe('create component command', () => {
         it('should add a component to a GameObject', () => {
             const temp_fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SampleScene.unity')
@@ -352,7 +342,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'add-component',
+                    'create', 'component',
                     temp_fixture.temp_path,
                     'Player',
                     'Rigidbody',
@@ -373,7 +363,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'add-component',
+                    'create', 'component',
                     temp_fixture.temp_path,
                     'NonexistentObject',
                     'Rigidbody',
@@ -387,7 +377,7 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('edit-component command', () => {
+    describe('update component command', () => {
         it('should edit component by file ID', () => {
             const temp_fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SampleScene.unity')
@@ -396,13 +386,13 @@ describeIfNative('CLI', () => {
             try {
                 // Get a component file ID from Player
                 const listResult = JSON.parse(run_cli([
-                    'list', temp_fixture.temp_path, '--json'
+                    'read', 'scene', temp_fixture.temp_path, '--json'
                 ]));
                 const player = listResult.gameobjects.find((g: any) => g.name === 'Player');
                 const transformId = player.components.find((c: any) => c.type === 'Transform').fileId;
 
                 const result = run_cli([
-                    'edit-component',
+                    'update', 'component',
                     temp_fixture.temp_path,
                     transformId,
                     'm_LocalPosition.x',
@@ -423,7 +413,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'edit-component',
+                    'update', 'component',
                     temp_fixture.temp_path,
                     '999999999',
                     'm_LocalPosition.x',
@@ -438,7 +428,7 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('remove-component command', () => {
+    describe('delete component command', () => {
         it('should remove a component by file ID', () => {
             const temp_fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SampleScene.unity')
@@ -447,7 +437,7 @@ describeIfNative('CLI', () => {
             try {
                 // First add a component, then remove it
                 const addResult = JSON.parse(run_cli([
-                    'add-component',
+                    'create', 'component',
                     temp_fixture.temp_path,
                     'Player',
                     'Rigidbody',
@@ -456,7 +446,7 @@ describeIfNative('CLI', () => {
                 expect(addResult.success).toBe(true);
 
                 const result = run_cli([
-                    'remove-component',
+                    'delete', 'component',
                     temp_fixture.temp_path,
                     addResult.component_id,
                     '--json'
@@ -469,7 +459,7 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('delete command', () => {
+    describe('delete gameobject command', () => {
         it('should delete a GameObject', () => {
             const temp_fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SampleScene.unity')
@@ -477,7 +467,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'delete',
+                    'delete', 'gameobject',
                     temp_fixture.temp_path,
                     'GameManager',
                     '--json'
@@ -487,7 +477,7 @@ describeIfNative('CLI', () => {
 
                 // Verify it's gone
                 const listResult = JSON.parse(run_cli([
-                    'list', temp_fixture.temp_path, '--json'
+                    'read', 'scene', temp_fixture.temp_path, '--json'
                 ]));
                 const names = listResult.gameobjects.map((g: any) => g.name);
                 expect(names).not.toContain('GameManager');
@@ -497,7 +487,7 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('copy-component command', () => {
+    describe('create component-copy command', () => {
         it('should copy a component to another GameObject', () => {
             const temp_fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SampleScene.unity')
@@ -506,13 +496,13 @@ describeIfNative('CLI', () => {
             try {
                 // Get Camera component from Main Camera
                 const listResult = JSON.parse(run_cli([
-                    'list', temp_fixture.temp_path, '--json'
+                    'read', 'scene', temp_fixture.temp_path, '--json'
                 ]));
                 const camera = listResult.gameobjects.find((g: any) => g.name === 'Main Camera');
                 const cameraComp = camera.components.find((c: any) => c.type === 'Camera');
 
                 const result = run_cli([
-                    'copy-component',
+                    'create', 'component-copy',
                     temp_fixture.temp_path,
                     cameraComp.fileId,
                     'Player',
@@ -526,7 +516,7 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('duplicate command', () => {
+    describe('clone command', () => {
         it('should duplicate a GameObject', () => {
             const temp_fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SampleScene.unity')
@@ -534,7 +524,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'duplicate',
+                    'clone',
                     temp_fixture.temp_path,
                     'Player',
                     '--json'
@@ -547,7 +537,7 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('reparent command', () => {
+    describe('update parent command', () => {
         it('should reparent a GameObject under another', () => {
             const temp_fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SampleScene.unity')
@@ -555,7 +545,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'reparent',
+                    'update', 'parent',
                     temp_fixture.temp_path,
                     'GameManager',
                     'Player',
@@ -569,7 +559,7 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('create-meta command', () => {
+    describe('create meta command', () => {
         it('should generate a .meta file for a script', () => {
             const temp_dir = mkdtempSync(join(tmpdir(), 'cli-meta-'));
 
@@ -578,7 +568,7 @@ describeIfNative('CLI', () => {
                 writeFileSync(scriptPath, 'using UnityEngine;\npublic class TestScript : MonoBehaviour { }');
 
                 const result = run_cli([
-                    'create-meta',
+                    'create', 'meta',
                     scriptPath,
                     '--json'
                 ]);
@@ -591,14 +581,14 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('create-scene command', () => {
+    describe('create scene command', () => {
         it('should create a minimal scene', () => {
             const temp_dir = mkdtempSync(join(tmpdir(), 'cli-scene-'));
 
             try {
                 const scenePath = join(temp_dir, 'New.unity');
                 const result = run_cli([
-                    'create-scene',
+                    'create', 'scene',
                     scenePath,
                     '--json'
                 ]);
@@ -619,7 +609,7 @@ describeIfNative('CLI', () => {
             try {
                 const scenePath = join(temp_dir, 'WithDefaults.unity');
                 const result = run_cli([
-                    'create-scene',
+                    'create', 'scene',
                     scenePath,
                     '--defaults',
                     '--json'
@@ -638,7 +628,7 @@ describeIfNative('CLI', () => {
     describe('settings commands via CLI', () => {
         it('should read settings from a project', () => {
             const result = run_cli([
-                'read-settings',
+                'read', 'settings',
                 external_fixtures,
                 '--setting', 'tags',
                 '--json'
@@ -648,7 +638,7 @@ describeIfNative('CLI', () => {
             expect(json.data).toHaveProperty('tags');
         });
 
-        it('should add a tag via edit-tag', () => {
+        it('should add a tag via update tag', () => {
             // Copy fixtures to temp to avoid mutating originals
             const temp_dir = mkdtempSync(join(tmpdir(), 'cli-settings-'));
             const settingsDir = join(temp_dir, 'ProjectSettings');
@@ -656,7 +646,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'edit-tag',
+                    'update', 'tag',
                     temp_dir,
                     'add',
                     'CLITestTag',
@@ -667,7 +657,7 @@ describeIfNative('CLI', () => {
 
                 // Verify the tag was added
                 const readResult = JSON.parse(run_cli([
-                    'read-settings', temp_dir, '--setting', 'tags', '--json'
+                    'read', 'settings', temp_dir, '--setting', 'tags', '--json'
                 ]));
                 expect(readResult.data.tags).toContain('CLITestTag');
             } finally {
@@ -675,14 +665,14 @@ describeIfNative('CLI', () => {
             }
         });
 
-        it('should set a layer via edit-layer', () => {
+        it('should set a layer via update layer', () => {
             const temp_dir = mkdtempSync(join(tmpdir(), 'cli-settings-'));
             const settingsDir = join(temp_dir, 'ProjectSettings');
             cpSync(join(external_fixtures, 'ProjectSettings'), settingsDir, { recursive: true });
 
             try {
                 const result = run_cli([
-                    'edit-layer',
+                    'update', 'layer',
                     temp_dir,
                     '8',
                     'CLITestLayer',

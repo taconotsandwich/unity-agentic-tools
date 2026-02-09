@@ -66,13 +66,21 @@ bun run dev
 
 ## CLI Commands Reference
 
-All commands use `bun unity-yaml/dist/cli.js`:
-- `list <file>` - List GameObject hierarchy
+All commands use `bun unity-yaml/dist/cli.js <command>`:
+- `read scene <file>` - List GameObject hierarchy (`--properties` for values, `--summary` for counts)
+- `read gameobject <file> <id>` - Get single object by name or file ID (`-c <type>` for component filter)
+- `read scriptable-object <file>` - Read .asset file
+- `read settings <project> -s <name>` - Read project settings
+- `read build <project>` - Read build settings
+- `create gameobject|scene|component|build-scene|...` - Create Unity objects
+- `update gameobject|transform|component|build-scene|...` - Modify properties
+- `delete gameobject|component|build-scene` - Remove objects
 - `find <file> <pattern>` - Find GameObjects by name
-- `get <file> <object_id>` - Get GameObject by ID
-- `inspect <file> [identifier]` - Inspect file or GameObject
-- `inspect-all <file>` - Inspect entire file with all details
-- `search-docs <query>` - Search Unity documentation
+- `search <project> -n <pattern>` - Search across scenes/prefabs
+- `grep <project> <regex>` - Regex search across project files
+- `clone <file> <name>` - Duplicate a GameObject and its hierarchy
+- `version <project>` - Read Unity project version
+- `docs <query>` - Search Unity documentation (auto-indexes)
 
 ## Claude Code Integration
 
