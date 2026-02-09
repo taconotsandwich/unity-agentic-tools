@@ -21,10 +21,9 @@ bun run test:integration  # CLI integration tests (bash)
 ## Architecture
 
 ```
-.claude-plugin/     Plugin manifest (autodiscovers commands/, skills/, agents/)
+.claude-plugin/     Plugin manifest (autodiscovers commands/, skills/)
 commands/           Slash commands for Claude Code
 skills/             Agent skills (unity-yaml parsing instructions)
-agents/             Subagents: unity-scanner, unity-analyst, unity-editor
 hooks/              Event handlers (detect_unity.js, pre/post validation)
 unity-yaml/         TypeScript CLI + Vitest tests
 rust-core/          Native Rust module (napi-rs)
