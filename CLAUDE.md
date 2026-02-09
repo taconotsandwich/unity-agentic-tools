@@ -18,6 +18,12 @@ bun run test          # Unit tests
 bun run test:integration  # CLI integration tests (bash)
 ```
 
+## Dev Setup
+
+```bash
+cd unity-yaml && npm link   # Register unity-yaml CLI globally (one-time)
+```
+
 ## Architecture
 
 ```
