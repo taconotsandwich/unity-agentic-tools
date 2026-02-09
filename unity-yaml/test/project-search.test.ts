@@ -91,6 +91,18 @@ describe('grep_project', () => {
         expect(result.truncated).toBe(true);
     });
 
+    it('should find matches with --type yaml (includes .unity, .prefab, .asset)', () => {
+        const result = grep_project({
+            project_path: EXTERNAL_FIXTURES,
+            pattern: 'm_LocalPosition',
+            file_type: 'yaml',
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.total_files_scanned).toBeGreaterThan(0);
+        expect(result.total_matches).toBeGreaterThan(0);
+    });
+
     it('should return error for invalid regex', () => {
         const result = grep_project({
             project_path: EXTERNAL_FIXTURES,

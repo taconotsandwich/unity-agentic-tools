@@ -66,6 +66,15 @@ program.command('find <file> <pattern>')
   .option('-e, --exact', 'Use exact matching')
   .option('-j, --json', 'Output as JSON')
   .action((file, pattern, options) => {
+    if (!pattern || pattern.trim() === '') {
+      console.log(JSON.stringify({ error: 'Pattern must not be empty' }, null, 2));
+      process.exit(1);
+    }
+    const { existsSync } = require('fs');
+    if (!existsSync(file)) {
+      console.log(JSON.stringify({ error: `File not found: ${file}` }, null, 2));
+      process.exit(1);
+    }
     const fuzzy = options.exact !== true;
     const result = getScanner().find_by_name(file, pattern, fuzzy);
     const output = {
@@ -114,6 +123,10 @@ program.command('grep <project_path> <pattern>')
   .option('-C, --context <n>', 'Context lines around matches', '0')
   .option('-j, --json', 'Output as JSON')
   .action((project_path, pattern, options) => {
+    if (!pattern || pattern.trim() === '') {
+      console.log(JSON.stringify({ success: false, error: 'Pattern must not be empty' }, null, 2));
+      process.exit(1);
+    }
     const result = grep_project({
       project_path,
       pattern,

@@ -40,7 +40,7 @@ fn truncate_line(s: &str, max_bytes: usize) -> String {
 fn extension_map(file_type: &str) -> Vec<&'static str> {
     match file_type {
         "cs" => vec![".cs"],
-        "yaml" => vec![".yaml", ".yml"],
+        "yaml" => vec![".yaml", ".yml", ".unity", ".prefab", ".asset"],
         "unity" => vec![".unity"],
         "prefab" => vec![".prefab"],
         "asset" => vec![".asset"],
@@ -472,6 +472,39 @@ mod tests {
             None,
         );
         assert!(files.is_empty());
+    }
+
+    #[test]
+    fn test_yaml_extension_map_includes_unity_formats() {
+        let exts = extension_map("yaml");
+        assert!(exts.contains(&".yaml"), "Should include .yaml");
+        assert!(exts.contains(&".yml"), "Should include .yml");
+        assert!(exts.contains(&".unity"), "Should include .unity");
+        assert!(exts.contains(&".prefab"), "Should include .prefab");
+        assert!(exts.contains(&".asset"), "Should include .asset");
+    }
+
+    #[test]
+    fn test_grep_yaml_type_finds_unity_files() {
+        let tmp = create_temp_project();
+        // Create a .unity file with searchable content
+        let assets = tmp.path().join("Assets");
+        fs::write(
+            assets.join("Test.unity"),
+            "%YAML 1.1\n--- !u!1 &100\nGameObject:\n  m_Name: TestObject\n",
+        )
+        .unwrap();
+
+        let result = grep_project(NapiGrepOptions {
+            project_path: tmp.path().to_string_lossy().to_string(),
+            pattern: "TestObject".to_string(),
+            file_type: Some("yaml".to_string()),
+            max_results: None,
+            context_lines: None,
+        });
+        assert!(result.success);
+        assert!(result.total_files_scanned > 0, "yaml type should scan .unity files");
+        assert!(result.total_matches >= 1, "Should find match in .unity file");
     }
 
     #[test]

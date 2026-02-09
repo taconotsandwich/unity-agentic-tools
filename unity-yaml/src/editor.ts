@@ -899,21 +899,26 @@ function resolveScriptGuid(
         const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
         const scriptNameLower = script.toLowerCase().replace(/\.cs$/, '');
 
-        // Search for matching script
+        // Two-pass search: exact filename first, then substring fallback
+        let substringMatch: { guid: string; path: string } | null = null;
+
         for (const [guid, assetPath] of Object.entries(cache)) {
           if (!assetPath.endsWith('.cs')) continue;
 
           const fileName = path.basename(assetPath, '.cs').toLowerCase();
-          const pathLower = assetPath.toLowerCase();
 
-          // Exact name match
+          // Exact filename match — return immediately
           if (fileName === scriptNameLower) {
             return { guid, path: assetPath };
           }
-          // Path contains the script name
-          if (pathLower.includes(scriptNameLower)) {
-            return { guid, path: assetPath };
+          // Track first substring match as fallback
+          if (!substringMatch && assetPath.toLowerCase().includes(scriptNameLower)) {
+            substringMatch = { guid, path: assetPath };
           }
+        }
+
+        if (substringMatch) {
+          return substringMatch;
         }
       } catch {
         // Cache read failed

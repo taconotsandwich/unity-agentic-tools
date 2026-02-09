@@ -1,6 +1,7 @@
 import { readdirSync, statSync, readFileSync, existsSync } from 'fs';
 import * as path from 'path';
 import { UnityScanner, isNativeModuleAvailable, getNativeWalkProjectFiles, getNativeGrepProject } from './scanner';
+import { glob_match } from './utils';
 import type {
     ProjectSearchOptions,
     ProjectSearchResult,
@@ -189,11 +190,11 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
                     continue;
                 }
 
-                // Component filter
+                // Component filter (supports glob patterns: * and ?)
                 if (component) {
                     if (goAny.components) {
                         const hasComponent = goAny.components.some(
-                            (c: any) => c.type.toLowerCase() === component.toLowerCase()
+                            (c: any) => glob_match(component, c.type)
                         );
                         if (!hasComponent) continue;
                     } else {
@@ -332,7 +333,7 @@ function grep_project_js(options: ProjectGrepOptions): ProjectGrepResult {
     // Determine extensions
     const EXTENSION_MAP: Record<string, string[]> = {
         cs: ['.cs'],
-        yaml: ['.yaml', '.yml'],
+        yaml: ['.yaml', '.yml', '.unity', '.prefab', '.asset'],
         unity: ['.unity'],
         prefab: ['.prefab'],
         asset: ['.asset'],

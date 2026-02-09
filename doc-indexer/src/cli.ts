@@ -60,6 +60,15 @@ program
         // Auto-index if project root found
         await auto_index(storage, projectRoot);
 
+        if (storage.chunk_count() === 0) {
+            const output = {
+                results: [],
+                message: 'No documentation indexed. Install Unity docs via Unity Hub > Installs > Modules > Documentation, or run: unity-yaml setup --index-docs',
+            };
+            console.log(JSON.stringify(output, null, 2));
+            return;
+        }
+
         const searcher = new DocSearch(storage);
 
         const results = await searcher.search({

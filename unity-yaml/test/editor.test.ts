@@ -1403,6 +1403,37 @@ describe('addComponent', () => {
         }
     });
 
+    it('should prefer exact filename match over substring match in GUID cache', () => {
+        // Regression: "CampStateMgr" was resolving to "ArenaCampStateMgr.cs"
+        const projectDir = join(tmpdir(), 'test-unity-exact-match');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const cachePath = join(cacheDir, 'guid-cache.json');
+        const arenaGuid = 'aaaa000000000000000000000000aaaa';
+        const exactGuid = 'bbbb000000000000000000000000bbbb';
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(cachePath, JSON.stringify({
+            // Substring match comes first in iteration order
+            [arenaGuid]: 'Assets/Scripts/ArenaCampStateMgr.cs',
+            [exactGuid]: 'Assets/Scripts/CampStateMgr.cs'
+        }));
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'CampStateMgr',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.script_guid).toBe(exactGuid);
+            expect(result.script_path).toBe('Assets/Scripts/CampStateMgr.cs');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
     it('should fail for unknown script without project path', () => {
         const result = addComponent({
             file_path: temp_fixture.temp_path,
