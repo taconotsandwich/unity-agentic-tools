@@ -1,6 +1,6 @@
 {
   "name": "unity-build-settings",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Read and analyze Unity project build settings, version detection, and build profiles",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

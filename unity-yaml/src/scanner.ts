@@ -8,7 +8,7 @@ let nativeModuleError: string | null = null;
 
 try {
   const nativeRequire = createRequire(import.meta.url || __filename);
-  const rustModule = nativeRequire('unity-agentic-tool');
+  const rustModule = nativeRequire('unity-file-tools');
   RustScanner = rustModule.Scanner;
 } catch (err) {
   nativeModuleError =

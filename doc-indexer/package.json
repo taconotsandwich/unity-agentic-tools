@@ -1,7 +1,7 @@
 {
   "name": "unity-doc-indexer",
   "packageManager": "bun@latest",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Fast Unity documentation indexer with RAG",
   "main": "dist/cli.js",
   "type": "module",
@@ -9,14 +9,14 @@
     "unity-doc-indexer": "./dist/cli.js"
   },
   "scripts": {
-    "build": "bun build src/cli.ts --outfile=dist/cli.js --target=bun --format=cjs --external unity-agentic-tool",
+    "build": "bun build src/cli.ts --outfile=dist/cli.js --target=bun --format=cjs --external unity-file-tools",
     "start": "bun dist/cli.js",
     "dev": "bun src/cli.ts",
     "test": "vitest run"
   },
   "dependencies": {
     "commander": "^14.0.0",
-    "unity-agentic-tool": "workspace:*"
+    "unity-file-tools": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.0.0",

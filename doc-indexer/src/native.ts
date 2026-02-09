@@ -7,7 +7,7 @@ export function load_embedding_generator(): any | null {
 
     try {
         const nativeRequire = createRequire(import.meta.url || __filename);
-        const mod = nativeRequire('unity-agentic-tool');
+        const mod = nativeRequire('unity-file-tools');
         _cachedEmbedder = new mod.EmbeddingGenerator();
         return _cachedEmbedder;
     } catch {

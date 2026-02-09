@@ -16,7 +16,7 @@
       },
       "dependencies": {
         "commander": "^14.0.0",
-        "unity-agentic-tool": "workspace:*",
+        "unity-file-tools": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "^25.0.0",
@@ -24,16 +24,10 @@
       },
     },
     "rust-core": {
-      "name": "unity-agentic-tool",
+      "name": "unity-file-tools",
       "version": "0.1.0",
       "devDependencies": {
         "@napi-rs/cli": "^2.18.0",
-      },
-      "optionalDependencies": {
-        "unity-agentic-tool-darwin-arm64": "0.1.0",
-        "unity-agentic-tool-darwin-x64": "0.1.0",
-        "unity-agentic-tool-linux-x64-gnu": "0.1.0",
-        "unity-agentic-tool-win32-x64-msvc": "0.1.0",
       },
     },
     "unity-build-settings": {
@@ -56,7 +50,7 @@
       },
       "dependencies": {
         "commander": "^14.0.2",
-        "unity-agentic-tool": "workspace:*",
+        "unity-file-tools": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "^25.0.0",
@@ -349,11 +343,11 @@
 
     "undici-types": ["undici-types@7.16.0", "", {}, "sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw=="],
 
-    "unity-agentic-tool": ["unity-agentic-tool@workspace:rust-core"],
-
     "unity-build-settings": ["unity-build-settings@workspace:unity-build-settings"],
 
     "unity-doc-indexer": ["unity-doc-indexer@workspace:doc-indexer"],
+
+    "unity-file-tools": ["unity-file-tools@workspace:rust-core"],
 
     "unity-yaml": ["unity-yaml@workspace:unity-yaml"],
 
