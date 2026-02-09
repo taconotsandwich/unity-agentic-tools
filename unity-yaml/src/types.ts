@@ -49,6 +49,13 @@ export interface PrefabInstanceInfo {
   modificationsCount: number;
 }
 
+export interface PrefabModification {
+  targetFileId: string;
+  targetGuid?: string;
+  propertyPath: string;
+  value: string;
+}
+
 export interface FindResult {
     name: string;
     fileId: string;
@@ -191,6 +198,18 @@ export interface NativeScannerInstance {
     cursor?: number;
     maxDepth?: number;
   }): PaginatedInspection;
+  readAsset(file: string): AssetObject[];
+}
+
+// Asset object types (for .asset files / ScriptableObjects)
+export interface AssetObject {
+  class_id: number;
+  file_id: string;
+  type_name: string;
+  name: string;
+  properties: Record<string, any>;
+  script_guid?: string;
+  script_path?: string;
 }
 
 // Remove Component types

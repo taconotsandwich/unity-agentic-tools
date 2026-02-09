@@ -63,6 +63,15 @@ impl UnityYamlParser {
             .collect()
     }
 
+    /// Extract all non-GameObject root blocks from .asset files.
+    /// Returns (class_id, file_id, block_content) for each block where class_id != 1.
+    pub fn extract_asset_objects(content: &str) -> Vec<(u32, String, String)> {
+        let blocks = Self::parse_all_blocks(content);
+        blocks.into_iter()
+            .filter(|(class_id, _, _)| *class_id != 1)
+            .collect()
+    }
+
     /// Get all blocks from content, indexed by file ID
     pub fn parse_all_blocks(content: &str) -> Vec<(u32, String, String)> {
         let pattern = Regex::new(r"--- !u!(\d+) &(\d+)(?: stripped)?\s*\n")
@@ -118,6 +127,42 @@ GameObject:
         assert_eq!(objects[0].name, "TestObject");
         assert_eq!(objects[0].file_id, "1234567890");
         assert!(objects[0].active);
+    }
+
+    #[test]
+    fn test_extract_asset_objects() {
+        let content = r#"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_Script: {fileID: 13312, guid: 0000000000000000e000000000000000, type: 0}
+  m_Name: Sign_1
+  m_Sprite: {fileID: 21300000, guid: 4991c79370c017c48b0b21e681ecd400, type: 3}
+"#;
+        let objects = UnityYamlParser::extract_asset_objects(content);
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0].0, 114); // class_id
+        assert_eq!(objects[0].1, "11400000"); // file_id
+        assert!(objects[0].2.contains("m_Name: Sign_1"));
+    }
+
+    #[test]
+    fn test_extract_asset_objects_filters_gameobjects() {
+        let content = r#"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &100
+GameObject:
+  m_Name: SomeObject
+  m_IsActive: 1
+--- !u!114 &200
+MonoBehaviour:
+  m_Name: MyAsset
+"#;
+        let objects = UnityYamlParser::extract_asset_objects(content);
+        // Should only include the MonoBehaviour, not the GameObject
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0].0, 114);
     }
 
     #[test]

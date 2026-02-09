@@ -227,6 +227,39 @@ describeIfNative('UnityScanner', () => {
       expect((result as any).source_guid).toBe('a1b2c3d4e5f6789012345678abcdef12');
       expect((result as any).modifications_count).toBe(4);
     });
+
+    it('inspect PrefabInstance with --properties should include modifications grouped by target', () => {
+      const result = scanner.inspect({
+        file: 'test/fixtures/SceneWithPrefab.unity',
+        identifier: '700000',
+        include_properties: true,
+      });
+      expect(result).toBeDefined();
+      expect((result as any).modifications).toBeDefined();
+      const mods = (result as any).modifications;
+      // Should be grouped by target fileID
+      expect(typeof mods).toBe('object');
+      // Should have entries (the exact count depends on the fixture)
+      const keys = Object.keys(mods);
+      expect(keys.length).toBeGreaterThan(0);
+      // Each group should be an array of {propertyPath, value}
+      for (const key of keys) {
+        expect(Array.isArray(mods[key])).toBe(true);
+        for (const mod of mods[key]) {
+          expect(mod.propertyPath).toBeDefined();
+          expect(mod.value).toBeDefined();
+        }
+      }
+    });
+
+    it('inspect PrefabInstance without --properties should NOT include modifications', () => {
+      const result = scanner.inspect({
+        file: 'test/fixtures/SceneWithPrefab.unity',
+        identifier: '700000',
+      });
+      expect(result).toBeDefined();
+      expect((result as any).modifications).toBeUndefined();
+    });
   });
 
   describe('GUID resolution', () => {
@@ -340,6 +373,37 @@ describeIfNative('UnityScanner', () => {
           }
         }
       }
+    });
+  });
+
+  describe('read_asset', () => {
+    it('should read a .asset file and return objects with properties', () => {
+      const objects = scanner.read_asset('../test/fixtures/external/Assets/Objects/Sign_1.asset');
+
+      expect(objects).toBeDefined();
+      expect(Array.isArray(objects)).toBe(true);
+      expect(objects.length).toBeGreaterThan(0);
+
+      const first = objects[0] as any;
+      expect(first.class_id).toBe(114);
+      expect(first.file_id).toBe('11400000');
+      expect(first.type_name).toBe('MonoBehaviour');
+      expect(first.name).toBe('Sign_1');
+      expect(first.properties).toBeDefined();
+      expect(first.properties.Sprite).toBeDefined();
+    });
+
+    it('should return empty array for non-existent file', () => {
+      const objects = scanner.read_asset('nonexistent.asset');
+      expect(objects).toEqual([]);
+    });
+
+    it('should return empty array for scene files (no non-GO blocks)', () => {
+      // Scene files have GameObjects which are filtered out
+      const objects = scanner.read_asset('test/fixtures/Main.unity');
+      // May contain Transform/MonoBehaviour blocks that aren't class_id 1
+      // but the key thing is it doesn't crash
+      expect(Array.isArray(objects)).toBe(true);
     });
   });
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { Command } from 'commander';
-import { indexMarkdownFile, indexDocsDirectory, indexScriptableObject } from './indexer';
+import { indexMarkdownFile, indexDocsDirectory, indexScriptableObject, indexHtmlFile } from './indexer';
 import { DocStorage } from './storage';
 import { DocSearch } from './search';
 
@@ -21,7 +21,7 @@ program
 
     const stat = require('fs').statSync(path);
     if (stat.isDirectory()) {
-      const result = await indexDocsDirectory(path, ['.md', '.txt'], storage);
+      const result = await indexDocsDirectory(path, ['.md', '.txt', '.html'], storage);
       console.log(`Indexed ${result.chunks_indexed} chunks (${result.total_tokens} tokens)`);
       if (result.embeddings_generated > 0) {
         console.log(`Generated ${result.embeddings_generated} embeddings`);
@@ -31,12 +31,16 @@ program
       const result = indexMarkdownFile(path, storage);
       console.log(`Indexed ${result.chunks_indexed} chunks (${result.total_tokens} tokens)`);
       console.log(`Processed in ${result.elapsed_ms}ms`);
+    } else if (path.endsWith('.html') || path.endsWith('.htm')) {
+      const result = indexHtmlFile(path, storage);
+      console.log(`Indexed ${result.chunks_indexed} chunks (${result.total_tokens} tokens)`);
+      console.log(`Processed in ${result.elapsed_ms}ms`);
     } else if (path.endsWith('.asset')) {
       const result = indexScriptableObject(path, storage);
       console.log(`Indexed ${result.chunks_indexed} chunks (${result.total_tokens} tokens)`);
       console.log(`Processed in ${result.elapsed_ms}ms`);
     } else {
-      console.error('Unsupported file type. Use: .md, .asset, or directory');
+      console.error('Unsupported file type. Use: .md, .html, .asset, or directory');
       process.exit(1);
     }
   });
