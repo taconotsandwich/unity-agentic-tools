@@ -2,8 +2,8 @@
 /**
  * Hook: SessionStart
  * Ensures the plugin is ready: workspace deps installed and TypeScript built.
- * Always injects the resolved CLI path into session context so Claude knows
- * the exact `bun <path>/cli.js` command to use.
+ * Creates an executable wrapper at bin/unity-yaml so Claude can invoke the CLI
+ * by full path without needing bun prefix or PATH changes.
  * If deps/build missing: runs bun install + bun run build first.
  */
 
@@ -42,17 +42,31 @@ function ensureSetup() {
     }
 }
 
+function ensureWrapper(pluginRoot) {
+    const binDir = path.join(pluginRoot, 'bin');
+    const wrapperPath = path.join(binDir, 'unity-yaml');
+    const cliPath = path.join(pluginRoot, 'unity-yaml', 'dist', 'cli.js');
+
+    if (!fs.existsSync(wrapperPath)) {
+        if (!fs.existsSync(binDir)) fs.mkdirSync(binDir);
+        fs.writeFileSync(wrapperPath, `#!/bin/sh\nexec bun "${cliPath}" "$@"\n`);
+        fs.chmodSync(wrapperPath, 0o755);
+    }
+
+    return wrapperPath;
+}
+
 async function main() {
     try {
         const input = await readStdin();
         const data = JSON.parse(input);
 
         const { didSetup, pluginRoot } = ensureSetup();
-        const cliPath = path.join(pluginRoot, 'unity-yaml', 'dist', 'cli.js');
+        const wrapperPath = ensureWrapper(pluginRoot);
 
-        // Always inject the resolved CLI path so Claude knows the exact command
+        // Always inject the resolved wrapper path so Claude can invoke directly
         data.context = (data.context || '') +
-            `# unity-yaml CLI: bun ${cliPath}\n`;
+            `# unity-yaml CLI: ${wrapperPath}\n`;
 
         if (didSetup) {
             data.context += '# Unity Agentic Tools: plugin dependencies installed and built.\n';
