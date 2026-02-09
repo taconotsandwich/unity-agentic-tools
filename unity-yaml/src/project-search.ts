@@ -123,6 +123,32 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
         scan_all = false,
     } = options;
 
+    if (max_matches !== undefined && max_matches < 1) {
+        return {
+            success: false,
+            project_path,
+            total_files_scanned: 0,
+            total_matches: 0,
+            cursor: 0,
+            truncated: false,
+            matches: [],
+            error: '--max-matches must be a positive integer (>= 1)',
+        };
+    }
+
+    if (name !== undefined && name.trim() === '') {
+        return {
+            success: false,
+            project_path,
+            total_files_scanned: 0,
+            total_matches: 0,
+            cursor: 0,
+            truncated: false,
+            matches: [],
+            error: 'Name pattern must not be empty',
+        };
+    }
+
     if (!existsSync(project_path)) {
         return {
             success: false,
@@ -168,16 +194,29 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
         try {
             let gameObjects;
 
-            if (name) {
-                // Use fuzzy name search
+            // Need full GO data when filtering by tag, layer, or component
+            const needFullData = !!(component || tag || layer !== undefined);
+
+            if (name && !needFullData) {
+                // Use fuzzy name search (lightweight)
                 gameObjects = scanner.find_by_name(file, name, true);
-            } else {
-                // Scan all GameObjects (minimal or with components)
-                if (component) {
-                    gameObjects = scanner.scan_scene_with_components(file);
-                } else {
-                    gameObjects = scanner.scan_scene_minimal(file);
+            } else if (needFullData) {
+                // Need full GO data for tag/layer/component filtering
+                gameObjects = scanner.scan_scene_with_components(file);
+                // If name filter is also specified, post-filter by name
+                if (name) {
+                    const nameLower = name.toLowerCase();
+                    const hasWildcard = name.includes('*') || name.includes('?');
+                    gameObjects = gameObjects.filter((go: any) => {
+                        if (!go.name) return false;
+                        if (hasWildcard) {
+                            return glob_match(name, go.name);
+                        }
+                        return go.name.toLowerCase().includes(nameLower);
+                    });
                 }
+            } else {
+                gameObjects = scanner.scan_scene_minimal(file);
             }
 
             // Apply filters

@@ -305,22 +305,38 @@ export function edit_settings(options: EditSettingsOptions): EditSettingsResult 
         };
     }
 
-    // Match the property line (with or without m_ prefix)
+    // Match the property line (with or without m_ prefix, with PascalCase normalization)
     const propPattern = new RegExp(`(^\\s*${property}:\\s*)(.*)$`, 'm');
-    if (!propPattern.test(content)) {
+    if (propPattern.test(content)) {
+        content = content.replace(propPattern, `$1${value}`);
+    } else {
         // Try with m_ prefix
         const prefixedPattern = new RegExp(`(^\\s*m_${property}:\\s*)(.*)$`, 'm');
-        if (!prefixedPattern.test(content)) {
-            return {
-                success: false,
-                project_path,
-                setting,
-                error: `Property "${property}" not found in ${setting}`,
-            };
+        if (prefixedPattern.test(content)) {
+            content = content.replace(prefixedPattern, `$1${value}`);
+        } else {
+            // Try snake_case to PascalCase conversion with m_ prefix
+            // e.g., fixed_timestep -> m_FixedTimestep, time_scale -> m_TimeScale
+            const pascal = property.replace(/(^|_)([a-z])/g, (_: string, __: string, c: string) => c.toUpperCase());
+            const pascalPattern = new RegExp(`(^\\s*m_${pascal}:\\s*)(.*)$`, 'm');
+            if (pascalPattern.test(content)) {
+                content = content.replace(pascalPattern, `$1${value}`);
+            } else {
+                // Try with space-separated names (TimeManager uses "Fixed Timestep")
+                const spacedName = property.replace(/_/g, ' ').replace(/(^| )([a-z])/g, (_: string, sp: string, c: string) => sp + c.toUpperCase());
+                const spacedPattern = new RegExp(`(^\\s*${spacedName}:\\s*)(.*)$`, 'm');
+                if (spacedPattern.test(content)) {
+                    content = content.replace(spacedPattern, `$1${value}`);
+                } else {
+                    return {
+                        success: false,
+                        project_path,
+                        setting,
+                        error: `Property "${property}" not found in ${setting}`,
+                    };
+                }
+            }
         }
-        content = content.replace(prefixedPattern, `$1${value}`);
-    } else {
-        content = content.replace(propPattern, `$1${value}`);
     }
 
     const result = atomicWrite(file_path, content);
@@ -563,6 +579,15 @@ export function edit_sorting_layer(options: SortingLayerEditOptions): EditSettin
             project_path,
             setting: 'TagManager',
             error: `Failed to read TagManager: ${err instanceof Error ? err.message : String(err)}`,
+        };
+    }
+
+    if (action === 'remove' && name === 'Default') {
+        return {
+            success: false,
+            project_path,
+            setting: 'TagManager',
+            error: 'Cannot remove the Default sorting layer — it is required by Unity',
         };
     }
 

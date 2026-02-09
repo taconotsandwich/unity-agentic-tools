@@ -337,5 +337,34 @@ describe('Settings Editor', () => {
             expect(result.success).toBe(false);
             expect(result.error).toContain('not found');
         });
+
+        it('should resolve snake_case property names for TimeManager (Bug #7)', () => {
+            const result = edit_settings({
+                project_path: temp.project_path,
+                setting: 'TimeManager',
+                property: 'time_scale',
+                value: '2',
+            });
+
+            expect(result.success).toBe(true);
+
+            // Verify the change
+            const verify = read_settings({ project_path: temp.project_path, setting: 'TimeManager' });
+            const data = verify.data as TimeSettingsData;
+            expect(data.time_scale).toBe(2);
+        });
+    });
+
+    describe('Bug #6: Default sorting layer protection', () => {
+        it('should refuse to remove Default sorting layer', () => {
+            const result = edit_sorting_layer({
+                project_path: temp.project_path,
+                action: 'remove',
+                name: 'Default',
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Cannot remove the Default sorting layer');
+        });
     });
 });

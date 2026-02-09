@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve, join } from 'path';
-import { readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import { readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile, createScene } from '../src/editor';
 import { create_temp_fixture } from './test-utils';
@@ -2820,5 +2820,157 @@ describe('createScene', () => {
 
         const content = readFileSync(scenePath, 'utf-8');
         expect(validateUnityYAML(content)).toBe(true);
+    });
+
+    it('should refuse to overwrite existing scene file (Bug #13)', () => {
+        const scenePath = join(sceneDir, 'Existing.unity');
+        createScene({ output_path: scenePath });
+        const result = createScene({ output_path: scenePath });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('already exists');
+    });
+});
+
+// ========== Bug Fix Regression Tests ==========
+
+describe('Bug #4: reparent YAML integrity', () => {
+    it('should not corrupt YAML when removing last child from parent', () => {
+        const temp = create_temp_fixture(resolve(__dirname, 'fixtures', 'SampleScene.unity'));
+        try {
+            // Create parent and child
+            createGameObject({ file_path: temp.temp_path, name: 'BugTestParent' });
+            createGameObject({ file_path: temp.temp_path, name: 'BugTestChild', parent: 'BugTestParent' });
+
+            // Reparent child to root (removing last child from parent)
+            const result = reparentGameObject({
+                file_path: temp.temp_path,
+                object_name: 'BugTestChild',
+                new_parent: 'root',
+            });
+            expect(result.success).toBe(true);
+
+            // Verify YAML integrity — m_Children and m_Father should be on separate lines
+            const content = readFileSync(temp.temp_path, 'utf-8');
+            expect(content).not.toMatch(/m_Children:.*m_Father:/);
+            expect(validateUnityYAML(content)).toBe(true);
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+});
+
+describe('Bug #5/#14: overwrite protection', () => {
+    it('createPrefabVariant should refuse to overwrite existing file', () => {
+        const source = resolve(__dirname, 'fixtures', 'Player.prefab');
+        if (!existsSync(source)) return; // skip if fixture missing
+        const temp = create_temp_fixture(source);
+        try {
+            const result = createPrefabVariant({
+                source_prefab: source,
+                output_path: temp.temp_path,
+            });
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('already exists');
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+});
+
+describe('Bug #19: createMetaFile for nonexistent source', () => {
+    it('should fail when source file does not exist', () => {
+        const result = createMetaFile({ script_path: '/tmp/nonexistent-script-xyz.cs' });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Source file not found');
+    });
+});
+
+describe('Bug #2: fileID support for update/delete', () => {
+    it('safeUnityYAMLEdit should accept numeric fileID', () => {
+        const temp = create_temp_fixture(resolve(__dirname, 'fixtures', 'SampleScene.unity'));
+        try {
+            // Create a GO so we know a fileID exists
+            const created = createGameObject({ file_path: temp.temp_path, name: 'FileIdTest' });
+            expect(created.success).toBe(true);
+
+            // Edit by fileID
+            const result = safeUnityYAMLEdit(
+                temp.temp_path,
+                String(created.game_object_id),
+                'm_Name',
+                'RenamedByFileId'
+            );
+            expect(result.success).toBe(true);
+
+            // Verify rename
+            const content = readFileSync(temp.temp_path, 'utf-8');
+            expect(content).toContain('m_Name: RenamedByFileId');
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+
+    it('deleteGameObject should accept numeric fileID', () => {
+        const temp = create_temp_fixture(resolve(__dirname, 'fixtures', 'SampleScene.unity'));
+        try {
+            const created = createGameObject({ file_path: temp.temp_path, name: 'DeleteByIdTest' });
+            expect(created.success).toBe(true);
+
+            const result = deleteGameObject({
+                file_path: temp.temp_path,
+                object_name: String(created.game_object_id),
+            });
+            expect(result.success).toBe(true);
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+});
+
+describe('Bug #10/#11: GO property validation', () => {
+    it('should reject unknown property names', () => {
+        const temp = create_temp_fixture(resolve(__dirname, 'fixtures', 'SampleScene.unity'));
+        try {
+            const result = safeUnityYAMLEdit(temp.temp_path, 'Player', 'm_FakeProperty', 'value');
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Unknown GameObject property');
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+
+    it('should reject invalid m_IsActive value', () => {
+        const temp = create_temp_fixture(resolve(__dirname, 'fixtures', 'SampleScene.unity'));
+        try {
+            const result = safeUnityYAMLEdit(temp.temp_path, 'Player', 'm_IsActive', 'banana');
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Invalid value');
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+
+    it('should accept true/false for m_IsActive and normalize to 0/1', () => {
+        const temp = create_temp_fixture(resolve(__dirname, 'fixtures', 'SampleScene.unity'));
+        try {
+            const result = safeUnityYAMLEdit(temp.temp_path, 'Player', 'm_IsActive', 'false');
+            expect(result.success).toBe(true);
+
+            const content = readFileSync(temp.temp_path, 'utf-8');
+            expect(content).toContain('m_IsActive: 0');
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+
+    it('should reject invalid m_Layer value', () => {
+        const temp = create_temp_fixture(resolve(__dirname, 'fixtures', 'SampleScene.unity'));
+        try {
+            const result = safeUnityYAMLEdit(temp.temp_path, 'Player', 'm_Layer', '32');
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Invalid value');
+        } finally {
+            temp.cleanup_fn();
+        }
     });
 });
