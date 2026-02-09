@@ -28,7 +28,7 @@ describe('doc-indexer CLI integration', () => {
         expect(result.stderr).not.toContain('does not exist');
         expect(result.stderr).not.toContain('is not recognized');
         const output = result.stdout + result.stderr;
-        expect(output).toMatch(/Found|error/i);
+        expect(output).toMatch(/Found|results|error/i);
     });
 
     it('index subcommand should execute against a nonexistent path gracefully', () => {
@@ -52,7 +52,7 @@ describe('doc-indexer CLI integration', () => {
     it('search -s (summarize) should be accepted', () => {
         const result = runCli('search "Rigidbody" -s');
         expect(result.stderr).not.toContain('unknown option');
-        expect(result.stdout + result.stderr).toMatch(/Found|error/i);
+        expect(result.stdout + result.stderr).toMatch(/Found|results|error/i);
     });
 
     it('search -c (compress) should be accepted', () => {
@@ -87,7 +87,7 @@ describe('doc-indexer CLI --storage-path', () => {
         // Should not crash; index file may or may not be created (no sources)
         expect(result.stderr).not.toContain('does not exist');
         const output = result.stdout + result.stderr;
-        expect(output).toMatch(/Found|error/i);
+        expect(output).toMatch(/Found|results|error/i);
     });
 
     it('should use --storage-path for clear', () => {
@@ -105,6 +105,7 @@ describe('doc-indexer CLI --storage-path', () => {
         expect(result.exitCode).not.toBe(0);
     });
 
+    // Timeout raised: fastembed ONNX model init takes 5-15s on first load
     it('index without path should discover sources when project root given', () => {
         // Create a fake Unity project with package docs
         const projectDir = join(temp_dir, 'MyProject');
@@ -119,5 +120,5 @@ describe('doc-indexer CLI --storage-path', () => {
         expect(result.stdout).toContain('pkg:com.unity.test-pkg');
         expect(result.stdout).toContain('1 files');
         expect(existsSync(storagePath)).toBe(true);
-    });
+    }, 30_000);
 });

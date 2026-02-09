@@ -686,6 +686,120 @@ describeIfNative('CLI', () => {
         });
     });
 
+    describe('update transform by name', () => {
+        it('should resolve GameObject name to transform fileID', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+
+            try {
+                const result = run_cli([
+                    'update', 'transform',
+                    temp_fixture.temp_path,
+                    'Player',
+                    '--position', '10,20,30',
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+
+                // Verify the position was actually written
+                const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+                expect(content).toContain('m_LocalPosition: {x: 10, y: 20, z: 30}');
+            } finally {
+                temp_fixture.cleanup_fn();
+            }
+        });
+
+        it('should still accept numeric transform fileID', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+
+            try {
+                // 1847675924 is Player's transform fileID
+                const result = run_cli([
+                    'update', 'transform',
+                    temp_fixture.temp_path,
+                    '1847675924',
+                    '--position', '5,6,7',
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+            } finally {
+                temp_fixture.cleanup_fn();
+            }
+        });
+
+        it('should return error for nonexistent GameObject name', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+
+            try {
+                const result = run_cli([
+                    'update', 'transform',
+                    temp_fixture.temp_path,
+                    'NonExistentObject',
+                    '--position', '1,2,3',
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('Could not resolve');
+            } finally {
+                temp_fixture.cleanup_fn();
+            }
+        });
+    });
+
+    describe('find input validation', () => {
+        it('should reject empty pattern', () => {
+            try {
+                run_cli([
+                    'find',
+                    resolve(fixtures_dir, 'SampleScene.unity'),
+                    '',
+                    '--json'
+                ]);
+                expect.unreachable('Should have exited with error');
+            } catch (err: any) {
+                expect(err.status).toBeTruthy();
+            }
+        });
+
+        it('should error on non-existent file', () => {
+            try {
+                run_cli([
+                    'find',
+                    '/nonexistent/file.unity',
+                    'Camera',
+                    '--json'
+                ]);
+                expect.unreachable('Should have exited with error');
+            } catch (err: any) {
+                expect(err.status).toBeTruthy();
+            }
+        });
+    });
+
+    describe('grep input validation', () => {
+        it('should reject empty pattern', () => {
+            try {
+                run_cli([
+                    'grep',
+                    external_fixtures,
+                    '',
+                    '--json'
+                ]);
+                expect.unreachable('Should have exited with error');
+            } catch (err: any) {
+                expect(err.status).toBeTruthy();
+            }
+        });
+    });
+
     describe('search and grep commands', () => {
         it('should search by name across project files', () => {
             const result = run_cli([

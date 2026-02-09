@@ -19,6 +19,25 @@ function parseVector(str: string): { x: number; y: number; z: number } {
     return { x: parts[0], y: parts[1], z: parts[2] };
 }
 
+/** Resolve a GameObject name or numeric fileID to a Transform fileID. */
+function resolve_transform_id(scanner: UnityScanner, file: string, identifier: string): number | null {
+    // All digits → already a transform fileID
+    if (/^\d+$/.test(identifier)) {
+        return parseInt(identifier, 10);
+    }
+
+    // Look up by name via the scanner (verbose needed for class_id/file_id on components)
+    const result = scanner.inspect({ file, identifier, verbose: true });
+    if (!result) return null;
+
+    // Find the Transform (class_id 4) or RectTransform (class_id 224) component
+    const transform = result.components?.find(
+        (c: any) => c.class_id === 4 || c.class_id === 224
+    );
+
+    return transform ? parseInt(transform.file_id, 10) : null;
+}
+
 export function build_update_command(getScanner: () => UnityScanner): Command {
     const cmd = new Command('update')
         .description('Update Unity object properties, transforms, settings, and hierarchy');
@@ -51,16 +70,27 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify(result, null, 2));
         });
 
-    cmd.command('transform <file> <transform_id>')
-        .description('Edit Transform component properties by fileID')
+    cmd.command('transform <file> <identifier>')
+        .description('Edit Transform by GameObject name or transform fileID')
         .option('-p, --position <x,y,z>', 'Set local position')
         .option('-r, --rotation <x,y,z>', 'Set local rotation (Euler angles in degrees)')
         .option('-s, --scale <x,y,z>', 'Set local scale')
         .option('-j, --json', 'Output as JSON')
-        .action((file, transform_id, options) => {
+        .action((file, identifier, options) => {
+            const transform_id = resolve_transform_id(getScanner(), file, identifier);
+
+            if (transform_id === null) {
+                console.log(JSON.stringify({
+                    success: false,
+                    file_path: file,
+                    error: `Could not resolve "${identifier}" to a Transform component. Use a GameObject name or transform fileID.`,
+                }, null, 2));
+                return;
+            }
+
             const result = editTransform({
                 file_path: file,
-                transform_id: parseInt(transform_id, 10),
+                transform_id,
                 position: options.position ? parseVector(options.position) : undefined,
                 rotation: options.rotation ? parseVector(options.rotation) : undefined,
                 scale: options.scale ? parseVector(options.scale) : undefined,

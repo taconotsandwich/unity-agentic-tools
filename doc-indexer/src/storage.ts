@@ -53,6 +53,11 @@ export class DocStorage {
         }
     }
 
+    /** Return the number of stored chunks. */
+    chunk_count(): number {
+        return this.chunks.size;
+    }
+
     async storeChunk(chunk: StoredChunk): Promise<void> {
         await this.init();
         this.chunks.set(chunk.id, chunk);
@@ -145,15 +150,27 @@ export class DocStorage {
         await this.init();
 
         const lowerQuery = query.toLowerCase();
+        const queryTerms = lowerQuery.split(/\s+/).filter(t => t.length > 0);
         const results: SearchResult[] = [];
 
         for (const [id, chunk] of this.chunks) {
             const lowerContent = chunk.content.toLowerCase();
 
             if (lowerContent.includes(lowerQuery)) {
-                const score = this.jaccardSimilarity(query, lowerContent);
+                // Score by term frequency: how many times query terms appear relative to content size
+                let termHits = 0;
+                for (const term of queryTerms) {
+                    let idx = 0;
+                    while ((idx = lowerContent.indexOf(term, idx)) !== -1) {
+                        termHits++;
+                        idx += term.length;
+                    }
+                }
+                // TF score: hits / words (proportion of content that matches)
+                const wordCount = lowerContent.split(/\s+/).length;
+                const score = termHits / Math.max(wordCount, 1);
 
-                if (score > 0.3) {
+                if (score > 0) {
                     results.push({
                         id,
                         content: chunk.content,
@@ -192,14 +209,6 @@ export class DocStorage {
         const norm2 = Math.sqrt((vec2 || []).reduce((sum, v) => sum + (v || 0) * (v || 0), 0));
 
         return norm1 > 0 && norm2 > 0 ? dotProduct / (norm1 * norm2) : 0;
-    }
-
-    private jaccardSimilarity(str1: string, str2: string): number {
-        const set1 = new Set(str1.toLowerCase().split(' '));
-        const set2 = new Set(str2.toLowerCase().split(' '));
-
-        const intersection = new Set([...set1].filter(x => set2.has(x)));
-        return intersection.size / Math.max(set1.size, set2.size);
     }
 
     async clearOldChunks(): Promise<void> {

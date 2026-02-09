@@ -143,6 +143,36 @@ describe('DocStorage', () => {
         expect(results.length).toBeLessThanOrEqual(5);
     });
 
+    it('should find results for single-word query against large chunks', async () => {
+        const storage = makeStorage();
+        // Simulate a real doc chunk: many words, query term appears a few times
+        const largeChunk = 'The Rigidbody component allows a GameObject to be affected by physics. ' +
+            'When a Rigidbody is attached, the object will respond to gravity and collisions. ' +
+            'You can configure mass, drag, and angular drag on the Rigidbody to control behavior. ' +
+            'Use AddForce to apply forces to the Rigidbody during gameplay. ' +
+            'The Rigidbody must be on the same GameObject as the Collider for physics to work correctly.';
+        await storage.storeChunk(makeChunk('doc1', largeChunk));
+        await storage.storeChunk(makeChunk('doc2', 'BoxCollider defines a box-shaped collision boundary for physics interactions'));
+
+        const results = await storage.keywordSearch('Rigidbody');
+
+        expect(results.length).toBeGreaterThanOrEqual(1);
+        expect(results[0].id).toBe('doc1');
+        expect(results[0].score).toBeGreaterThan(0);
+    });
+
+    it('should rank chunks with more term occurrences higher', async () => {
+        const storage = makeStorage();
+        await storage.storeChunk(makeChunk('sparse', 'The Rigidbody component is used in Unity for physics simulation on objects'));
+        await storage.storeChunk(makeChunk('dense', 'Rigidbody handles physics. Configure Rigidbody mass. Rigidbody drag matters.'));
+
+        const results = await storage.keywordSearch('Rigidbody');
+
+        expect(results.length).toBe(2);
+        // Dense chunk should score higher (more occurrences per word)
+        expect(results[0].id).toBe('dense');
+    });
+
     it('should sort results by score descending', async () => {
         const storage = makeStorage();
         // "unity development" has higher overlap with query "unity development"
