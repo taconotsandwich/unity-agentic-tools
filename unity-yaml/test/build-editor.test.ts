@@ -8,7 +8,7 @@ import {
     disable_scene,
     move_scene,
     reorder_scenes,
-} from '../src/editor';
+} from '../src/build-editor';
 import { parse_editor_build_settings } from '../src/build-settings';
 
 // Use a copy of the fixture for edit tests

@@ -6,7 +6,7 @@ import {
     read_project_version,
     has_build_profiles,
     get_project_info,
-} from '../src/version';
+} from '../src/build-version';
 
 const FIXTURE_PATH = path.resolve(__dirname, '../../test/fixtures/external');
 

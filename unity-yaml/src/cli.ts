@@ -636,7 +636,9 @@ program.command('index-docs [path]')
   });
 
 // Build settings bridge commands
-import { get_build_settings, add_scene, remove_scene, enable_scene, disable_scene, move_scene, read_project_version } from '../../unity-build-settings/src/index';
+import { get_build_settings } from './build-settings';
+import { add_scene, remove_scene, enable_scene, disable_scene, move_scene } from './build-editor';
+import { read_project_version } from './build-version';
 
 program.command('build-settings <project_path>')
   .description('Read build settings (scene list, build profiles)')

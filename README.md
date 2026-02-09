@@ -69,7 +69,6 @@ hooks/            Event handlers
 unity-yaml/       TypeScript CLI
 rust-core/        Native Rust module (napi-rs)
 doc-indexer/      Documentation indexing module
-unity-build-settings/  Build settings module
 ```
 
 ## Development

@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { get_project_info, UnityProjectInfo } from './version';
+import { get_project_info, UnityProjectInfo } from './build-version';
 
 export interface SceneEntry {
     enabled: boolean;
