@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build-native:
@@ -16,16 +17,16 @@ jobs:
         include:
           - os: macos-14
             target: aarch64-apple-darwin
-            binary: unity-agentic-tool.darwin-arm64.node
+            binary: unity-file-tools.darwin-arm64.node
           - os: macos-15
             target: x86_64-apple-darwin
-            binary: unity-agentic-tool.darwin-x64.node
+            binary: unity-file-tools.darwin-x64.node
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            binary: unity-agentic-tool.linux-x64-gnu.node
+            binary: unity-file-tools.linux-x64-gnu.node
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            binary: unity-agentic-tool.win32-x64-msvc.node
+            binary: unity-file-tools.win32-x64-msvc.node
 
     runs-on: ${{ matrix.os }}
 
@@ -137,36 +138,16 @@ jobs:
       - name: List downloaded artifacts
         run: find rust-core/artifacts -name "*.node" -ls
 
-      - name: Move binaries into npm packages
-        working-directory: ./rust-core
-        run: bunx napi artifacts --dir artifacts
-
-      - name: List npm packages
+      - name: Move binaries into package root
         run: |
-          for dir in rust-core/npm/*/; do
-            echo "=== $dir ==="
-            ls -la "$dir"
+          for dir in rust-core/artifacts/*/; do
+            cp "$dir"*.node rust-core/
           done
+          ls -la rust-core/*.node
 
-      - name: Publish platform packages
+      - name: Publish package
         working-directory: ./rust-core
-        run: |
-          for dir in npm/*/; do
-            if [ -f "$dir/package.json" ]; then
-              echo "Publishing $(basename $dir)..."
-              cd "$dir"
-              npm publish --access public || echo "Already published or failed: $(basename $dir)"
-              cd ../..
-            fi
-          done
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish main package
-        working-directory: ./rust-core
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
 
       - name: Extract version from tag
         id: version
@@ -204,7 +185,7 @@ jobs:
 
             ### npm
             ```bash
-            bun add unity-agentic-tool
+            bun add unity-file-tools
             ```
 
             ### From Source

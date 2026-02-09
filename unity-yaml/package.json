@@ -1,7 +1,7 @@
 {
   "name": "unity-yaml",
   "packageManager": "bun@latest",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Fast, token-efficient Unity YAML parser for AI agents",
   "exports": {
     ".": {
@@ -18,8 +18,8 @@
   ],
   "scripts": {
     "build": "bun run build:lib && bun run build:cli",
-    "build:lib": "bun build src/index.ts --outdir=dist --target=bun --format=cjs --external unity-agentic-tool",
-    "build:cli": "bun build src/cli.ts --outdir=dist --target=bun --format=cjs --external unity-agentic-tool",
+    "build:lib": "bun build src/index.ts --outdir=dist --target=bun --format=cjs --external unity-file-tools",
+    "build:cli": "bun build src/cli.ts --outdir=dist --target=bun --format=cjs --external unity-file-tools",
     "build:rust": "cd ../rust-core && bun run build",
     "build:all": "bun run build:rust || echo 'Rust build skipped' && bun run build",
     "dev": "bun build src/index.ts --watch",
@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "commander": "^14.0.2",
-    "unity-agentic-tool": "workspace:*"
+    "unity-file-tools": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^25.0.0",

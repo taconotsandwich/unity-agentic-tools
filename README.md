@@ -124,23 +124,20 @@ npm platform package (user path).
 
 ### Testing npm package changes
 
-After changing `rust-core/package.json`, `rust-core/npm/*/package.json`, or
-`rust-core/index.js`:
+After changing `rust-core/package.json` or `rust-core/index.js`:
 
 ```bash
-# Verify main package contents (should list index.js, index.d.ts, package.json)
+# Verify package contents (should list index.js, index.d.ts, *.node, package.json)
 cd rust-core && npm publish --dry-run
 
-# Create tarballs to test install from scratch
-cd rust-core && npm pack                          # -> unity-agentic-tool-0.1.0.tgz
-cd rust-core/npm/darwin-arm64 && npm pack         # -> unity-agentic-tool-darwin-arm64-0.1.0.tgz
+# Create tarball to test install from scratch
+cd rust-core && npm pack                          # -> unity-file-tools-0.1.0.tgz
 
 # Test in an isolated directory
 mkdir /tmp/npm-test && cd /tmp/npm-test
 npm init -y
-npm install /path/to/rust-core/unity-agentic-tool-0.1.0.tgz
-npm install /path/to/rust-core/npm/darwin-arm64/unity-agentic-tool-darwin-arm64-0.1.0.tgz
-bun -e "const m = require('unity-agentic-tool'); console.log(typeof m.Scanner)"
+npm install /path/to/rust-core/unity-file-tools-0.1.0.tgz
+bun -e "const m = require('unity-file-tools'); console.log(typeof m.Scanner)"
 # Should print: function
 ```
 

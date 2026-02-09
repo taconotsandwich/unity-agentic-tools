@@ -32,7 +32,7 @@ doc-indexer/        Documentation indexing module
 
 ## Key Design Patterns
 
-- **Native Module via npm**: Published as `unity-agentic-tool` with platform-specific `optionalDependencies`. `bun install` auto-downloads the correct binary. Workspace link resolves in dev.
+- **Native Module via npm**: Published as `unity-file-tools` — a single package shipping all platform binaries. `bun install` auto-downloads. Workspace link resolves in dev.
 - **Safe YAML Editing**: `editor.ts` preserves GUIDs, comments, class IDs. Uses temp files for atomic writes.
 - **GUID Cache**: `setup.ts` creates `.unity-agentic/` mapping script GUIDs to file paths.
 - **Token Efficiency**: `inspect` without `--properties` returns structure only. Use `--properties` when component values are needed.
