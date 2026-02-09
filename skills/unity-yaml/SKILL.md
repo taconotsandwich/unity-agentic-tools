@@ -5,7 +5,7 @@ description: "Parse, inspect, and edit Unity YAML files (.unity, .prefab, .asset
 
 # Unity YAML CLI
 
-CLI path is injected by SessionStart hook. Run as: `unity-yaml <command>`
+Executable wrapper path injected by SessionStart hook. Run as: `<path> <command>`
 
 ## read — Read Unity files, settings, and build data
 

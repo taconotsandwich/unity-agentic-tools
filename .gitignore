@@ -63,6 +63,9 @@ ts/
 
 # MCP
 
+# Generated CLI wrapper
+bin/
+
 # Native binaries
 *.node
 
