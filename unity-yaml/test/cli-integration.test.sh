@@ -36,7 +36,7 @@ run_cli() {
 
 # Test 1: List GameObjects
 echo "Test 1: List GameObjects"
-if run_cli "test1" bun dist/cli.js list test/fixtures/SampleScene.unity --json; then
+if run_cli "test1" bun dist/cli.js read scene test/fixtures/SampleScene.unity --json; then
     echo "✓ List command works"
 else
     echo "✗ List command failed"
@@ -53,13 +53,13 @@ else
     failures=$((failures + 1))
 fi
 
-# Test 3: Inspect object
+# Test 3: Get object by name
 echo ""
-echo "Test 3: Inspect GameObject by name"
-if run_cli "test3" bun dist/cli.js inspect test/fixtures/SampleScene.unity "Player" --json; then
-    echo "✓ Inspect command works"
+echo "Test 3: Get GameObject by name"
+if run_cli "test3" bun dist/cli.js read gameobject test/fixtures/SampleScene.unity "Player" --json; then
+    echo "✓ Get command works"
 else
-    echo "✗ Inspect command failed"
+    echo "✗ Get command failed"
     failures=$((failures + 1))
 fi
 
@@ -71,7 +71,7 @@ temp_fixture_path="$tmp_dir/SampleScene.unity"
 
 cp "$fixture_path" "$temp_fixture_path"
 
-if run_cli "test4" bun dist/cli.js edit "$temp_fixture_path" "Player" "m_IsActive" "false" --json; then
+if run_cli "test4" bun dist/cli.js update gameobject "$temp_fixture_path" "Player" "m_IsActive" "false" --json; then
     echo "✓ Edit command works"
     echo "  Changes persisted in temp file"
 else
@@ -84,7 +84,7 @@ echo ""
 echo "Test 5: Create GameObject"
 cp "$fixture_path" "$tmp_dir/create-test.unity"
 
-if run_cli "test5" bun dist/cli.js create "$tmp_dir/create-test.unity" "NewTestObject" --json; then
+if run_cli "test5" bun dist/cli.js create gameobject "$tmp_dir/create-test.unity" "NewTestObject" --json; then
     # Verify the object was created by finding it
     if bun dist/cli.js find "$tmp_dir/create-test.unity" "NewTestObject" --exact 2>/dev/null | grep -q '"count": 1'; then
         echo "✓ Create command works"
@@ -102,7 +102,7 @@ echo ""
 echo "Test 6: Create GameObject with parent"
 cp "$fixture_path" "$tmp_dir/parent-test.unity"
 
-if run_cli "test6" bun dist/cli.js create "$tmp_dir/parent-test.unity" "ChildObject" --parent "Player" --json; then
+if run_cli "test6" bun dist/cli.js create gameobject "$tmp_dir/parent-test.unity" "ChildObject" --parent "Player" --json; then
     # Verify parent relationship by checking m_Father in the file
     if grep -q "m_Father: {fileID: 1847675924}" "$tmp_dir/parent-test.unity"; then
         echo "✓ Create with parent works"
@@ -121,11 +121,11 @@ echo "Test 7: Edit Transform"
 cp "$fixture_path" "$tmp_dir/transform-test.unity"
 
 # First create an object to get a known transform ID
-create_output=$(bun dist/cli.js create "$tmp_dir/transform-test.unity" "TransformTestObj" 2>&1)
+create_output=$(bun dist/cli.js create gameobject "$tmp_dir/transform-test.unity" "TransformTestObj" 2>&1)
 transform_id=$(echo "$create_output" | grep -o '"transform_id": [0-9]*' | grep -o '[0-9]*')
 
 if [ -n "$transform_id" ]; then
-    if run_cli "test7" bun dist/cli.js edit-transform "$tmp_dir/transform-test.unity" "$transform_id" --position "10,20,30" --scale "2,2,2" --json; then
+    if run_cli "test7" bun dist/cli.js update transform "$tmp_dir/transform-test.unity" "$transform_id" --position "10,20,30" --scale "2,2,2" --json; then
         # Verify the transform was updated
         if grep -q "m_LocalPosition: {x: 10, y: 20, z: 30}" "$tmp_dir/transform-test.unity"; then
             echo "✓ Edit transform works"
@@ -147,7 +147,7 @@ echo ""
 echo "Test 8: Add Component"
 cp "$fixture_path" "$tmp_dir/component-test.unity"
 
-if run_cli "test8" bun dist/cli.js add-component "$tmp_dir/component-test.unity" "Player" "BoxCollider" --json; then
+if run_cli "test8" bun dist/cli.js create component "$tmp_dir/component-test.unity" "Player" "BoxCollider" --json; then
     # Verify BoxCollider was added
     if grep -q "BoxCollider:" "$tmp_dir/component-test.unity"; then
         echo "✓ Add component works"
@@ -166,7 +166,7 @@ echo "Test 9: Create Prefab Variant"
 prefab_path="test/fixtures/SamplePrefab.prefab"
 variant_path="$tmp_dir/TestVariant.prefab"
 
-if run_cli "test9" bun dist/cli.js create-variant "$prefab_path" "$variant_path" --name "TestVariant" --json; then
+if run_cli "test9" bun dist/cli.js create prefab-variant "$prefab_path" "$variant_path" --name "TestVariant" --json; then
     # Verify variant was created with correct structure
     if grep -q "PrefabInstance:" "$variant_path" && grep -q "stripped" "$variant_path"; then
         echo "✓ Create prefab variant works"
@@ -211,16 +211,16 @@ echo "Test 12: Full workflow (create → add components → edit transform)"
 cp "$fixture_path" "$tmp_dir/workflow-test.unity"
 
 # Create object
-workflow_output=$(bun dist/cli.js create "$tmp_dir/workflow-test.unity" "WorkflowObject" 2>&1)
+workflow_output=$(bun dist/cli.js create gameobject "$tmp_dir/workflow-test.unity" "WorkflowObject" 2>&1)
 wf_transform_id=$(echo "$workflow_output" | grep -o '"transform_id": [0-9]*' | grep -o '[0-9]*')
 
 if [ -n "$wf_transform_id" ]; then
     # Add components
-    bun dist/cli.js add-component "$tmp_dir/workflow-test.unity" "WorkflowObject" "BoxCollider" > /dev/null 2>&1
-    bun dist/cli.js add-component "$tmp_dir/workflow-test.unity" "WorkflowObject" "Rigidbody" > /dev/null 2>&1
+    bun dist/cli.js create component "$tmp_dir/workflow-test.unity" "WorkflowObject" "BoxCollider" > /dev/null 2>&1
+    bun dist/cli.js create component "$tmp_dir/workflow-test.unity" "WorkflowObject" "Rigidbody" > /dev/null 2>&1
 
     # Edit transform
-    bun dist/cli.js edit-transform "$tmp_dir/workflow-test.unity" "$wf_transform_id" --position "5,10,15" > /dev/null 2>&1
+    bun dist/cli.js update transform "$tmp_dir/workflow-test.unity" "$wf_transform_id" --position "5,10,15" > /dev/null 2>&1
 
     # Verify all changes
     if grep -q "BoxCollider:" "$tmp_dir/workflow-test.unity" && \

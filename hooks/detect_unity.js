@@ -31,7 +31,7 @@ async function main() {
     const uniqueFiles = [...new Set(matches)];
 
     if (uniqueFiles.length > 0) {
-      data.context = '# Use unity-yaml CLI (list/find/inspect/edit) instead of reading Unity files raw.\n' + (data.context || '');
+      data.context = '# Use unity-yaml CLI (read scene/gameobject, find, search, create, update, delete) instead of reading Unity files raw.\n' + (data.context || '');
     }
 
     console.log(JSON.stringify(data));
