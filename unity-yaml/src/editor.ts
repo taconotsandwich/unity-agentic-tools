@@ -54,41 +54,99 @@ export function safeUnityYAMLEdit(
     ? propertyName.slice(2)
     : propertyName;
 
+  // Validate property name against known GO properties
+  const VALID_GO_PROPERTIES = new Set([
+    'Name', 'TagString', 'IsActive', 'Layer',
+    'StaticEditorFlags', 'Icon', 'NavMeshLayer',
+  ]);
+  if (!VALID_GO_PROPERTIES.has(normalizedProperty)) {
+    const validList = [...VALID_GO_PROPERTIES].map(p => `m_${p}`).join(', ');
+    return {
+      success: false,
+      file_path: filePath,
+      error: `Unknown GameObject property "m_${normalizedProperty}". Valid properties: ${validList}`
+    };
+  }
+
+  // Validate value types for known properties (Bug #11)
+  const GO_PROP_VALIDATORS: Record<string, (v: string) => string | null> = {
+    'IsActive': v => (v === '0' || v === '1' || v === 'true' || v === 'false') ? null : 'must be 0, 1, true, or false',
+    'Layer': v => (/^\d+$/.test(v) && parseInt(v) >= 0 && parseInt(v) <= 31) ? null : 'must be an integer 0-31',
+    'StaticEditorFlags': v => /^\d+$/.test(v) ? null : 'must be a non-negative integer',
+  };
+  const validator = GO_PROP_VALIDATORS[normalizedProperty];
+  if (validator) {
+    const error = validator(newValue);
+    if (error) {
+      return {
+        success: false,
+        file_path: filePath,
+        error: `Invalid value "${newValue}" for m_${normalizedProperty}: ${error}`
+      };
+    }
+  }
+
+  // Normalize boolean values for Unity YAML
+  if (normalizedProperty === 'IsActive') {
+    if (newValue === 'true') newValue = '1';
+    else if (newValue === 'false') newValue = '0';
+  }
+
   // Split the file into Unity YAML blocks (each starts with --- !u!)
   // Keep the delimiter with the block that follows it
   const blocks = content.split(/(?=--- !u!)/);
 
-  // Find the GameObject block (!u!1) that contains m_Name: objectName
-  // We need to escape special regex characters in the object name
-  const escapedName = objectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const namePattern = new RegExp(`^\\s*m_Name:\\s*${escapedName}\\s*$`, 'm');
-
-  // Single-pass: collect both targetBlockIndex and all matching fileIDs
   let targetBlockIndex = -1;
-  const matchedIds: number[] = [];
-  for (let i = 0; i < blocks.length; i++) {
-    const block = blocks[i];
-    if (block.startsWith('--- !u!1 ') && namePattern.test(block)) {
-      if (targetBlockIndex === -1) targetBlockIndex = i;
-      const idMatch = block.match(/^--- !u!1 &(\d+)/);
-      if (idMatch) matchedIds.push(parseInt(idMatch[1], 10));
+
+  // If objectName is all digits, look up by fileID directly
+  if (/^\d+$/.test(objectName)) {
+    const fileId = parseInt(objectName, 10);
+    const fileIdPattern = new RegExp(`^--- !u!1 &${fileId}\\b`);
+    for (let i = 0; i < blocks.length; i++) {
+      if (fileIdPattern.test(blocks[i])) {
+        targetBlockIndex = i;
+        break;
+      }
     }
-  }
+    if (targetBlockIndex === -1) {
+      return {
+        success: false,
+        file_path: filePath,
+        error: `GameObject with fileID ${fileId} not found`
+      };
+    }
+  } else {
+    // Find the GameObject block (!u!1) that contains m_Name: objectName
+    // We need to escape special regex characters in the object name
+    const escapedName = objectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const namePattern = new RegExp(`^\\s*m_Name:\\s*${escapedName}\\s*$`, 'm');
 
-  if (targetBlockIndex === -1) {
-    return {
-      success: false,
-      file_path: filePath,
-      error: `GameObject "${objectName}" not found in file`
-    };
-  }
+    // Single-pass: collect both targetBlockIndex and all matching fileIDs
+    const matchedIds: number[] = [];
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      if (block.startsWith('--- !u!1 ') && namePattern.test(block)) {
+        if (targetBlockIndex === -1) targetBlockIndex = i;
+        const idMatch = block.match(/^--- !u!1 &(\d+)/);
+        if (idMatch) matchedIds.push(parseInt(idMatch[1], 10));
+      }
+    }
 
-  if (matchedIds.length > 1) {
-    return {
-      success: false,
-      file_path: filePath,
-      error: `Multiple GameObjects named "${objectName}" found (fileIDs: ${matchedIds.join(', ')}). Use numeric fileID to specify which one.`
-    };
+    if (targetBlockIndex === -1) {
+      return {
+        success: false,
+        file_path: filePath,
+        error: `GameObject "${objectName}" not found in file`
+      };
+    }
+
+    if (matchedIds.length > 1) {
+      return {
+        success: false,
+        file_path: filePath,
+        error: `Multiple GameObjects named "${objectName}" found (fileIDs: ${matchedIds.join(', ')}). Use numeric fileID to specify which one.`
+      };
+    }
   }
 
   // Edit only the target block
@@ -809,12 +867,24 @@ export function editTransform(options: EditTransformOptions): EditResult {
  * Generate generic YAML for any Unity component.
  * Unity will fill in default values when the scene/prefab is loaded.
  */
+/** Default property values for common built-in components. */
+const COMPONENT_DEFAULTS: Record<number, string> = {
+  65: `  m_IsTrigger: 0\n  m_Material: {fileID: 0}\n  m_Center: {x: 0, y: 0, z: 0}\n  m_Size: {x: 1, y: 1, z: 1}`, // BoxCollider
+  135: `  m_IsTrigger: 0\n  m_Material: {fileID: 0}\n  m_Center: {x: 0, y: 0, z: 0}\n  m_Radius: 0.5`, // SphereCollider
+  136: `  m_IsTrigger: 0\n  m_Material: {fileID: 0}\n  m_Center: {x: 0, y: 0, z: 0}\n  m_Radius: 0.5\n  m_Height: 2\n  m_Direction: 1`, // CapsuleCollider
+  23: `  m_CastShadows: 1\n  m_ReceiveShadows: 1\n  m_Materials:\n  - {fileID: 0}`, // MeshRenderer
+  108: `  m_LightType: 1\n  m_Color: {r: 1, g: 0.95686275, b: 0.8392157, a: 1}\n  m_Intensity: 1\n  m_Range: 10\n  m_SpotAngle: 30\n  m_Shadows: 2`, // Light
+  111: `  m_Controller: {fileID: 0}`, // Animator
+  54: `  m_Mass: 1\n  m_Drag: 0\n  m_AngularDrag: 0.05\n  m_UseGravity: 1\n  m_IsKinematic: 0`, // Rigidbody
+};
+
 function createGenericComponentYAML(
   componentName: string,
   classId: number,
   componentId: number,
   gameObjectId: number
 ): string {
+  const defaults = COMPONENT_DEFAULTS[classId] ? '\n' + COMPONENT_DEFAULTS[classId] + '\n' : '';
   return `--- !u!${classId} &${componentId}
 ${componentName}:
   m_ObjectHideFlags: 0
@@ -823,7 +893,7 @@ ${componentName}:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: ${gameObjectId}}
   m_Enabled: 1
-`;
+${defaults}`;
 }
 
 /**
@@ -1153,6 +1223,39 @@ function findPrefabRootInfo(content: string): { gameObjectId: number; transformI
     }
   }
 
+  // Fallback: variant prefabs have stripped blocks instead of full blocks
+  // Look for stripped GameObject and Transform blocks referencing a PrefabInstance
+  for (const block of blocks) {
+    if (/^--- !u!1 &\d+\s+stripped/.test(block)) {
+      const goIdMatch = block.match(/^--- !u!1 &(\d+)/);
+      if (!goIdMatch) continue;
+      const gameObjectId = parseInt(goIdMatch[1], 10);
+
+      // Find the matching stripped Transform
+      for (const tBlock of blocks) {
+        if (/^--- !u!4 &\d+\s+stripped/.test(tBlock)) {
+          const tIdMatch = tBlock.match(/^--- !u!4 &(\d+)/);
+          if (!tIdMatch) continue;
+          const transformId = parseInt(tIdMatch[1], 10);
+
+          // Extract name from PrefabInstance modifications
+          let name = 'Variant';
+          for (const piBlock of blocks) {
+            if (piBlock.startsWith('--- !u!1001 ')) {
+              const nameModMatch = piBlock.match(/propertyPath: m_Name\s*\n\s*value:\s*(.+)/);
+              if (nameModMatch) {
+                name = nameModMatch[1].trim();
+              }
+              break;
+            }
+          }
+
+          return { gameObjectId, transformId, name };
+        }
+      }
+    }
+  }
+
   return null;
 }
 
@@ -1187,6 +1290,23 @@ export function createPrefabVariant(options: CreatePrefabVariantOptions): Create
       success: false,
       output_path,
       error: 'Output path must have .prefab extension'
+    };
+  }
+
+  // Check output doesn't already exist
+  if (existsSync(output_path)) {
+    return {
+      success: false,
+      output_path,
+      error: `File already exists: ${output_path}. Delete it first or choose a different path.`
+    };
+  }
+
+  if (existsSync(output_path + '.meta')) {
+    return {
+      success: false,
+      output_path,
+      error: `Meta file already exists: ${output_path}.meta. Delete it first or choose a different path.`
     };
   }
 
@@ -1385,7 +1505,9 @@ function removeChildFromParent(content: string, parentTransformId: number, child
   for (let i = 0; i < blocks.length; i++) {
     if (transformPattern.test(blocks[i])) {
       // Remove the child line from multiline m_Children
-      const childLinePattern = new RegExp(`\\s*- \\{fileID: ${childTransformId}\\}\\n?`);
+      // Anchor to \n and only match spaces/tabs for indent (not newlines)
+      // to avoid merging m_Children: with the next line when last child is removed
+      const childLinePattern = new RegExp(`\\n[ \\t]*- \\{fileID: ${childTransformId}\\}`);
       blocks[i] = blocks[i].replace(childLinePattern, '');
 
       // Check if m_Children is now empty (no more - {fileID: lines after it)
@@ -1633,11 +1755,22 @@ export function deleteGameObject(options: DeleteGameObjectOptions): DeleteGameOb
     return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
   }
 
-  const goResult = requireUniqueGameObject(content, object_name);
-  if ('error' in goResult) {
-    return { success: false, file_path, error: goResult.error };
+  // Support fileID or name lookup
+  let goId: number;
+  if (/^\d+$/.test(object_name)) {
+    const fileId = parseInt(object_name, 10);
+    const found = findBlockByFileId(content, fileId);
+    if (!found || found.classId !== 1) {
+      return { success: false, file_path, error: `GameObject with fileID ${fileId} not found` };
+    }
+    goId = fileId;
+  } else {
+    const goResult = requireUniqueGameObject(content, object_name);
+    if ('error' in goResult) {
+      return { success: false, file_path, error: goResult.error };
+    }
+    goId = goResult.id;
   }
-  const goId = goResult.id;
 
   // Collect all component fileIDs from the GO
   const goFound = findBlockByFileId(content, goId);
@@ -1922,6 +2055,14 @@ export function createScriptableObject(options: CreateScriptableObjectOptions): 
 
   if (!output_path.endsWith('.asset')) {
     return { success: false, output_path, error: 'Output path must have .asset extension' };
+  }
+
+  if (existsSync(output_path)) {
+    return { success: false, output_path, error: `File already exists: ${output_path}. Delete it first or choose a different path.` };
+  }
+
+  if (existsSync(output_path + '.meta')) {
+    return { success: false, output_path, error: `Meta file already exists: ${output_path}.meta. Delete it first or choose a different path.` };
   }
 
   const resolved = resolveScriptGuid(script, project_path);
@@ -2405,6 +2546,14 @@ export function createMetaFile(options: CreateMetaFileOptions): CreateMetaFileRe
   const { script_path } = options;
   const metaPath = script_path + '.meta';
 
+  if (!existsSync(script_path)) {
+    return {
+      success: false,
+      meta_path: metaPath,
+      error: `Source file not found: ${script_path}`
+    };
+  }
+
   if (existsSync(metaPath)) {
     return {
       success: false,
@@ -2459,6 +2608,14 @@ export function createScene(options: CreateSceneOptions): CreateSceneResult {
       success: false,
       output_path,
       error: 'Output path must have .unity extension',
+    };
+  }
+
+  if (existsSync(output_path)) {
+    return {
+      success: false,
+      output_path,
+      error: `File already exists: ${output_path}. Delete it first or choose a different path.`,
     };
   }
 

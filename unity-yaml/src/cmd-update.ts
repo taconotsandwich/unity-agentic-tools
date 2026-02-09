@@ -12,8 +12,8 @@ import { enable_scene, disable_scene, move_scene } from './build-editor';
 
 function parseVector(str: string): { x: number; y: number; z: number } {
     const parts = str.split(',').map(Number);
-    if (parts.length !== 3 || parts.some(isNaN)) {
-        console.error('Invalid vector format. Use: x,y,z (e.g., 1,2,3)');
+    if (parts.length !== 3 || parts.some(v => !Number.isFinite(v))) {
+        console.error('Invalid vector format. Use: x,y,z with finite numbers (e.g., 1,2,3)');
         process.exit(1);
     }
     return { x: parts[0], y: parts[1], z: parts[2] };

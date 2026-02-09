@@ -248,11 +248,21 @@ impl Scanner {
         let target_obj = match gameobjects.iter().find(|o| o.file_id == target_file_id) {
             Some(obj) => obj,
             None => {
-                // Check if the ID matches any non-GameObject block
-                let block_pattern = format!("--- !u!(\\d+) &{}", target_file_id);
+                // Check if the ID matches any block (could be a non-GO or stripped GO)
+                let block_pattern = format!("--- !u!(\\d+) &{}(?: stripped)?", target_file_id);
                 if let Ok(re) = regex::Regex::new(&block_pattern) {
                     if let Some(caps) = re.captures(&content) {
                         let class_id: u32 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
+                        let full_match = caps.get(0).map_or("", |m| m.as_str());
+                        let is_stripped = full_match.contains("stripped");
+
+                        if class_id == 1 && is_stripped {
+                            return Some(serde_json::json!({
+                                "error": format!("ID {} is a stripped PrefabInstance GameObject — it has no inspectable data. Use the PrefabInstance ID instead, or unpack the prefab first.", target_file_id),
+                                "is_error": true
+                            }));
+                        }
+
                         let type_name = class_id_to_name(class_id);
                         return Some(serde_json::json!({
                             "error": format!("ID {} is a {} (class_id {}), not a GameObject. Use the parent GameObject's ID or name instead.", target_file_id, type_name, class_id),
@@ -945,5 +955,83 @@ mod tests {
     #[test]
     fn test_calculate_fuzzy_score_substring() {
         assert_eq!(calculate_fuzzy_score("amer", "camera"), 70.0);
+    }
+
+    #[test]
+    fn test_extract_gameobjects_duplicate_names() {
+        // Bug #1: Two GOs with the same name should both be extracted
+        let content = r#"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &100
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 200}
+  m_Layer: 0
+  m_Name: Cube
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!1 &101
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 201}
+  m_Layer: 0
+  m_Name: Cube
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+"#;
+        let gos = UnityYamlParser::extract_gameobjects(content);
+        assert_eq!(gos.len(), 2, "Both duplicate-named GOs should be extracted");
+        assert_eq!(gos[0].name, "Cube");
+        assert_eq!(gos[1].name, "Cube");
+        assert_ne!(gos[0].file_id, gos[1].file_id);
+    }
+
+    #[test]
+    fn test_extract_gameobjects_skips_stripped() {
+        // Bug #1/#3: Stripped GO blocks should NOT be extracted
+        let content = r#"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &500 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 100, guid: abc123, type: 3}
+  m_PrefabInstance: {fileID: 600}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &101
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 201}
+  m_Layer: 0
+  m_Name: RealObject
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+"#;
+        let gos = UnityYamlParser::extract_gameobjects(content);
+        assert_eq!(gos.len(), 1, "Stripped GO should not be extracted");
+        assert_eq!(gos[0].name, "RealObject");
+        assert_eq!(gos[0].file_id, "101");
     }
 }

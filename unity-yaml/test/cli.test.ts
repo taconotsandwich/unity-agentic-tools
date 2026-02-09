@@ -182,7 +182,7 @@ describeIfNative('CLI', () => {
             expect(json.components[0].type).toBe('Transform');
         });
 
-        it('should fall through to full object when component type not found', () => {
+        it('should return error when component type not found', () => {
             const result = run_cli([
                 'read', 'gameobject',
                 resolve(fixtures_dir, 'SampleScene.unity'),
@@ -191,8 +191,8 @@ describeIfNative('CLI', () => {
                 '--json'
             ]);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('object');
-            expect(json).not.toHaveProperty('components');
+            expect(json).toHaveProperty('error');
+            expect(json.error).toContain('No component of type "FakeType"');
         });
     });
 

@@ -49,7 +49,12 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 return;
             }
             const pageSize = Math.min(rawPageSize, 1000);
-            const cursor = parseInt(options.cursor, 10) || 0;
+            const rawCursor = parseInt(options.cursor, 10);
+            if (isNaN(rawCursor) || rawCursor < 0) {
+                console.log(JSON.stringify({ error: '--cursor must be a non-negative integer' }));
+                return;
+            }
+            const cursor = rawCursor;
             const rawMaxDepth = parseInt(options.maxDepth, 10);
             const maxDepth = isNaN(rawMaxDepth) ? 10 : Math.max(0, Math.min(rawMaxDepth, 50));
 
@@ -65,6 +70,10 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             if (result.error) {
                 console.log(JSON.stringify({ error: result.error }, null, 2));
                 return;
+            }
+
+            if (!file.endsWith('.unity') && result.gameobjects) {
+                (result as any).warning = `File "${file}" is not a .unity scene file`;
             }
 
             if (options.summary) {
@@ -112,7 +121,8 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             });
 
             if (!result) {
-                console.log(JSON.stringify({ error: `GameObject with ID ${object_id} not found` }, null, 2));
+                const label = /^\d+$/.test(object_id) ? 'fileID' : 'name';
+                console.log(JSON.stringify({ error: `GameObject with ${label} "${object_id}" not found` }, null, 2));
                 return;
             }
 
@@ -124,9 +134,19 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             if (options.component) {
                 const comps = result.components.filter((c: any) => c.type === options.component);
                 if (comps.length > 0) {
-                    console.log(JSON.stringify({ file, components: comps }, null, 2));
-                    return;
+                    console.log(JSON.stringify({
+                        file,
+                        name: result.name,
+                        file_id: result.file_id,
+                        components: comps,
+                    }, null, 2));
+                } else {
+                    const available = result.components.map((c: any) => c.type).join(', ');
+                    console.log(JSON.stringify({
+                        error: `No component of type "${options.component}" found on "${result.name}". Available: ${available}`,
+                    }, null, 2));
                 }
+                return;
             }
 
             console.log(JSON.stringify({ file, object: result }, null, 2));
