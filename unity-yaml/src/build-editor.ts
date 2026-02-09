@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { parse_editor_build_settings, SceneEntry } from './build-settings';
 
-export interface EditResult {
+export interface BuildEditResult {
     success: boolean;
     message: string;
     scenes?: SceneEntry[];
@@ -82,7 +82,7 @@ export function add_scene(
     projectPath: string,
     scenePath: string,
     options?: { enabled?: boolean; position?: number }
-): EditResult {
+): BuildEditResult {
     const enabled = options?.enabled ?? true;
     const position = options?.position;
 
@@ -138,7 +138,7 @@ export function add_scene(
 /**
  * Remove a scene from the build settings
  */
-export function remove_scene(projectPath: string, scenePath: string): EditResult {
+export function remove_scene(projectPath: string, scenePath: string): BuildEditResult {
     const buildSettingsPath = get_build_settings_path(projectPath);
     const current = parse_editor_build_settings(buildSettingsPath);
 
@@ -172,21 +172,21 @@ export function remove_scene(projectPath: string, scenePath: string): EditResult
 /**
  * Enable a scene in the build settings
  */
-export function enable_scene(projectPath: string, scenePath: string): EditResult {
+export function enable_scene(projectPath: string, scenePath: string): BuildEditResult {
     return set_scene_enabled(projectPath, scenePath, true);
 }
 
 /**
  * Disable a scene in the build settings
  */
-export function disable_scene(projectPath: string, scenePath: string): EditResult {
+export function disable_scene(projectPath: string, scenePath: string): BuildEditResult {
     return set_scene_enabled(projectPath, scenePath, false);
 }
 
 /**
  * Set enabled state for a scene
  */
-function set_scene_enabled(projectPath: string, scenePath: string, enabled: boolean): EditResult {
+function set_scene_enabled(projectPath: string, scenePath: string, enabled: boolean): BuildEditResult {
     const buildSettingsPath = get_build_settings_path(projectPath);
     const current = parse_editor_build_settings(buildSettingsPath);
 
@@ -227,7 +227,7 @@ function set_scene_enabled(projectPath: string, scenePath: string, enabled: bool
 /**
  * Move a scene to a new position in the build order
  */
-export function move_scene(projectPath: string, scenePath: string, newPosition: number): EditResult {
+export function move_scene(projectPath: string, scenePath: string, newPosition: number): BuildEditResult {
     const buildSettingsPath = get_build_settings_path(projectPath);
     const current = parse_editor_build_settings(buildSettingsPath);
 
@@ -279,7 +279,7 @@ export function move_scene(projectPath: string, scenePath: string, newPosition: 
 /**
  * Reorder all scenes by providing a new order
  */
-export function reorder_scenes(projectPath: string, scenePaths: string[]): EditResult {
+export function reorder_scenes(projectPath: string, scenePaths: string[]): BuildEditResult {
     const buildSettingsPath = get_build_settings_path(projectPath);
     const current = parse_editor_build_settings(buildSettingsPath);
 
