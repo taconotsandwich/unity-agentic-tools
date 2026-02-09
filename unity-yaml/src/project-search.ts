@@ -1,6 +1,6 @@
 import { readdirSync, statSync, readFileSync, existsSync } from 'fs';
 import * as path from 'path';
-import { UnityScanner, isNativeModuleAvailable } from './scanner';
+import { UnityScanner, isNativeModuleAvailable, getNativeWalkProjectFiles, getNativeGrepProject } from './scanner';
 import type {
     ProjectSearchOptions,
     ProjectSearchResult,
@@ -27,8 +27,28 @@ const SKIP_DIRS = new Set(['Library', 'Temp', 'obj', 'Logs', '.git', '.unity-age
 
 /**
  * Recursively walk a Unity project directory and collect files with given extensions.
+ * Uses native Rust walker when available, falls back to JS implementation.
  */
 export function walk_project_files(
+    project_path: string,
+    extensions: string[],
+    exclude_dirs?: string[]
+): string[] {
+    // Try native Rust walker first
+    const nativeWalk = getNativeWalkProjectFiles();
+    if (nativeWalk) {
+        try {
+            return nativeWalk(project_path, extensions, exclude_dirs ?? null);
+        } catch {
+            // Fall through to JS implementation
+        }
+    }
+
+    return walk_project_files_js(project_path, extensions, exclude_dirs);
+}
+
+/** JS fallback implementation of walk_project_files. */
+function walk_project_files_js(
     project_path: string,
     extensions: string[],
     exclude_dirs?: string[]
@@ -230,8 +250,47 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
 
 /**
  * Search for a regex pattern across project files.
+ * Uses native Rust grep when available, falls back to JS implementation.
  */
 export function grep_project(options: ProjectGrepOptions): ProjectGrepResult {
+    // Try native Rust grep first
+    const nativeGrep = getNativeGrepProject();
+    if (nativeGrep) {
+        try {
+            const nativeResult = nativeGrep({
+                projectPath: options.project_path,
+                pattern: options.pattern,
+                fileType: options.file_type,
+                maxResults: options.max_results,
+                contextLines: options.context_lines,
+            });
+            // Map camelCase napi result to snake_case TS types
+            return {
+                success: nativeResult.success,
+                project_path: nativeResult.projectPath,
+                pattern: nativeResult.pattern,
+                total_files_scanned: nativeResult.totalFilesScanned,
+                total_matches: nativeResult.totalMatches,
+                truncated: nativeResult.truncated,
+                error: nativeResult.error,
+                matches: nativeResult.matches.map((m: any) => ({
+                    file: m.file,
+                    line_number: m.lineNumber,
+                    line: m.line,
+                    context_before: m.contextBefore,
+                    context_after: m.contextAfter,
+                })),
+            };
+        } catch {
+            // Fall through to JS implementation
+        }
+    }
+
+    return grep_project_js(options);
+}
+
+/** JS fallback implementation of grep_project. */
+function grep_project_js(options: ProjectGrepOptions): ProjectGrepResult {
     const {
         project_path,
         pattern,

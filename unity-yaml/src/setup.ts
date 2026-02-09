@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, statSync } from 'fs';
 import { join, relative, resolve } from 'path';
+import { getNativeBuildGuidCache } from './scanner';
 
 const CONFIG_DIR = '.unity-agentic';
 const CONFIG_FILE = 'config.json';
@@ -84,9 +85,25 @@ export function setup(options: SetupOptions = {}): SetupResult {
 }
 
 /**
- * Build GUID cache by scanning all .meta files
+ * Build GUID cache by scanning all .meta files.
+ * Uses native Rust parallel scanner when available, falls back to JS.
  */
 function buildGuidCache(projectRoot: string): GuidCache {
+  // Try native Rust implementation first (parallel .meta scanning)
+  const nativeBuild = getNativeBuildGuidCache();
+  if (nativeBuild) {
+    try {
+      return nativeBuild(projectRoot) as GuidCache;
+    } catch {
+      // Fall through to JS implementation
+    }
+  }
+
+  return buildGuidCacheJs(projectRoot);
+}
+
+/** JS fallback implementation of buildGuidCache. */
+function buildGuidCacheJs(projectRoot: string): GuidCache {
   const cache: GuidCache = {};
   const assetsDir = join(projectRoot, 'Assets');
 
