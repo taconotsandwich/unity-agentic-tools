@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { resolve, join } from 'path';
-import { walk_project_files, grep_project } from '../src/project-search';
+import { resolve } from 'path';
+import { walk_project_files, grep_project, search_project } from '../src/project-search';
+import { isNativeModuleAvailable } from '../src/scanner';
 
 // Root-level fixtures have the full Unity project structure
 const EXTERNAL_FIXTURES = resolve(__dirname, '..', '..', 'test', 'fixtures', 'external');
@@ -108,5 +109,34 @@ describe('grep_project', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('not found');
+    });
+});
+
+const describeIfNative = isNativeModuleAvailable() ? describe : describe.skip;
+
+describeIfNative('search_project', () => {
+    it('should respect max_matches cap', () => {
+        const result = search_project({
+            project_path: EXTERNAL_FIXTURES,
+            max_matches: 2,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.matches.length).toBeLessThanOrEqual(2);
+        expect(result.truncated).toBe(true);
+    });
+
+    it('should return all matches when max_matches exceeds total', () => {
+        const result = search_project({
+            project_path: EXTERNAL_FIXTURES,
+            name: 'Camera',
+            max_matches: 9999,
+        });
+
+        expect(result.success).toBe(true);
+        // Should not be truncated due to max_matches (may be truncated by page_size)
+        if (result.total_matches < 50) {
+            expect(result.truncated).toBe(false);
+        }
     });
 });

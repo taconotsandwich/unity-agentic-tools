@@ -472,6 +472,7 @@ export interface ProjectSearchOptions {
   file_type?: 'scene' | 'prefab' | 'all';
   page_size?: number;
   cursor?: number;
+  max_matches?: number;
 }
 
 export interface ProjectSearchMatch {

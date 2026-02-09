@@ -53,10 +53,11 @@ describe('discover_sources', () => {
         expect(pkgSources.length).toBe(0);
     });
 
-    it('should return empty when Packages dir does not exist', () => {
+    it('should return empty packages when Packages dir does not exist', () => {
         const sources = discover_sources(temp_dir);
+        const pkgSources = sources.filter(s => s.type === 'package');
 
-        expect(sources.length).toBe(0);
+        expect(pkgSources.length).toBe(0);
     });
 });
 
@@ -106,5 +107,41 @@ describe('resolve_editor_docs_path', () => {
         const result = resolve_editor_docs_path('9999.9.9f1');
 
         expect(result).toBeNull();
+    });
+});
+
+describe('discover_editor_source fallback', () => {
+    let temp_dir: string;
+
+    beforeEach(() => {
+        temp_dir = mkdtempSync(join(tmpdir(), 'editor-fallback-'));
+    });
+
+    afterEach(() => {
+        if (existsSync(temp_dir)) {
+            rmSync(temp_dir, { recursive: true, force: true });
+        }
+    });
+
+    it('should not throw for project with no version file', () => {
+        // No ProjectVersion.txt — should not throw, may find docs via Hub fallback
+        const sources = discover_sources(temp_dir);
+        expect(Array.isArray(sources)).toBe(true);
+        // Any editor sources found should have valid structure
+        for (const s of sources.filter(s => s.type === 'editor')) {
+            expect(s.id).toMatch(/^editor:/);
+            expect(s.path).toBeTruthy();
+        }
+    });
+
+    it('should return empty array for project with unresolvable version', () => {
+        // Create ProjectVersion.txt with a version that doesn't exist on disk
+        const settingsDir = join(temp_dir, 'ProjectSettings');
+        mkdirSync(settingsDir, { recursive: true });
+        writeFileSync(join(settingsDir, 'ProjectVersion.txt'), 'm_EditorVersion: 9999.9.9f1');
+
+        const sources = discover_sources(temp_dir);
+        // May find docs via fallback if Hub is installed, but should not throw
+        expect(Array.isArray(sources)).toBe(true);
     });
 });

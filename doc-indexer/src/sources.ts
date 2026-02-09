@@ -59,19 +59,53 @@ function discover_package_sources(projectRoot: string): DocSource[] {
 }
 
 // Read the Unity version and check for local Editor documentation at the Hub path.
+// Falls back to scanning Hub directory for any installed version if exact match not found.
 function discover_editor_source(projectRoot: string): DocSource | null {
     const version = read_unity_version(projectRoot);
-    if (!version) return null;
 
-    const docsPath = resolve_editor_docs_path(version);
-    if (!docsPath) return null;
+    if (version) {
+        const docsPath = resolve_editor_docs_path(version);
+        if (docsPath) {
+            return {
+                id: `editor:${version}`,
+                type: 'editor',
+                path: docsPath,
+                name: `Unity ${version} Editor Docs`,
+            };
+        }
+    }
 
-    return {
-        id: `editor:${version}`,
-        type: 'editor',
-        path: docsPath,
-        name: `Unity ${version} Editor Docs`,
-    };
+    // Fallback: scan Hub directory for any installed version
+    return find_any_editor_docs();
+}
+
+/** Scan Unity Hub Editor directory for any installed version with docs. */
+function find_any_editor_docs(): DocSource | null {
+    const hubDirs: string[] = [];
+    const platform = process.platform;
+
+    if (platform === 'darwin') {
+        hubDirs.push('/Applications/Unity/Hub/Editor');
+    } else if (platform === 'win32') {
+        hubDirs.push('C:\\Program Files\\Unity\\Hub\\Editor');
+    } else {
+        hubDirs.push(join(homedir(), 'Unity/Hub/Editor'));
+    }
+
+    for (const hubDir of hubDirs) {
+        if (!existsSync(hubDir)) continue;
+        let entries: string[];
+        try { entries = readdirSync(hubDir); } catch { continue; }
+        // Sort descending — prefer newest version
+        entries.sort().reverse();
+        for (const entry of entries) {
+            const docsPath = join(hubDir, entry, 'Documentation', 'en');
+            if (existsSync(docsPath)) {
+                return { id: `editor:${entry}`, type: 'editor', path: docsPath, name: `Unity ${entry} Editor Docs` };
+            }
+        }
+    }
+    return null;
 }
 
 /** Check platform-specific Unity Hub Editor documentation paths. */

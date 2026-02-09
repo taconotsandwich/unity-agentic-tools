@@ -97,6 +97,20 @@ describeIfNative('CLI', () => {
             expect(json.truncated).toBe(false);
         });
 
+        it('should return compact summary with --summary', () => {
+            const result = run_cli([
+                'list',
+                resolve(fixtures_dir, 'SampleScene.unity'),
+                '--summary',
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('total_gameobjects', 4);
+            expect(json).toHaveProperty('component_counts');
+            expect(json.component_counts).toHaveProperty('Transform');
+            expect(json).not.toHaveProperty('gameobjects');
+        });
+
         it('should return different objects on page 1 vs page 2', () => {
             const page1 = JSON.parse(run_cli([
                 'list',
@@ -132,6 +146,51 @@ describeIfNative('CLI', () => {
             expect(json).toHaveProperty('pattern');
             expect(json).toHaveProperty('matches');
             expect(json.matches.length).toBeGreaterThan(0);
+        });
+    });
+
+    describe('get command', () => {
+        it('should return all matching components with -c filter', () => {
+            const result = run_cli([
+                'get',
+                resolve(fixtures_dir, 'Tiny3D.unity'),
+                'Directional Light',
+                '-c', 'MonoBehaviour',
+                '-p',
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('components');
+            expect(json.components.length).toBe(2);
+            expect(json.components.every((c: any) => c.type === 'MonoBehaviour')).toBe(true);
+        });
+
+        it('should return single component when only one matches', () => {
+            const result = run_cli([
+                'get',
+                resolve(fixtures_dir, 'SampleScene.unity'),
+                'Player',
+                '-c', 'Transform',
+                '-p',
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('components');
+            expect(json.components.length).toBe(1);
+            expect(json.components[0].type).toBe('Transform');
+        });
+
+        it('should fall through to full object when component type not found', () => {
+            const result = run_cli([
+                'get',
+                resolve(fixtures_dir, 'SampleScene.unity'),
+                'Player',
+                '-c', 'FakeType',
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('object');
+            expect(json).not.toHaveProperty('components');
         });
     });
 

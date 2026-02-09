@@ -5,7 +5,7 @@ import { indexMarkdownFile, indexDocsDirectory, indexScriptableObject, indexHtml
 import { DocStorage } from './storage';
 import { DocSearch } from './search';
 import { find_project_root, resolve_storage_path } from './project-root';
-import { discover_sources } from './sources';
+import { discover_sources, read_unity_version, resolve_editor_docs_path } from './sources';
 
 const program = new Command();
 
@@ -119,7 +119,24 @@ program
 
             const sources = discover_sources(projectRoot);
             if (sources.length === 0) {
-                console.log('No documentation sources found.');
+                const version = read_unity_version(projectRoot);
+                const lines = ['No documentation sources found.', ''];
+                lines.push('Checked:');
+                lines.push('  - Packages/*/Documentation~/ (package docs convention)');
+                if (version) {
+                    const editorPath = resolve_editor_docs_path(version);
+                    lines.push(`  - ${editorPath || `Unity Hub Editor/${version}/Documentation/en (not found)`}`);
+                    lines.push(`  - Unity Hub Editor/*/ (glob fallback, no docs installed)`);
+                } else {
+                    lines.push('  - ProjectSettings/ProjectVersion.txt not found (cannot resolve editor version)');
+                    lines.push('  - Unity Hub Editor/*/ (glob fallback, no docs installed)');
+                }
+                lines.push('');
+                lines.push('To fix:');
+                lines.push('  1. Install documentation via Unity Hub > Installs > Modules > Documentation');
+                lines.push('  2. Place docs in a package Documentation~/ folder');
+                lines.push('  3. Or run: index-docs <path-to-docs-directory>');
+                console.log(lines.join('\n'));
                 return;
             }
 
