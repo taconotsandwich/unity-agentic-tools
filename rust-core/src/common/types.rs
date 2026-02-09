@@ -179,6 +179,8 @@ pub struct PaginatedInspection {
     pub gameobjects: Vec<GameObjectDetail>,
     #[napi(ts_type = "PrefabInstanceInfo[] | undefined")]
     pub prefab_instances: Option<Vec<PrefabInstanceInfo>>,
+    #[napi(ts_type = "string | undefined")]
+    pub error: Option<String>,
 }
 
 /// Chunk types for indexing

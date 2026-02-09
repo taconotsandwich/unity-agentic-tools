@@ -1,6 +1,6 @@
 ---
 name: unity-yaml
-description: "Parse, inspect, and edit Unity YAML files (.unity, .prefab, .asset) via native Rust CLI. Use instead of raw Read for Unity files. Not for C# or shaders. Requires /initial-install."
+description: "Use when working with Unity projects, Unity YAML files (.unity, .prefab, .asset), or the unity-yaml CLI tool. Covers parsing, inspecting, editing, searching, and testing Unity files via native Rust CLI. Use instead of raw Read for Unity files. Load this skill before any Unity-related task. Not for C# or shaders. Requires /initial-install."
 ---
 
 # Unity YAML CLI

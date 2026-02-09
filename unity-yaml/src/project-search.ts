@@ -120,6 +120,7 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
         page_size = 50,
         cursor = 0,
         max_matches,
+        scan_all = false,
     } = options;
 
     if (!existsSync(project_path)) {
@@ -155,9 +156,9 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
 
     const files = walk_project_files(project_path, extensions);
 
-    // Apply file-level pagination
-    const paginatedFiles = files.slice(cursor, cursor + page_size);
-    const truncated = cursor + page_size < files.length;
+    // Apply file-level pagination (bypass when scan_all is true)
+    const paginatedFiles = scan_all ? files : files.slice(cursor, cursor + page_size);
+    const truncated = scan_all ? false : cursor + page_size < files.length;
     const next_cursor = truncated ? cursor + page_size : undefined;
 
     const scanner = new UnityScanner();

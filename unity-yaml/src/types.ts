@@ -104,6 +104,7 @@ export interface PaginatedInspection {
   page_size: number;
   gameobjects: GameObjectDetail[];
   prefabInstances?: PrefabInstanceInfo[];
+  error?: string;
 }
 
 // Creation types
@@ -473,6 +474,7 @@ export interface ProjectSearchOptions {
   page_size?: number;
   cursor?: number;
   max_matches?: number;
+  scan_all?: boolean;
 }
 
 export interface ProjectSearchMatch {
