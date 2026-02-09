@@ -70,8 +70,10 @@ CLI: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js <command>`
 
 | Command | Usage |
 |---------|-------|
-| `search-docs <query>` | Search indexed Unity docs (`-s` summarize, `-c` compress) |
-| `index-docs <path>` | Index .md, .html, or directory of docs |
+| `search-docs <query>` | Search docs (auto-discovers + indexes on first use, `-s` summarize, `-c` compress) |
+| `index-docs [path]` | Index docs (auto-discovers package + editor sources if no path given) |
+
+Index stored per-project at `.unity-agentic/doc-index.json`. Re-indexes only when files change (mtime-based).
 
 ## Build Settings
 
