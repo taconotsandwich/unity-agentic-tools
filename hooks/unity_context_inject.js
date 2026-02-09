@@ -38,7 +38,7 @@ async function main() {
       const filePath = toolInput.filePath || toolInput.path || toolInput.file_path || '';
 
       if (isUnityFile(filePath)) {
-        data.context = `# Prefer unity-yaml over raw Read for "${path.basename(filePath)}" — use read scene/gameobject or find commands. CLI path provided by SessionStart hook.\n` + (data.context || '');
+        data.context = `# Prefer unity-yaml CLI over raw Read for "${path.basename(filePath)}" — use read scene/gameobject or find commands.\n` + (data.context || '');
       }
     }
 
