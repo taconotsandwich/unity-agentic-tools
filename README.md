@@ -65,10 +65,11 @@ Or use slash commands directly:
 .claude-plugin/   Plugin manifest
 commands/         Slash commands
 skills/           Agent skills
-agents/           Specialized subagents
 hooks/            Event handlers
 unity-yaml/       TypeScript CLI
 rust-core/        Native Rust module (napi-rs)
+doc-indexer/      Documentation indexing module
+unity-build-settings/  Build settings module
 ```
 
 ## Development
@@ -104,7 +105,7 @@ your locally-built `.node` file directly -- no npm download needed.
 ```bash
 bun run build:rust         # after Rust code changes
 bun run build              # after TypeScript changes
-bun run test               # unit tests (294 + 50 + 37)
+bun run test               # unit tests (299 + 50 + 50)
 bun run test:integration   # CLI integration tests
 bun run type-check         # tsc --noEmit
 ```
