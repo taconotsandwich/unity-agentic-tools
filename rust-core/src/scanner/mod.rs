@@ -138,23 +138,38 @@ impl Scanner {
         let prefab_instances = prefab::extract_prefab_instances(&content, &self.guid_cache);
 
         if fuzzy {
+            let glob_re = glob_to_regex(&pattern);
             let lower_pattern = pattern.to_lowercase();
 
             let mut matches: Vec<FindResult> = Vec::new();
 
             for go in &gameobjects {
-                let lower_name = go.name.to_lowercase();
-                if lower_name.contains(&lower_pattern) {
-                    let score = calculate_fuzzy_score(&lower_pattern, &lower_name);
-                    matches.push(FindResult::from_game_object(go, Some(score)));
+                if let Some(ref re) = glob_re {
+                    if re.is_match(&go.name) {
+                        let score = 80.0; // glob match score
+                        matches.push(FindResult::from_game_object(go, Some(score)));
+                    }
+                } else {
+                    let lower_name = go.name.to_lowercase();
+                    if lower_name.contains(&lower_pattern) {
+                        let score = calculate_fuzzy_score(&lower_pattern, &lower_name);
+                        matches.push(FindResult::from_game_object(go, Some(score)));
+                    }
                 }
             }
 
             for pi in &prefab_instances {
-                let lower_name = pi.name.to_lowercase();
-                if lower_name.contains(&lower_pattern) {
-                    let score = calculate_fuzzy_score(&lower_pattern, &lower_name);
-                    matches.push(FindResult::from_prefab_instance(pi, Some(score)));
+                if let Some(ref re) = glob_re {
+                    if re.is_match(&pi.name) {
+                        let score = 80.0;
+                        matches.push(FindResult::from_prefab_instance(pi, Some(score)));
+                    }
+                } else {
+                    let lower_name = pi.name.to_lowercase();
+                    if lower_name.contains(&lower_pattern) {
+                        let score = calculate_fuzzy_score(&lower_pattern, &lower_name);
+                        matches.push(FindResult::from_prefab_instance(pi, Some(score)));
+                    }
                 }
             }
 
@@ -167,16 +182,27 @@ impl Scanner {
 
             matches
         } else {
+            let glob_re = glob_to_regex(&pattern);
             let mut matches: Vec<FindResult> = Vec::new();
 
             for go in &gameobjects {
-                if go.name == pattern {
+                let matched = if let Some(ref re) = glob_re {
+                    re.is_match(&go.name)
+                } else {
+                    go.name == pattern
+                };
+                if matched {
                     matches.push(FindResult::from_game_object(go, None));
                 }
             }
 
             for pi in &prefab_instances {
-                if pi.name == pattern {
+                let matched = if let Some(ref re) = glob_re {
+                    re.is_match(&pi.name)
+                } else {
+                    pi.name == pattern
+                };
+                if matched {
                     matches.push(FindResult::from_prefab_instance(pi, None));
                 }
             }
@@ -219,7 +245,24 @@ impl Scanner {
         }
 
         let gameobjects = UnityYamlParser::extract_gameobjects(&content);
-        let target_obj = gameobjects.iter().find(|o| o.file_id == target_file_id)?;
+        let target_obj = match gameobjects.iter().find(|o| o.file_id == target_file_id) {
+            Some(obj) => obj,
+            None => {
+                // Check if the ID matches any non-GameObject block
+                let block_pattern = format!("--- !u!(\\d+) &{}", target_file_id);
+                if let Ok(re) = regex::Regex::new(&block_pattern) {
+                    if let Some(caps) = re.captures(&content) {
+                        let class_id: u32 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
+                        let type_name = class_id_to_name(class_id);
+                        return Some(serde_json::json!({
+                            "error": format!("ID {} is a {} (class_id {}), not a GameObject. Use the parent GameObject's ID or name instead.", target_file_id, type_name, class_id),
+                            "is_error": true
+                        }));
+                    }
+                }
+                return None;
+            }
+        };
 
         let components = self.get_components_for_gameobject(&content, &target_file_id, &options.file);
         let verbose = options.verbose.unwrap_or(false);
@@ -309,7 +352,7 @@ impl Scanner {
         let path = Path::new(&file);
         if !path.exists() {
             return PaginatedInspection {
-                file,
+                file: file.clone(),
                 total: 0,
                 cursor,
                 next_cursor: None,
@@ -317,6 +360,7 @@ impl Scanner {
                 page_size,
                 gameobjects: Vec::new(),
                 prefab_instances: None,
+                error: Some(format!("File not found: {}", file)),
             };
         }
 
@@ -324,7 +368,7 @@ impl Scanner {
             Ok(c) => c,
             Err(_) => {
                 return PaginatedInspection {
-                    file,
+                    file: file.clone(),
                     total: 0,
                     cursor,
                     next_cursor: None,
@@ -332,6 +376,7 @@ impl Scanner {
                     page_size,
                     gameobjects: Vec::new(),
                     prefab_instances: None,
+                    error: Some(format!("Cannot read file: {}", file)),
                 }
             }
         };
@@ -434,6 +479,7 @@ impl Scanner {
             page_size,
             gameobjects: page,
             prefab_instances,
+            error: None,
         }
     }
 
@@ -714,6 +760,28 @@ impl Scanner {
     }
 }
 
+/// Convert a glob pattern (with `*` and `?`) to a case-insensitive regex.
+/// Returns None if the pattern contains no glob characters.
+fn glob_to_regex(pattern: &str) -> Option<regex::Regex> {
+    if !pattern.contains('*') && !pattern.contains('?') {
+        return None;
+    }
+    let mut regex_str = String::from("(?i)^");
+    for ch in pattern.chars() {
+        match ch {
+            '*' => regex_str.push_str(".*"),
+            '?' => regex_str.push('.'),
+            '.' | '+' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '\\' => {
+                regex_str.push('\\');
+                regex_str.push(ch);
+            }
+            _ => regex_str.push(ch),
+        }
+    }
+    regex_str.push('$');
+    regex::Regex::new(&regex_str).ok()
+}
+
 fn calculate_fuzzy_score(pattern: &str, text: &str) -> f64 {
     if pattern == text {
         return 100.0;
@@ -749,6 +817,43 @@ fn find_project_root(file_path: &str) -> Option<String> {
     }
 }
 
+/// Map common Unity class IDs to human-readable names.
+fn class_id_to_name(class_id: u32) -> &'static str {
+    match class_id {
+        1 => "GameObject",
+        2 => "Component",
+        4 => "Transform",
+        8 => "Behaviour",
+        12 => "ParticleAnimator",
+        20 => "Camera",
+        23 => "MeshRenderer",
+        25 => "Renderer",
+        33 => "MeshFilter",
+        54 => "Rigidbody",
+        64 => "MeshCollider",
+        65 => "BoxCollider",
+        82 => "AudioSource",
+        108 => "Light",
+        111 => "Animation",
+        114 => "MonoBehaviour",
+        115 => "MonoScript",
+        120 => "LineRenderer",
+        124 => "Behaviour",
+        135 => "SphereCollider",
+        136 => "CapsuleCollider",
+        137 => "SkinnedMeshRenderer",
+        198 => "ParticleSystem",
+        205 => "LODGroup",
+        212 => "SpriteRenderer",
+        222 => "CanvasRenderer",
+        223 => "Canvas",
+        224 => "RectTransform",
+        225 => "CanvasGroup",
+        1001 => "PrefabInstance",
+        _ => "Unknown",
+    }
+}
+
 fn extract_guid_from_meta(content: &str) -> Option<String> {
     let re = regex::Regex::new(r"^guid:\s*([a-f0-9]{32})").ok()?;
     for line in content.lines() {
@@ -757,4 +862,88 @@ fn extract_guid_from_meta(content: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_glob_to_regex_no_glob_chars() {
+        assert!(glob_to_regex("Camera").is_none());
+        assert!(glob_to_regex("MainCamera").is_none());
+        assert!(glob_to_regex("").is_none());
+    }
+
+    #[test]
+    fn test_glob_star_both_sides() {
+        let re = glob_to_regex("*Star*").unwrap();
+        assert!(re.is_match("NorthStar"));
+        assert!(re.is_match("StarField"));
+        assert!(re.is_match("Star"));
+        assert!(re.is_match("Stare")); // *Star* matches anything containing "Star"
+    }
+
+    #[test]
+    fn test_glob_star_both_sides_matches() {
+        let re = glob_to_regex("*Star*").unwrap();
+        assert!(re.is_match("NorthStar"));
+        assert!(re.is_match("StarField"));
+        assert!(re.is_match("Star"));
+        assert!(re.is_match("NorthStarField"));
+    }
+
+    #[test]
+    fn test_glob_trailing_star() {
+        let re = glob_to_regex("Star*").unwrap();
+        assert!(re.is_match("StarField"));
+        assert!(re.is_match("Star"));
+        assert!(!re.is_match("NorthStar"));
+    }
+
+    #[test]
+    fn test_glob_leading_star() {
+        let re = glob_to_regex("*Camera").unwrap();
+        assert!(re.is_match("MainCamera"));
+        assert!(re.is_match("Camera"));
+        assert!(!re.is_match("CameraRig"));
+    }
+
+    #[test]
+    fn test_glob_question_mark() {
+        let re = glob_to_regex("?tar").unwrap();
+        assert!(re.is_match("Star"));
+        assert!(!re.is_match("Sttar"));
+        assert!(!re.is_match("tar"));
+    }
+
+    #[test]
+    fn test_glob_case_insensitive() {
+        let re = glob_to_regex("*camera*").unwrap();
+        assert!(re.is_match("MainCamera"));
+        assert!(re.is_match("CAMERA"));
+        assert!(re.is_match("camera_rig"));
+    }
+
+    #[test]
+    fn test_glob_special_chars_escaped() {
+        let re = glob_to_regex("test.name*").unwrap();
+        assert!(re.is_match("test.name_foo"));
+        assert!(!re.is_match("testXname_foo")); // dot is escaped, not wildcard
+    }
+
+    #[test]
+    fn test_calculate_fuzzy_score_exact() {
+        assert_eq!(calculate_fuzzy_score("camera", "camera"), 100.0);
+    }
+
+    #[test]
+    fn test_calculate_fuzzy_score_prefix() {
+        assert_eq!(calculate_fuzzy_score("cam", "camera"), 85.0);
+    }
+
+    #[test]
+    fn test_calculate_fuzzy_score_substring() {
+        assert_eq!(calculate_fuzzy_score("amer", "camera"), 70.0);
+    }
 }

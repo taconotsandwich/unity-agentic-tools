@@ -94,6 +94,7 @@ export interface PaginatedInspection {
   pageSize: number
   gameobjects: Array<GameObjectDetail>
   prefabInstances?: PrefabInstanceInfo[] | undefined
+  error?: string | undefined
 }
 /** Chunk types for indexing */
 export const enum ChunkType {

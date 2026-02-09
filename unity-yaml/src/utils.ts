@@ -73,6 +73,19 @@ export function atomicWrite(filePath: string, content: string): AtomicWriteResul
 }
 
 /**
+ * Match a string against a glob pattern (* and ? wildcards) or exact equality.
+ * Case-insensitive. If the pattern has no glob chars, does exact equality.
+ */
+export function glob_match(pattern: string, text: string): boolean {
+    if (!pattern.includes('*') && !pattern.includes('?')) {
+        return pattern.toLowerCase() === text.toLowerCase();
+    }
+    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    const regex_str = escaped.replace(/\*/g, '.*').replace(/\?/g, '.');
+    return new RegExp(`^${regex_str}$`, 'i').test(text);
+}
+
+/**
  * Generate a new GUID (32 hex characters).
  */
 export function generateGuid(): string {

@@ -98,8 +98,14 @@ program.command('search <project_path>')
   .option('--page-size <n>', 'Max files per page', '50')
   .option('--cursor <n>', 'Start offset for pagination', '0')
   .option('-m, --max-matches <n>', 'Max total matches (caps results across all files)')
+  .option('--scan-all', 'Scan all files (ignore file-level pagination)')
   .option('-j, --json', 'Output as JSON')
   .action((project_path, options) => {
+    const rawPageSize = parseInt(options.pageSize, 10);
+    if (isNaN(rawPageSize) || rawPageSize < 1) {
+      console.log(JSON.stringify({ error: '--page-size must be a positive integer' }));
+      return;
+    }
     const result = search_project({
       project_path,
       name: options.name,
@@ -107,9 +113,10 @@ program.command('search <project_path>')
       tag: options.tag,
       layer: options.layer !== undefined ? parseInt(options.layer, 10) : undefined,
       file_type: options.type as 'scene' | 'prefab' | 'all',
-      page_size: parseInt(options.pageSize, 10) || 50,
+      page_size: rawPageSize,
       cursor: parseInt(options.cursor, 10) || 0,
       max_matches: options.maxMatches ? parseInt(options.maxMatches, 10) : undefined,
+      scan_all: options.scanAll === true,
     });
 
     console.log(JSON.stringify(result, null, 2));

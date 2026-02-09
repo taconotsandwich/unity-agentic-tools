@@ -1,7 +1,28 @@
 import { Command } from 'commander';
+import { existsSync } from 'fs';
 import type { UnityScanner } from './scanner';
 import { read_settings } from './settings';
 import { get_build_settings } from './build-settings';
+
+/** Check if a file is a Unity YAML file by reading its header. */
+function validate_unity_yaml(file: string): string | null {
+    if (!existsSync(file)) {
+        return `File not found: ${file}`;
+    }
+    try {
+        const fd = require('fs').openSync(file, 'r');
+        const buf = Buffer.alloc(64);
+        require('fs').readSync(fd, buf, 0, 64, 0);
+        require('fs').closeSync(fd);
+        const header = buf.toString('utf-8');
+        if (!header.startsWith('%YAML') || !header.includes('!u!')) {
+            return `File "${file}" is not a Unity YAML file (missing %YAML/!u! header)`;
+        }
+    } catch {
+        return `Cannot read file: ${file}`;
+    }
+    return null;
+}
 
 export function build_read_command(getScanner: () => UnityScanner): Command {
     const cmd = new Command('read')
@@ -17,9 +38,20 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--max-depth <n>', 'Max hierarchy depth (default 10, max 50)', '10')
         .option('--summary', 'Show compact summary (counts only, no object list)')
         .action((file, options) => {
-            const pageSize = Math.min(parseInt(options.pageSize, 10) || 200, 1000);
+            const validationError = validate_unity_yaml(file);
+            if (validationError) {
+                console.log(JSON.stringify({ error: validationError }, null, 2));
+                return;
+            }
+            const rawPageSize = parseInt(options.pageSize, 10);
+            if (isNaN(rawPageSize) || rawPageSize < 1) {
+                console.log(JSON.stringify({ error: '--page-size must be a positive integer' }));
+                return;
+            }
+            const pageSize = Math.min(rawPageSize, 1000);
             const cursor = parseInt(options.cursor, 10) || 0;
-            const maxDepth = Math.min(parseInt(options.maxDepth, 10) || 10, 50);
+            const rawMaxDepth = parseInt(options.maxDepth, 10);
+            const maxDepth = isNaN(rawMaxDepth) ? 10 : Math.max(0, Math.min(rawMaxDepth, 50));
 
             const result = getScanner().inspect_all_paginated({
                 file,
@@ -29,6 +61,11 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 cursor,
                 max_depth: maxDepth,
             });
+
+            if (result.error) {
+                console.log(JSON.stringify({ error: result.error }, null, 2));
+                return;
+            }
 
             if (options.summary) {
                 const component_counts: Record<string, number> = {};
@@ -62,6 +99,11 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('-j, --json', 'Output as JSON')
         .option('-v, --verbose', 'Show internal Unity IDs')
         .action((file, object_id, options) => {
+            const validationErr = validate_unity_yaml(file);
+            if (validationErr) {
+                console.log(JSON.stringify({ error: validationErr }, null, 2));
+                return;
+            }
             const result = getScanner().inspect({
                 file,
                 identifier: object_id,
@@ -71,6 +113,11 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             if (!result) {
                 console.log(JSON.stringify({ error: `GameObject with ID ${object_id} not found` }, null, 2));
+                return;
+            }
+
+            if ((result as any).is_error) {
+                console.log(JSON.stringify({ error: (result as any).error }, null, 2));
                 return;
             }
 

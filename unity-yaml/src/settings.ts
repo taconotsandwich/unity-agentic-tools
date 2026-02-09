@@ -349,6 +349,16 @@ export function edit_settings(options: EditSettingsOptions): EditSettingsResult 
  */
 export function edit_tag(options: TagEditOptions): EditSettingsResult {
     const { project_path, action, tag } = options;
+
+    if (!tag || !tag.trim()) {
+        return {
+            success: false,
+            project_path,
+            setting: 'TagManager',
+            error: 'Tag name cannot be empty',
+        };
+    }
+
     const file_path = resolve_setting_path(project_path, 'TagManager');
 
     if (!existsSync(file_path)) {
