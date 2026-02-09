@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execSync } from 'child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 
 const CLI_PATH = join(__dirname, '..', '..', 'dist', 'cli.js');
 
@@ -20,27 +22,17 @@ function runCli(args: string): { stdout: string; stderr: string; exitCode: numbe
     }
 }
 
-/**
- * Integration tests that exercise the built CLI binary via subprocess.
- * These catch Commander.js wiring bugs (e.g. the 2-arg .command() form
- * that triggers executable subcommand mode) that unit tests miss.
- */
 describe('doc-indexer CLI integration', () => {
     it('search subcommand should execute without "does not exist" error', () => {
-        // The bug: 2-arg .command('search <query>', 'desc') made Commander
-        // look for a 'unity-doc-indexer-search' binary instead of running inline.
-        // Now uses local embeddings — no API key needed.
         const result = runCli('search "Rigidbody"');
         expect(result.stderr).not.toContain('does not exist');
         expect(result.stderr).not.toContain('is not recognized');
-        // Should succeed with "Found" (keyword search always works)
         const output = result.stdout + result.stderr;
         expect(output).toMatch(/Found|error/i);
     });
 
     it('index subcommand should execute against a nonexistent path gracefully', () => {
         const result = runCli('index /tmp/nonexistent-path-12345');
-        // Should fail with a file error, NOT with "unity-doc-indexer-index does not exist"
         expect(result.stderr).not.toContain('does not exist');
     });
 
@@ -72,5 +64,60 @@ describe('doc-indexer CLI integration', () => {
         const result = runCli('search "Rigidbody" -j');
         expect(result.stderr).not.toContain('unknown option');
         expect(() => JSON.parse(result.stdout)).not.toThrow();
+    });
+});
+
+describe('doc-indexer CLI --storage-path', () => {
+    let temp_dir: string;
+
+    beforeEach(() => {
+        temp_dir = mkdtempSync(join(tmpdir(), 'cli-storage-test-'));
+    });
+
+    afterEach(() => {
+        if (existsSync(temp_dir)) {
+            rmSync(temp_dir, { recursive: true, force: true });
+        }
+    });
+
+    it('should use --storage-path for search', () => {
+        const storagePath = join(temp_dir, 'custom-index.json');
+        const result = runCli(`--storage-path ${storagePath} search "test"`);
+
+        // Should not crash; index file may or may not be created (no sources)
+        expect(result.stderr).not.toContain('does not exist');
+        const output = result.stdout + result.stderr;
+        expect(output).toMatch(/Found|error/i);
+    });
+
+    it('should use --storage-path for clear', () => {
+        const storagePath = join(temp_dir, 'custom-index.json');
+        const result = runCli(`--storage-path ${storagePath} clear`);
+
+        expect(result.stdout).toContain('Cleared');
+    });
+
+    it('index without path should fail when no project root found', () => {
+        const storagePath = join(temp_dir, 'custom-index.json');
+        const result = runCli(`--storage-path ${storagePath} index`);
+
+        // Should fail gracefully (no Unity project found)
+        expect(result.exitCode).not.toBe(0);
+    });
+
+    it('index without path should discover sources when project root given', () => {
+        // Create a fake Unity project with package docs
+        const projectDir = join(temp_dir, 'MyProject');
+        mkdirSync(join(projectDir, 'Assets'), { recursive: true });
+        const docsDir = join(projectDir, 'Packages', 'com.unity.test-pkg', 'Documentation~');
+        mkdirSync(docsDir, { recursive: true });
+        writeFileSync(join(docsDir, 'index.md'), '# Test Package\n\nSome documentation content.');
+
+        const storagePath = join(temp_dir, 'test-index.json');
+        const result = runCli(`--project-root ${projectDir} --storage-path ${storagePath} index`);
+
+        expect(result.stdout).toContain('pkg:com.unity.test-pkg');
+        expect(result.stdout).toContain('1 files');
+        expect(existsSync(storagePath)).toBe(true);
     });
 });

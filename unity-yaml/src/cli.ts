@@ -575,19 +575,30 @@ program.command('grep <project_path> <pattern>')
   });
 
 // Search docs command (uses doc-indexer CLI)
+import { find_unity_project_root } from './utils';
+
 program.command('search-docs <query>')
-  .description('Search Unity documentation')
+  .description('Search Unity documentation (auto-indexes on first use)')
   .option('-s, --summarize', 'Summarize results')
   .option('-c, --compress', 'Compress results')
   .option('-j, --json', 'Output as JSON')
   .action((query, options) => {
     const docIndexerPath = path.join(__dirname, '..', '..', 'doc-indexer', 'dist', 'cli.js');
-    const args = [docIndexerPath, 'search', query];
+    const projectRoot = find_unity_project_root();
+    const globalArgs: string[] = [];
+    if (projectRoot) {
+      globalArgs.push('--project-root', projectRoot);
+      const storagePath = path.join(projectRoot, '.unity-agentic', 'doc-index.json');
+      globalArgs.push('--storage-path', storagePath);
+    }
+
+    const args = [docIndexerPath, ...globalArgs, 'search', JSON.stringify(query)];
     if (options.summarize) args.push('-s');
     if (options.compress) args.push('-c');
     if (options.json) args.push('-j');
 
-    exec(`bun ${args.join(' ')}`, (error, stdout, _stderr) => {
+    exec(`bun ${args.join(' ')}`, (error, stdout, stderr) => {
+      if (stderr) process.stderr.write(stderr);
       if (error) {
         console.error('Error:', error.message);
         process.exit(1);
@@ -598,13 +609,23 @@ program.command('search-docs <query>')
   });
 
 // Index docs command
-program.command('index-docs <path>')
-  .description('Index Unity documentation')
+program.command('index-docs [path]')
+  .description('Index Unity documentation (auto-discovers sources if no path given)')
   .action((pathArg) => {
     const docIndexerPath = path.join(__dirname, '..', '..', 'doc-indexer', 'dist', 'cli.js');
-    const args = [docIndexerPath, 'index', pathArg];
+    const projectRoot = find_unity_project_root();
+    const globalArgs: string[] = [];
+    if (projectRoot) {
+      globalArgs.push('--project-root', projectRoot);
+      const storagePath = path.join(projectRoot, '.unity-agentic', 'doc-index.json');
+      globalArgs.push('--storage-path', storagePath);
+    }
 
-    exec(`bun ${args.join(' ')}`, (error, stdout, _stderr) => {
+    const args = [docIndexerPath, ...globalArgs, 'index'];
+    if (pathArg) args.push(pathArg);
+
+    exec(`bun ${args.join(' ')}`, (error, stdout, stderr) => {
+      if (stderr) process.stderr.write(stderr);
       if (error) {
         console.error('Error:', error.message);
         process.exit(1);
