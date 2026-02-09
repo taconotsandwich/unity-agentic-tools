@@ -11,7 +11,6 @@ TypeScript CLI providing token-efficient Unity file manipulation utilities for C
 - `unity-yaml/dist/` - Compiled JavaScript output (built by Bun)
 - `unity-yaml/test/` - TypeScript tests
 - `.claude-plugin/` - Claude Code plugin manifest
-- `agents/` - Claude agent definitions
 - `doc-indexer/` - Documentation indexing module
 
 ## Quick Setup
@@ -78,6 +77,5 @@ All commands use `bun unity-yaml/dist/cli.js`:
 ## Claude Code Integration
 
 - Plugin manifest: `.claude-plugin/plugin.json`
-- Agent definitions: `agents/` directory
 - Hook handlers: `claude/hooks.json`
 - Documentation: See docs/claude.md
