@@ -1,5 +1,5 @@
 import { createRequire } from 'module';
-import { FindResult, GameObject, GameObjectDetail, GameObjectWithComponents, SceneInspection, InspectOptions, ScanOptions, NativeScanner, NativeScannerInstance, PaginationOptions, PaginatedInspection } from './types';
+import { AssetObject, FindResult, GameObject, GameObjectDetail, GameObjectWithComponents, SceneInspection, InspectOptions, ScanOptions, NativeScanner, NativeScannerInstance, PaginationOptions, PaginatedInspection } from './types';
 
 // Load the native Rust module via workspace dependency
 // Use createRequire to prevent the bundler from inlining the native .node binary
@@ -103,5 +103,12 @@ export class UnityScanner {
       cursor: options.cursor,
       maxDepth: options.max_depth,
     });
+  }
+
+  /**
+   * Read a .asset file (ScriptableObject) and return its root objects with properties
+   */
+  read_asset(file: string): AssetObject[] {
+    return this.scanner.readAsset(file);
   }
 }

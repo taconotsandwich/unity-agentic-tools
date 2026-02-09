@@ -39,6 +39,13 @@ export interface PrefabInstanceInfo {
   sourcePrefab?: string | undefined
   modificationsCount: number
 }
+/** A single property override in a PrefabInstance */
+export interface PrefabModification {
+  targetFileId: string
+  targetGuid?: string | undefined
+  propertyPath: string
+  value: string
+}
 /** Union result from find_by_name: either a GameObject or PrefabInstance */
 export interface FindResult {
   name: string
@@ -150,6 +157,8 @@ export declare class Scanner {
   inspectAll(file: string, includeProperties: boolean, verbose: boolean): SceneInspection
   /** Inspect entire file with pagination support */
   inspectAllPaginated(options: PaginationOptions): PaginatedInspection
+  /** Read a .asset file and return its root objects with properties */
+  readAsset(file: string): any
 }
 /** High-performance documentation indexer */
 export declare class Indexer {

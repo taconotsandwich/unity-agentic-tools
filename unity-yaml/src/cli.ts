@@ -387,6 +387,44 @@ program.command('create-meta <script_path>')
     console.log(JSON.stringify(result, null, 2));
   });
 
+// Read asset command
+program.command('read-asset <file>')
+  .description('Read a .asset file (ScriptableObject) and show its objects with properties')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, _options) => {
+    const objects = getScanner().read_asset(file);
+    const output = {
+      file,
+      count: objects.length,
+      objects,
+    };
+    console.log(JSON.stringify(output, null, 2));
+  });
+
+// Edit asset command
+program.command('edit-asset <file> <property> <value>')
+  .description('Edit a property in the first MonoBehaviour block of a .asset file')
+  .option('-j, --json', 'Output as JSON')
+  .action((file, property, value, _options) => {
+    // Read the asset to find the first MonoBehaviour (class_id 114) file_id
+    const objects = getScanner().read_asset(file);
+    const monoBehaviour = objects.find((obj: any) => obj.class_id === 114);
+
+    if (!monoBehaviour) {
+      console.log(JSON.stringify({ success: false, error: 'No MonoBehaviour block found in asset file' }, null, 2));
+      process.exit(1);
+    }
+
+    const result = editComponentByFileId({
+      file_path: file,
+      file_id: monoBehaviour.file_id,
+      property,
+      new_value: value,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+  });
+
 // Settings commands
 import { read_settings, edit_settings, edit_tag, edit_layer, edit_sorting_layer } from './settings';
 

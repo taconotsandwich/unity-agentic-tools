@@ -210,10 +210,12 @@ impl Scanner {
             matches.first()?.file_id.clone()
         };
 
+        let include_properties = options.include_properties.unwrap_or(false);
+
         // Check if target_file_id matches a PrefabInstance
         let prefabs = prefab::extract_prefab_instances(&content, &self.guid_cache);
         if let Some(pi) = prefabs.iter().find(|p| p.file_id == target_file_id) {
-            return Some(self.build_prefab_instance_output(pi));
+            return Some(self.build_prefab_instance_output(pi, Some(&content), include_properties));
         }
 
         let gameobjects = UnityYamlParser::extract_gameobjects(&content);
@@ -221,7 +223,6 @@ impl Scanner {
 
         let components = self.get_components_for_gameobject(&content, &target_file_id, &options.file);
         let verbose = options.verbose.unwrap_or(false);
-        let include_properties = options.include_properties.unwrap_or(false);
 
         let detail = self.extract_gameobject_details(&content, target_obj, &components);
 
@@ -436,6 +437,84 @@ impl Scanner {
         }
     }
 
+    /// Read a .asset file and return its root objects with properties
+    #[napi]
+    pub fn read_asset(&mut self, file: String) -> serde_json::Value {
+        let path = Path::new(&file);
+        if !path.exists() {
+            return serde_json::json!([]);
+        }
+
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return serde_json::json!([]),
+        };
+
+        self.ensure_guid_resolver(&file);
+
+        let blocks = UnityYamlParser::extract_asset_objects(&content);
+        let mut objects = Vec::new();
+
+        for (class_id, file_id, block_content) in &blocks {
+            // Extract m_Name from block
+            let name = regex::Regex::new(r"m_Name:\s*(.+)")
+                .ok()
+                .and_then(|re| re.captures(block_content))
+                .and_then(|caps| caps.get(1))
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
+
+            // Determine type name from block (first line after header like "MonoBehaviour:")
+            let type_name = regex::Regex::new(r"^([A-Za-z][A-Za-z0-9_]*):")
+                .ok()
+                .and_then(|re| re.captures(block_content))
+                .and_then(|caps| caps.get(1))
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_else(|| format!("ClassID_{}", class_id));
+
+            // Extract script GUID for MonoBehaviour (class_id 114)
+            let mut script_guid: Option<String> = None;
+            let mut script_path: Option<String> = None;
+
+            if *class_id == 114 {
+                let guid_re = regex::Regex::new(r"m_Script:\s*\{[^}]*guid:\s*([a-f0-9]{32})").ok();
+                if let Some(re) = guid_re {
+                    if let Some(caps) = re.captures(block_content) {
+                        if let Some(guid_match) = caps.get(1) {
+                            let guid = guid_match.as_str().to_string();
+                            script_guid = Some(guid.clone());
+                            script_path = self.guid_cache.get(&guid).cloned();
+                        }
+                    }
+                }
+            }
+
+            // Extract properties using existing infrastructure
+            // We need the full content with header for extract_properties
+            let full_block = format!("--- !u!{} &{}\n{}", class_id, file_id, block_content);
+            let properties = component::extract_properties(&full_block, file_id, *class_id, &self.guid_cache);
+
+            let mut obj = serde_json::json!({
+                "class_id": class_id,
+                "file_id": file_id,
+                "type_name": type_name,
+                "name": name,
+                "properties": properties,
+            });
+
+            if let Some(ref guid) = script_guid {
+                obj["script_guid"] = serde_json::json!(guid);
+            }
+            if let Some(ref path) = script_path {
+                obj["script_path"] = serde_json::json!(path);
+            }
+
+            objects.push(obj);
+        }
+
+        serde_json::json!(objects)
+    }
+
     fn ensure_guid_resolver(&mut self, file: &str) {
         if self.project_root.is_none() {
             if let Some(root) = find_project_root(file) {
@@ -557,7 +636,7 @@ impl Scanner {
         output
     }
 
-    fn build_prefab_instance_output(&self, pi: &PrefabInstanceInfo) -> serde_json::Value {
+    fn build_prefab_instance_output(&self, pi: &PrefabInstanceInfo, content: Option<&str>, include_properties: bool) -> serde_json::Value {
         let mut output = serde_json::json!({
             "type": "PrefabInstance",
             "name": pi.name,
@@ -567,6 +646,23 @@ impl Scanner {
         });
         if let Some(ref src) = pi.source_prefab {
             output["source_prefab"] = serde_json::json!(src);
+        }
+        if include_properties {
+            if let Some(content) = content {
+                if let Some(block) = prefab::extract_prefab_block(content, &pi.file_id) {
+                    let mods = prefab::extract_modifications(&block);
+                    // Group by target_file_id
+                    let mut grouped: std::collections::HashMap<String, Vec<serde_json::Value>> = std::collections::HashMap::new();
+                    for m in &mods {
+                        let entry = grouped.entry(m.target_file_id.clone()).or_default();
+                        entry.push(serde_json::json!({
+                            "propertyPath": m.property_path,
+                            "value": m.value,
+                        }));
+                    }
+                    output["modifications"] = serde_json::json!(grouped);
+                }
+            }
         }
         output
     }

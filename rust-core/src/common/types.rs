@@ -58,6 +58,17 @@ pub struct PrefabInstanceInfo {
     pub modifications_count: u32,
 }
 
+/// A single property override in a PrefabInstance
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrefabModification {
+    pub target_file_id: String,
+    #[napi(ts_type = "string | undefined")]
+    pub target_guid: Option<String>,
+    pub property_path: String,
+    pub value: String,
+}
+
 /// Union result from find_by_name: either a GameObject or PrefabInstance
 #[napi(object)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
