@@ -11,11 +11,11 @@ CLI: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js <command>`
 
 | Command | Usage |
 |---------|-------|
-| `list <file>` | GameObject hierarchy (paginated: `--page-size`, `--cursor`, `--max-depth`) |
+| `list <file>` | GameObject hierarchy (paginated: `--page-size`, `--cursor`, `--max-depth`, `--summary`) |
 | `find <file> <pattern>` | Search by name (`--exact` for exact match) |
 | `inspect <file> [id]` | Structure only; add `--properties` for values, `--verbose` for IDs |
 | `inspect-all <file>` | Full file inspection (`--properties`, `--page-size`, `--cursor`) |
-| `get <file> <id>` | Single object by file ID (`-c <type>` for specific component) |
+| `get <file> <id>` | Single object by file ID (`-c <type>` returns all matching components) |
 | `read-asset <file>` | Read .asset file (ScriptableObject) with all properties |
 
 ## Editing
@@ -63,7 +63,7 @@ CLI: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js <command>`
 
 | Command | Usage |
 |---------|-------|
-| `search <project> -n <pattern>` | Search across scenes/prefabs (`-c`, `-t`, `-l` filters) |
+| `search <project> -n <pattern>` | Search across scenes/prefabs (`-c`, `-t`, `-l` filters, `-m <n>` max matches) |
 | `grep <project> <regex>` | Regex search across project files (`--type cs\|yaml\|all`) |
 
 ## Documentation

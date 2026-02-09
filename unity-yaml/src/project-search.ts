@@ -98,6 +98,7 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
         file_type = 'all',
         page_size = 50,
         cursor = 0,
+        max_matches,
     } = options;
 
     if (!existsSync(project_path)) {
@@ -202,7 +203,11 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
                 }
 
                 matches.push(match);
+
+                if (max_matches !== undefined && matches.length >= max_matches) break;
             }
+
+            if (max_matches !== undefined && matches.length >= max_matches) break;
         } catch {
             // Skip files that can't be parsed
             continue;
@@ -216,7 +221,7 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
         total_matches: matches.length,
         cursor,
         next_cursor,
-        truncated,
+        truncated: truncated || (max_matches !== undefined && matches.length >= max_matches),
         matches,
     };
 }

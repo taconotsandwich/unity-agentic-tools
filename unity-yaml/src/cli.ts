@@ -39,6 +39,7 @@ program.command('list <file>')
   .option('--page-size <n>', 'Max objects per page (default 200, max 1000)', '200')
   .option('--cursor <n>', 'Start offset for pagination (default 0)', '0')
   .option('--max-depth <n>', 'Max hierarchy depth (default 10, max 50)', '10')
+  .option('--summary', 'Show compact summary (counts only, no object list)')
   .action((file, options) => {
     const pageSize = Math.min(parseInt(options.pageSize, 10) || 200, 1000);
     const cursor = parseInt(options.cursor, 10) || 0;
@@ -51,6 +52,29 @@ program.command('list <file>')
       cursor,
       max_depth: maxDepth,
     });
+
+    if (options.summary) {
+      const component_counts: Record<string, number> = {};
+      let prefab_instances = 0;
+      const gos = result.gameobjects || [];
+      for (const go of gos) {
+        if ((go as any).isPrefabInstance) prefab_instances++;
+        for (const comp of ((go as any).components || [])) {
+          const t = comp.type || comp.typeName || 'Unknown';
+          component_counts[t] = (component_counts[t] || 0) + 1;
+        }
+      }
+      console.log(JSON.stringify({
+        file: result.file,
+        total_gameobjects: result.total,
+        prefab_instances,
+        component_counts,
+        page_shown: gos.length,
+        truncated: result.truncated,
+      }, null, 2));
+      return;
+    }
+
     console.log(JSON.stringify(result, null, 2));
   });
 
@@ -93,9 +117,9 @@ program.command('get <file> <object_id>')
     }
 
     if (options.component) {
-      const comp = result.components.find((c: any) => c.type === options.component);
-      if (comp) {
-        console.log(JSON.stringify({ file, component: comp }, null, 2));
+      const comps = result.components.filter((c: any) => c.type === options.component);
+      if (comps.length > 0) {
+        console.log(JSON.stringify({ file, components: comps }, null, 2));
         return;
       }
     }
@@ -540,6 +564,7 @@ program.command('search <project_path>')
   .option('--type <type>', 'File type filter: scene, prefab, all', 'all')
   .option('--page-size <n>', 'Max files per page', '50')
   .option('--cursor <n>', 'Start offset for pagination', '0')
+  .option('-m, --max-matches <n>', 'Max total matches (caps results across all files)')
   .option('-j, --json', 'Output as JSON')
   .action((project_path, options) => {
     const result = search_project({
@@ -551,6 +576,7 @@ program.command('search <project_path>')
       file_type: options.type as 'scene' | 'prefab' | 'all',
       page_size: parseInt(options.pageSize, 10) || 50,
       cursor: parseInt(options.cursor, 10) || 0,
+      max_matches: options.maxMatches ? parseInt(options.maxMatches, 10) : undefined,
     });
 
     console.log(JSON.stringify(result, null, 2));
