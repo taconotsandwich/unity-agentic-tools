@@ -5,7 +5,7 @@ description: "Parse, inspect, and edit Unity YAML files (.unity, .prefab, .asset
 
 # Unity YAML CLI
 
-CLI: `bun ${CLAUDE_PLUGIN_ROOT}/unity-yaml/dist/cli.js <command>`
+CLI path is injected by SessionStart hook. Run as: `unity-yaml <command>`
 
 ## read — Read Unity files, settings, and build data
 
