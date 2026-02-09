@@ -2,8 +2,9 @@
 /**
  * Hook: SessionStart
  * Ensures the plugin is ready: workspace deps installed and TypeScript built.
- * If already set up: exits immediately (fast path, no output).
- * If missing: runs bun install + bun run build.
+ * Always injects the resolved CLI path into session context so Claude knows
+ * the exact `bun <path>/cli.js` command to use.
+ * If deps/build missing: runs bun install + bun run build first.
  */
 
 const readline = require('readline');
@@ -25,7 +26,7 @@ function ensureSetup() {
     const needsInstall = !fs.existsSync(path.join(pluginRoot, 'node_modules'));
     const needsBuild = !fs.existsSync(path.join(pluginRoot, 'unity-yaml', 'dist', 'cli.js'));
 
-    if (!needsInstall && !needsBuild) return false;
+    if (!needsInstall && !needsBuild) return { didSetup: false, pluginRoot };
 
     try {
         if (needsInstall) {
@@ -34,10 +35,10 @@ function ensureSetup() {
         if (needsBuild) {
             execSync('bun run build', { cwd: pluginRoot, stdio: 'inherit', timeout: 60000 });
         }
-        return true;
+        return { didSetup: true, pluginRoot };
     } catch (err) {
         process.stderr.write(`Auto-setup failed: ${err.message}. Run bun install && bun run build manually.\n`);
-        return false;
+        return { didSetup: false, pluginRoot };
     }
 }
 
@@ -46,11 +47,15 @@ async function main() {
         const input = await readStdin();
         const data = JSON.parse(input);
 
-        const didSetup = ensureSetup();
+        const { didSetup, pluginRoot } = ensureSetup();
+        const cliPath = path.join(pluginRoot, 'unity-yaml', 'dist', 'cli.js');
+
+        // Always inject the resolved CLI path so Claude knows the exact command
+        data.context = (data.context || '') +
+            `# unity-yaml CLI: bun ${cliPath}\n`;
 
         if (didSetup) {
-            data.context = (data.context || '') +
-                '# Unity Agentic Tools: plugin dependencies installed and built.\n';
+            data.context += '# Unity Agentic Tools: plugin dependencies installed and built.\n';
         }
 
         console.log(JSON.stringify(data));
