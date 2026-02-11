@@ -556,8 +556,9 @@ mod tests {
 
     #[test]
     fn test_grep_invalid_regex() {
+        let tmp = create_temp_project();
         let result = grep_project(NapiGrepOptions {
-            project_path: "/tmp".to_string(),
+            project_path: tmp.path().to_string_lossy().to_string(),
             pattern: "[invalid".to_string(),
             file_type: None,
             max_results: None,
