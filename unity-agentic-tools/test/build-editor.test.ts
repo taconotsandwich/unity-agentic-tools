@@ -152,6 +152,19 @@ describe('move_scene', () => {
         expect(result.scenes?.[1].path).toBe('Assets/Scenes/Menu.unity');
     });
 
+    it('should re-enable a disabled scene when moved', () => {
+        // First disable the scene
+        disable_scene(TEST_PROJECT_PATH, 'Assets/Scenes/Level.unity');
+
+        // Now move it to position 0
+        const result = move_scene(TEST_PROJECT_PATH, 'Assets/Scenes/Level.unity', 0);
+
+        expect(result.success).toBe(true);
+        const movedScene = result.scenes?.find(s => s.path === 'Assets/Scenes/Level.unity');
+        expect(movedScene?.enabled).toBe(true);
+        expect(movedScene?.buildIndex).toBeGreaterThanOrEqual(0);
+    });
+
     it('should fail for invalid position', () => {
         const result = move_scene(TEST_PROJECT_PATH, 'Assets/Scenes/Menu.unity', 99);
 

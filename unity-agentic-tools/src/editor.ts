@@ -325,7 +325,7 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
     return {
       success: false,
       file_path,
-      error: `Property "${property}" not found in component ${file_id} (class ${classId}). Use inspect to view available properties.`
+      error: `Property "${property}" not found in component ${file_id} (class ${classId}). Unity only serializes properties that differ from defaults — newly created or unmodified components may not have this property in YAML yet. Use 'read gameobject --properties' to see available properties, or set the property in the Unity Editor first to make it serializable.`
     };
   }
 
@@ -918,6 +918,7 @@ const COMPONENT_DEFAULTS: Record<number, string> = {
   108: `  m_LightType: 1\n  m_Color: {r: 1, g: 0.95686275, b: 0.8392157, a: 1}\n  m_Intensity: 1\n  m_Range: 10\n  m_SpotAngle: 30\n  m_Shadows: 2`, // Light
   111: `  m_Controller: {fileID: 0}`, // Animator
   54: `  m_Mass: 1\n  m_Drag: 0\n  m_AngularDrag: 0.05\n  m_UseGravity: 1\n  m_IsKinematic: 0`, // Rigidbody
+  82: `  m_PlayOnAwake: 1\n  m_Volume: 1\n  m_Pitch: 1\n  m_Loop: 0\n  m_Mute: 0\n  m_Priority: 128`, // AudioSource
 };
 
 function createGenericComponentYAML(
@@ -2167,6 +2168,12 @@ export function createScriptableObject(options: CreateScriptableObjectOptions): 
 
   if (existsSync(output_path + '.meta')) {
     return { success: false, output_path, error: `Meta file already exists: ${output_path}.meta. Delete it first or choose a different path.` };
+  }
+
+  // Reject built-in Unity class names — ScriptableObjects require a custom script
+  const builtInClassId = get_class_id(script);
+  if (builtInClassId !== null) {
+    return { success: false, output_path, error: `"${script}" is a built-in Unity class (class ${builtInClassId}), not a custom script. ScriptableObjects require a custom script that derives from ScriptableObject. Provide a script GUID, .cs file path, or script name with --project.` };
   }
 
   const resolved = resolveScriptGuid(script, project_path);
