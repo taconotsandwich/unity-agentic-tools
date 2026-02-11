@@ -94,7 +94,14 @@ impl Scanner {
             .into_iter()
             .map(|obj| {
                 let components = self.get_components_for_gameobject(&content, &obj.file_id, &file);
-                self.build_gameobject_output(&obj, &components, verbose, false)
+                let mut output = self.build_gameobject_output(&obj, &components, verbose, false);
+
+                // Always include tag and layer for search filtering support
+                let (tag, layer, _, _) = gameobject::extract_metadata(&content, &obj.file_id);
+                output["tag"] = serde_json::json!(tag);
+                output["layer"] = serde_json::json!(layer);
+
+                output
             })
             .collect();
 
