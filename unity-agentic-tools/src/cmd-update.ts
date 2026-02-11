@@ -193,13 +193,15 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         });
 
     cmd.command('parent <file> <object_name> <new_parent>')
-        .description('Move a GameObject under a new parent. Use "root" to move to scene root')
+        .description('Move a GameObject under a new parent. Use "root" to move to scene root. Use --by-id to specify fileIDs instead of names')
         .option('-j, --json', 'Output as JSON')
-        .action((file, object_name, new_parent, _options) => {
+        .option('--by-id', 'Treat object_name and new_parent as numeric fileIDs instead of names')
+        .action((file, object_name, new_parent, options) => {
             const result = reparentGameObject({
                 file_path: file,
                 object_name: object_name,
                 new_parent: new_parent,
+                by_id: options.byId,
             });
 
             console.log(JSON.stringify(result, null, 2));

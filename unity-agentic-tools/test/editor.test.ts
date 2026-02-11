@@ -785,6 +785,36 @@ describe('createGameObject', () => {
         expect(result.error).toContain('empty');
     });
 
+    it('should reject names with forward slashes', () => {
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Parent/Child'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('forward slashes');
+    });
+
+    it('should reject names with newlines', () => {
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Line1\nLine2'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('newlines');
+    });
+
+    it('should reject names with backslashes', () => {
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'Path\\Name'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('backslashes');
+    });
+
     it('should handle names with spaces', () => {
         const result = createGameObject({
             file_path: temp_fixture.temp_path,
@@ -2782,6 +2812,76 @@ describe('reparentGameObject', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('not found');
+    });
+
+    it('should reparent by file ID with --by-id flag', () => {
+        const parentResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'IdParent'
+        });
+        expect(parentResult.success).toBe(true);
+
+        const childResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'IdChild'
+        });
+        expect(childResult.success).toBe(true);
+
+        // Reparent using numeric file IDs
+        const result = reparentGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: String(childResult.game_object_id),
+            new_parent: String(parentResult.game_object_id),
+            by_id: true,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.new_parent_transform_id).toBe(parentResult.transform_id);
+
+        // Verify the hierarchy in file
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const childPattern = new RegExp(`--- !u!4 &${childResult.transform_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const childMatch = content.match(childPattern);
+        expect(childMatch).not.toBeNull();
+        expect(childMatch![0]).toContain(`m_Father: {fileID: ${parentResult.transform_id}}`);
+    });
+
+    it('should reparent to root by file ID with --by-id flag', () => {
+        const parentResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'IdRootParent'
+        });
+        expect(parentResult.success).toBe(true);
+
+        const childResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'IdRootChild',
+            parent: 'IdRootParent'
+        });
+        expect(childResult.success).toBe(true);
+
+        // Reparent to root using file ID for child
+        const result = reparentGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: String(childResult.game_object_id),
+            new_parent: 'root',
+            by_id: true,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.new_parent_transform_id).toBe(0);
+    });
+
+    it('should fail with invalid file ID when using --by-id', () => {
+        const result = reparentGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'not-a-number',
+            new_parent: 'root',
+            by_id: true,
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Invalid fileID');
     });
 });
 

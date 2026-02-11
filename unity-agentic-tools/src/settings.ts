@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'fs';
 import * as path from 'path';
-import { atomicWrite } from './utils';
+import { atomicWrite, validate_name } from './utils';
 import type {
     ReadSettingsOptions,
     ReadSettingsResult,
@@ -372,6 +372,16 @@ export function edit_tag(options: TagEditOptions): EditSettingsResult {
             project_path,
             setting: 'TagManager',
             error: 'Tag name cannot be empty',
+        };
+    }
+
+    const nameError = validate_name(tag, 'Tag name');
+    if (nameError) {
+        return {
+            success: false,
+            project_path,
+            setting: 'TagManager',
+            error: nameError,
         };
     }
 

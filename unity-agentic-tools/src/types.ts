@@ -307,6 +307,7 @@ export interface ReparentGameObjectOptions {
   file_path: string;
   object_name: string;
   new_parent: string;  // Parent name or "root" for scene root
+  by_id?: boolean;     // When true, object_name and new_parent are treated as numeric fileIDs
 }
 
 export interface ReparentGameObjectResult {

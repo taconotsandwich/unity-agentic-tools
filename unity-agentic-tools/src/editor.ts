@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import * as path from 'path';
 import type { CreateGameObjectOptions, CreateGameObjectResult, EditTransformOptions, Vector3, AddComponentOptions, AddComponentResult, CreatePrefabVariantOptions, CreatePrefabVariantResult, Quaternion, PropertyEdit, EditComponentByFileIdOptions, EditComponentResult, RemoveComponentOptions, RemoveComponentResult, DeleteGameObjectOptions, DeleteGameObjectResult, CopyComponentOptions, CopyComponentResult, DuplicateGameObjectOptions, DuplicateGameObjectResult, CreateScriptableObjectOptions, CreateScriptableObjectResult, UnpackPrefabOptions, UnpackPrefabResult, ReparentGameObjectOptions, ReparentGameObjectResult, CreateMetaFileOptions, CreateMetaFileResult, CreateSceneOptions, CreateSceneResult } from './types';
 import { get_class_id, UNITY_CLASS_IDS } from './class-ids';
-import { atomicWrite, generateGuid, find_unity_project_root } from './utils';
+import { atomicWrite, generateGuid, find_unity_project_root, validate_name } from './utils';
 import { getNativeBuildGuidCache } from './scanner';
 
 export interface EditResult {
@@ -688,6 +688,11 @@ export function createGameObject(options: CreateGameObjectOptions): CreateGameOb
       file_path,
       error: 'GameObject name cannot be empty'
     };
+  }
+
+  const nameError = validate_name(name, 'GameObject name');
+  if (nameError) {
+    return { success: false, file_path, error: nameError };
   }
 
   // Check if file exists
@@ -2543,10 +2548,37 @@ function isAncestor(content: string, childTransformId: number, candidateAncestor
 }
 
 /**
+ * Resolve a GameObject fileID to its Transform fileID.
+ * Finds the GameObject block (!u!1), extracts the first component reference (the Transform).
+ */
+function resolveTransformByGameObjectId(content: string, gameObjectFileId: number): { id: number } | { error: string } {
+  const found = findBlockByFileId(content, gameObjectFileId);
+  if (!found || found.classId !== 1) {
+    return { error: `GameObject with fileID ${gameObjectFileId} not found` };
+  }
+
+  // Extract first component ref from m_Component — in Unity, the Transform is always first
+  const componentMatch = found.block.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(\d+)\}/);
+  if (!componentMatch) {
+    return { error: `GameObject fileID ${gameObjectFileId} has no Transform component` };
+  }
+
+  const transformId = parseInt(componentMatch[1], 10);
+
+  // Verify it's actually a Transform (!u!4) or RectTransform (!u!224)
+  const transformBlock = findBlockByFileId(content, transformId);
+  if (!transformBlock || (transformBlock.classId !== 4 && transformBlock.classId !== 224)) {
+    return { error: `First component of GameObject fileID ${gameObjectFileId} is not a Transform` };
+  }
+
+  return { id: transformId };
+}
+
+/**
  * Reparent a GameObject under a new parent (or to root).
  */
 export function reparentGameObject(options: ReparentGameObjectOptions): ReparentGameObjectResult {
-  const { file_path, object_name, new_parent } = options;
+  const { file_path, object_name, new_parent, by_id } = options;
 
   if (!existsSync(file_path)) {
     return { success: false, file_path, error: `File not found: ${file_path}` };
@@ -2559,12 +2591,25 @@ export function reparentGameObject(options: ReparentGameObjectOptions): Reparent
     return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
   }
 
-  // Find the child's Transform ID (must be unique for destructive operation)
-  const childResult = requireUniqueTransform(content, object_name);
-  if ('error' in childResult) {
-    return { success: false, file_path, error: childResult.error };
+  // Find the child's Transform ID
+  let childTransformId: number;
+  if (by_id) {
+    const fileId = parseInt(object_name, 10);
+    if (isNaN(fileId)) {
+      return { success: false, file_path, error: `Invalid fileID: "${object_name}" — expected a numeric value with --by-id` };
+    }
+    const resolved = resolveTransformByGameObjectId(content, fileId);
+    if ('error' in resolved) {
+      return { success: false, file_path, error: resolved.error };
+    }
+    childTransformId = resolved.id;
+  } else {
+    const childResult = requireUniqueTransform(content, object_name);
+    if ('error' in childResult) {
+      return { success: false, file_path, error: childResult.error };
+    }
+    childTransformId = childResult.id;
   }
-  const childTransformId = childResult.id;
 
   // Read the child's current m_Father
   const blocks = content.split(/(?=--- !u!)/);
@@ -2584,11 +2629,23 @@ export function reparentGameObject(options: ReparentGameObjectOptions): Reparent
   // Resolve new parent
   let newParentTransformId = 0;
   if (new_parent.toLowerCase() !== 'root') {
-    const parentResult = requireUniqueTransform(content, new_parent);
-    if ('error' in parentResult) {
-      return { success: false, file_path, error: parentResult.error };
+    if (by_id) {
+      const fileId = parseInt(new_parent, 10);
+      if (isNaN(fileId)) {
+        return { success: false, file_path, error: `Invalid parent fileID: "${new_parent}" — expected a numeric value with --by-id, or "root"` };
+      }
+      const resolved = resolveTransformByGameObjectId(content, fileId);
+      if ('error' in resolved) {
+        return { success: false, file_path, error: resolved.error };
+      }
+      newParentTransformId = resolved.id;
+    } else {
+      const parentResult = requireUniqueTransform(content, new_parent);
+      if ('error' in parentResult) {
+        return { success: false, file_path, error: parentResult.error };
+      }
+      newParentTransformId = parentResult.id;
     }
-    newParentTransformId = parentResult.id;
 
     // Prevent self-parenting
     if (newParentTransformId === childTransformId) {
