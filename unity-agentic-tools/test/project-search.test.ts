@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolve } from 'path';
+import { isAbsolute, resolve } from 'path';
 import { walk_project_files, grep_project, search_project } from '../src/project-search';
 import { isNativeModuleAvailable, getNativeWalkProjectFiles, getNativeGrepProject, getNativeBuildGuidCache } from '../src/scanner';
 
@@ -222,7 +222,7 @@ describeIfNative('native vs JS parity', () => {
         expect(nativeFiles.some((f: string) => f.includes('GameManager.cs'))).toBe(true);
         // Verify all paths are absolute
         for (const f of nativeFiles) {
-            expect(f).toMatch(/^\//);
+            expect(isAbsolute(f)).toBe(true);
         }
     });
 
@@ -301,7 +301,7 @@ describeIfNative('native vs JS parity', () => {
         }
         // All values should be relative paths (no leading /)
         for (const path of Object.values(cache)) {
-            expect(path as string).not.toMatch(/^\//);
+            expect(isAbsolute(path as string)).toBe(false);
         }
     });
 
