@@ -236,6 +236,47 @@ else
     failures=$((failures + 1))
 fi
 
+# Test 13: CRLF line ending support
+echo ""
+echo "Test 13: CRLF line endings (Windows-origin files)"
+
+# Convert LF fixture to CRLF at test time — immune to Git normalization
+perl -pe 's/\n/\r\n/' "$fixture_path" > "$tmp_dir/crlf-scene.unity"
+
+# Verify the file actually has CRLF
+if file "$tmp_dir/crlf-scene.unity" | grep -q "CRLF\|CR"; then
+    # Read scene (CRLF) and compare object count to LF original
+    lf_count=$(bun dist/cli.js read scene "$fixture_path" --json 2>/dev/null | grep -c '"name"' || true)
+    crlf_count=$(bun dist/cli.js read scene "$tmp_dir/crlf-scene.unity" --json 2>/dev/null | grep -c '"name"' || true)
+
+    if [ "$crlf_count" -gt 0 ] && [ "$crlf_count" -eq "$lf_count" ]; then
+        echo "✓ CRLF read scene: $crlf_count objects (matches LF)"
+    else
+        echo "✗ CRLF read scene: got $crlf_count objects, expected $lf_count"
+        failures=$((failures + 1))
+    fi
+
+    # Find by name in CRLF file
+    crlf_find=$(bun dist/cli.js find "$tmp_dir/crlf-scene.unity" "Player" --exact --json 2>/dev/null)
+    if echo "$crlf_find" | grep -q '"count": 1'; then
+        echo "✓ CRLF find works"
+    else
+        echo "✗ CRLF find failed"
+        failures=$((failures + 1))
+    fi
+
+    # Inspect in CRLF file
+    if run_cli "test13_inspect" bun dist/cli.js read gameobject "$tmp_dir/crlf-scene.unity" "Player" --json; then
+        echo "✓ CRLF inspect works"
+    else
+        echo "✗ CRLF inspect failed"
+        failures=$((failures + 1))
+    fi
+else
+    echo "✗ Could not create CRLF test fixture"
+    failures=$((failures + 1))
+fi
+
 echo ""
 echo "=== Test Summary ==="
 if [ $failures -eq 0 ]; then

@@ -2,9 +2,10 @@ use napi_derive::napi;
 use rayon::prelude::*;
 use regex::RegexBuilder;
 use std::collections::HashSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+
+use crate::common;
 
 /// Directories to always skip during project walks.
 const SKIP_DIRS: &[&str] = &[
@@ -234,7 +235,7 @@ pub fn grep_project(options: NapiGrepOptions) -> NapiGrepResult {
     let all_matches: Vec<NapiGrepMatch> = text_files
         .par_iter()
         .flat_map(|file_path| {
-            let content = match fs::read_to_string(file_path) {
+            let content = match common::read_unity_file(file_path) {
                 Ok(c) => c,
                 Err(_) => return vec![],
             };
@@ -338,7 +339,7 @@ pub fn build_guid_cache(project_root: String) -> serde_json::Value {
     let pairs: Vec<(String, String)> = meta_files
         .par_iter()
         .filter_map(|meta_path| {
-            let content = fs::read_to_string(meta_path).ok()?;
+            let content = common::read_unity_file(meta_path).ok()?;
             let caps = guid_regex.captures(&content)?;
             let guid = caps.get(1)?.as_str().to_string();
 

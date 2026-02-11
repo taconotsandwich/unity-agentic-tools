@@ -20,6 +20,7 @@ const ROOT = path.resolve(__dirname, '..');
 
 const FILES = {
   source: path.join(ROOT, 'unity-yaml', 'package.json'),
+  rustCore: path.join(ROOT, 'rust-core', 'package.json'),
   plugin: path.join(ROOT, '.claude-plugin', 'plugin.json'),
   marketplace: path.join(ROOT, 'marketplace.json'),
 };
@@ -45,6 +46,11 @@ function getVersions() {
     versions.source = source.version;
   }
 
+  const rustCore = readJSON(FILES.rustCore);
+  if (rustCore) {
+    versions.rustCore = rustCore.version;
+  }
+
   const plugin = readJSON(FILES.plugin);
   if (plugin) {
     versions.plugin = plugin.version;
@@ -65,6 +71,7 @@ function checkVersions() {
 
   console.log('Current versions:');
   console.log(`  unity-yaml/package.json: ${versions.source || 'not found'}`);
+  console.log(`  rust-core/package.json: ${versions.rustCore || 'not found'}`);
   console.log(`  .claude-plugin/plugin.json: ${versions.plugin || 'not found'}`);
   console.log(`  marketplace.json: ${versions.marketplace || 'not found'}`);
 
@@ -101,6 +108,14 @@ function syncVersions(targetVersion) {
     source.version = version;
     writeJSON(FILES.source, source);
     console.log(`  Updated: unity-yaml/package.json`);
+  }
+
+  // Update rust-core/package.json
+  const rustCore = readJSON(FILES.rustCore);
+  if (rustCore) {
+    rustCore.version = version;
+    writeJSON(FILES.rustCore, rustCore);
+    console.log(`  Updated: rust-core/package.json`);
   }
 
   // Update plugin.json

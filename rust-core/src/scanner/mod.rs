@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::common::{Component, FindResult, GameObject, GameObjectDetail, InspectOptions, PrefabInstanceInfo, SceneInspection, ScanOptions, PaginationOptions, PaginatedInspection};
+use crate::common::{self, Component, FindResult, GameObject, GameObjectDetail, InspectOptions, PrefabInstanceInfo, SceneInspection, ScanOptions, PaginationOptions, PaginatedInspection};
 use parser::UnityYamlParser;
 use config::ComponentConfig;
 
@@ -64,7 +64,7 @@ impl Scanner {
             return Vec::new();
         }
 
-        let content = match fs::read_to_string(path) {
+        let content = match common::read_unity_file(path) {
             Ok(c) => c,
             Err(_) => return Vec::new(),
         };
@@ -80,7 +80,7 @@ impl Scanner {
             return Vec::new();
         }
 
-        let content = match fs::read_to_string(path) {
+        let content = match common::read_unity_file(path) {
             Ok(c) => c,
             Err(_) => return Vec::new(),
         };
@@ -127,7 +127,7 @@ impl Scanner {
             return Vec::new();
         }
 
-        let content = match fs::read_to_string(path) {
+        let content = match common::read_unity_file(path) {
             Ok(c) => c,
             Err(_) => return Vec::new(),
         };
@@ -219,7 +219,7 @@ impl Scanner {
             return None;
         }
 
-        let content = match fs::read_to_string(path) {
+        let content = match common::read_unity_file(path) {
             Ok(c) => c,
             Err(_) => return None,
         };
@@ -295,7 +295,7 @@ impl Scanner {
             };
         }
 
-        let content = match fs::read_to_string(path) {
+        let content = match common::read_unity_file(path) {
             Ok(c) => c,
             Err(_) => {
                 return SceneInspection {
@@ -374,7 +374,7 @@ impl Scanner {
             };
         }
 
-        let content = match fs::read_to_string(path) {
+        let content = match common::read_unity_file(path) {
             Ok(c) => c,
             Err(_) => {
                 return PaginatedInspection {
@@ -432,8 +432,9 @@ impl Scanner {
                 }
             }
 
-            // Compute depth for each object
-            detailed.retain(|detail| {
+            // Truncate hierarchy display: clear children for objects at depth >= max_depth
+            // (keeps all objects in the list so total count stays accurate)
+            for detail in detailed.iter_mut() {
                 let transform_id = detail.components.iter()
                     .find(|c| c.class_id == 4 || c.class_id == 224)
                     .map(|c| c.file_id.clone());
@@ -446,7 +447,8 @@ impl Scanner {
                             Some(parent) if parent != "0" && !parent.is_empty() => {
                                 depth += 1;
                                 if depth > max_depth {
-                                    return false;
+                                    detail.children = None;
+                                    break;
                                 }
                                 current = parent.clone();
                             }
@@ -454,8 +456,7 @@ impl Scanner {
                         }
                     }
                 }
-                true
-            });
+            }
         }
 
         let total = detailed.len() as u32;
@@ -501,7 +502,7 @@ impl Scanner {
             return serde_json::json!([]);
         }
 
-        let content = match fs::read_to_string(path) {
+        let content = match common::read_unity_file(path) {
             Ok(c) => c,
             Err(_) => return serde_json::json!([]),
         };
@@ -594,7 +595,7 @@ impl Scanner {
                 if path.is_dir() {
                     self.scan_meta_files(&path, project_root);
                 } else if path.extension().map_or(false, |e| e == "meta") {
-                    if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(content) = common::read_unity_file(&path) {
                         if let Some(guid) = extract_guid_from_meta(&content) {
                             // Remove .meta extension
                             let asset_path = path.with_extension("");

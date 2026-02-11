@@ -307,6 +307,28 @@ describe('Settings Editor', () => {
             expect(result.success).toBe(false);
             expect(result.error).toContain('already exists');
         });
+
+        it('should reject empty sorting layer name', () => {
+            const result = edit_sorting_layer({
+                project_path: temp.project_path,
+                action: 'add',
+                name: '',
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('cannot be empty');
+        });
+
+        it('should reject whitespace-only sorting layer name', () => {
+            const result = edit_sorting_layer({
+                project_path: temp.project_path,
+                action: 'add',
+                name: '   ',
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('cannot be empty');
+        });
     });
 
     describe('edit_settings (generic)', () => {
