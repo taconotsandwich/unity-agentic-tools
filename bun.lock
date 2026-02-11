@@ -38,12 +38,12 @@
       },
       "dependencies": {
         "commander": "^14.0.2",
-        "unity-file-tools": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "^25.0.0",
         "@vitest/ui": "^4.0.16",
         "typescript": "^5.3.0",
+        "unity-file-tools": "workspace:*",
         "vitest": "^4.0.16",
       },
     },
