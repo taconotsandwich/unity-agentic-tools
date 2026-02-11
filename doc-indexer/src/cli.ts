@@ -63,7 +63,7 @@ program
         if (storage.chunk_count() === 0) {
             const output = {
                 results: [],
-                message: 'No documentation indexed. Install Unity docs via Unity Hub > Installs > Modules > Documentation, or run: unity-yaml setup --index-docs',
+                message: 'No documentation indexed. Install Unity docs via Unity Hub > Installs > Modules > Documentation, or run: unity-agentic-tools setup --index-docs',
             };
             console.log(JSON.stringify(output, null, 2));
             return;

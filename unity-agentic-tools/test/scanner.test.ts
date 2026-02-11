@@ -415,7 +415,7 @@ describeIfNative('UnityScanner', () => {
     it('package.json bin field should point to dist/cli.js', async () => {
       const pkg = await import('../package.json');
       expect(pkg.bin).toBeDefined();
-      expect(pkg.bin['unity-yaml']).toBe('./dist/cli.js');
+      expect(pkg.bin['unity-agentic-tools']).toBe('./dist/cli.js');
     });
   });
 });

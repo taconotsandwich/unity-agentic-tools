@@ -54,7 +54,7 @@ jobs:
 
       - name: Run CLI integration tests (Unix)
         if: runner.os != 'Windows'
-        working-directory: ./unity-yaml
+        working-directory: ./unity-agentic-tools
         run: bash test/cli-integration.test.sh
 
       - name: Validate extension configurations (Unix)
@@ -84,7 +84,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           echo "Testing CLI with native module via workspace..."
-          bun unity-yaml/dist/cli.js status
+          bun unity-agentic-tools/dist/cli.js status
           echo "Native module loaded successfully via workspace resolution"
 
       - name: Generate test coverage
@@ -95,9 +95,9 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v4
         with:
-          files: ./unity-yaml/coverage/coverage-final.json
+          files: ./unity-agentic-tools/coverage/coverage-final.json
           flags: unittests
-          name: unity-yaml-coverage
+          name: unity-agentic-tools-coverage
           fail_ci_if_error: false
           verbose: true
         env:

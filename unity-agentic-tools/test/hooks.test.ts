@@ -38,7 +38,7 @@ describe('detect_unity.js', () => {
         });
         expect(result.exitCode).toBe(0);
         const data = JSON.parse(result.stdout);
-        expect(data.context).toContain('unity-yaml CLI');
+        expect(data.context).toContain('unity-agentic-tools CLI');
     });
 
     it('should inject context when prompt mentions .prefab file', () => {
@@ -47,7 +47,7 @@ describe('detect_unity.js', () => {
         });
         expect(result.exitCode).toBe(0);
         const data = JSON.parse(result.stdout);
-        expect(data.context).toContain('unity-yaml CLI');
+        expect(data.context).toContain('unity-agentic-tools CLI');
     });
 
     it('should pass through unchanged when no Unity files in prompt', () => {
@@ -213,7 +213,7 @@ describe('unity_context_inject.js', () => {
         expect(result.exitCode).toBe(0);
         const data = JSON.parse(result.stdout);
         expect(data.context).toContain('Main.unity');
-        expect(data.context).toContain('unity-yaml CLI');
+        expect(data.context).toContain('unity-agentic-tools CLI');
     });
 
     it('should not inject context for Read on a .txt file', () => {

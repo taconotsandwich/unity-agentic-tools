@@ -21,7 +21,7 @@ bun run test:integration  # CLI integration tests (bash)
 ## Dev Setup
 
 ```bash
-cd unity-yaml && npm link   # Register unity-yaml CLI globally (one-time)
+cd unity-agentic-tools && npm link   # Register unity-agentic-tools CLI globally (one-time)
 ```
 
 ## Architecture
@@ -29,9 +29,9 @@ cd unity-yaml && npm link   # Register unity-yaml CLI globally (one-time)
 ```
 .claude-plugin/     Plugin manifest (autodiscovers commands/, skills/)
 commands/           Slash commands for Claude Code
-skills/             Agent skills (unity-yaml parsing instructions)
+skills/             Agent skills (unity-agentic-tools parsing instructions)
 hooks/              Event handlers (detect_unity.js, pre/post validation)
-unity-yaml/         TypeScript CLI + Vitest tests
+unity-agentic-tools/         TypeScript CLI + Vitest tests
 rust-core/          Native Rust module (napi-rs)
 doc-indexer/        Documentation indexing module
 ```

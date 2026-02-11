@@ -1,6 +1,6 @@
-# unity-yaml
+# unity-agentic-tools
 
-Core parsing engine for the unity-agentic-tools plugin. Provides fast, token-efficient Unity YAML parsing.
+Token-efficient CLI and library for parsing, analyzing, and editing Unity YAML files. Powered by a native Rust backend.
 
 ## Overview
 
