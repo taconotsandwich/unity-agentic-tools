@@ -65,6 +65,7 @@ ts/
 
 # Native binaries
 *.node
+unity-yaml/native/
 
 # Rust
 target/

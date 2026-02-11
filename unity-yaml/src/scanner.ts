@@ -1,8 +1,8 @@
 import { createRequire } from 'module';
 import { AssetObject, FindResult, GameObject, GameObjectDetail, GameObjectWithComponents, SceneInspection, InspectOptions, ScanOptions, NativeScanner, NativeScannerInstance, PaginationOptions, PaginatedInspection } from './types';
 
-// Load the native Rust module via workspace dependency
-// Use createRequire to prevent the bundler from inlining the native .node binary
+// Load the native Rust module
+// Try bundled native/ directory first (npm install), fall back to workspace link (dev)
 let RustScanner: NativeScanner | null = null;
 let nativeModuleError: string | null = null;
 
@@ -13,7 +13,14 @@ let nativeBuildGuidCache: ((projectRoot: string) => any) | null = null;
 
 try {
   const nativeRequire = createRequire(import.meta.url || __filename);
-  const rustModule = nativeRequire('unity-file-tools');
+  let rustModule: any;
+  try {
+    // Published package: native/ directory bundled alongside dist/
+    rustModule = nativeRequire('../native/index.js');
+  } catch {
+    // Dev workspace: resolve via workspace link
+    rustModule = nativeRequire('unity-file-tools');
+  }
   RustScanner = rustModule.Scanner;
   nativeWalkProjectFiles = rustModule.walkProjectFiles || null;
   nativeGrepProject = rustModule.grepProject || null;

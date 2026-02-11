@@ -126,27 +126,30 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Install rust-core dependencies
-        working-directory: ./rust-core
+      - name: Install dependencies
         run: bun install
+
+      - name: Build TypeScript
+        run: bun run build
 
       - name: Download all native binaries
         uses: actions/download-artifact@v4
         with:
-          path: rust-core/artifacts
+          path: artifacts
 
-      - name: List downloaded artifacts
-        run: find rust-core/artifacts -name "*.node" -ls
-
-      - name: Move binaries into package root
+      - name: Bundle native module into unity-yaml
         run: |
-          for dir in rust-core/artifacts/*/; do
-            cp "$dir"*.node rust-core/
+          mkdir -p unity-yaml/native
+          cp rust-core/index.js unity-yaml/native/
+          cp rust-core/index.d.ts unity-yaml/native/
+          for dir in artifacts/*/; do
+            cp "$dir"*.node unity-yaml/native/
           done
-          ls -la rust-core/*.node
+          echo "Bundled native files:"
+          ls -la unity-yaml/native/
 
       - name: Publish package
-        working-directory: ./rust-core
+        working-directory: ./unity-yaml
         run: npm publish --provenance --access public
 
       - name: Extract version from tag
@@ -185,7 +188,7 @@ jobs:
 
             ### npm
             ```bash
-            bun add unity-file-tools
+            bun add -g unity-yaml
             ```
 
             ### From Source
