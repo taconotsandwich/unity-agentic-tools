@@ -260,8 +260,9 @@ export function move_scene(projectPath: string, scenePath: string, newPosition: 
         guid: s.guid || '',
     }));
 
-    // Remove from old position and insert at new position
+    // Remove from old position, re-enable if disabled, and insert at new position
     const [movedScene] = scenes.splice(sceneIndex, 1);
+    movedScene.enabled = true;
     scenes.splice(newPosition, 0, movedScene);
 
     // Write back
