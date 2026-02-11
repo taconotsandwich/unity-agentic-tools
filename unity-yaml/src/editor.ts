@@ -272,8 +272,35 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
     };
   }
 
-  // Use applyModification for all path types (simple, dotted, array)
+  // Validate same-file fileID references (no guid = same file). Allow {fileID: 0} (null ref).
+  const sameFileRefMatch = new_value.match(/^\{fileID:\s*(\d+)\}$/);
+  if (sameFileRefMatch) {
+    const refId = parseInt(sameFileRefMatch[1], 10);
+    if (refId !== 0 && !new RegExp(`--- !u!\\d+ &${refId}\\b`).test(content)) {
+      return {
+        success: false,
+        file_path,
+        error: `fileID ${refId} does not exist in this file`
+      };
+    }
+  }
+
+  // Type-validate the new value against the current value
   const targetBlock = blocks[targetBlockIndex];
+  const currentValue = extract_current_value(targetBlock, normalizedProperty)
+    ?? extract_current_value(targetBlock, property.startsWith('m_') ? property.slice(2) : property);
+  if (currentValue !== null) {
+    const typeError = validate_value_type(currentValue, new_value);
+    if (typeError) {
+      return {
+        success: false,
+        file_path,
+        error: typeError
+      };
+    }
+  }
+
+  // Use applyModification for all path types (simple, dotted, array)
   let updatedBlock = applyModification(targetBlock, normalizedProperty, new_value, '{fileID: 0}');
 
   // If applyModification didn't change anything, try without m_ prefix
@@ -283,13 +310,23 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
     updatedBlock = applyModification(targetBlock, withoutPrefix, new_value, '{fileID: 0}');
   }
 
-  // If still unchanged and it's a simple path, add the property
-  if (updatedBlock === targetBlock && !property.includes('.') && !property.includes('Array')) {
-    const addProp = property.startsWith('m_') ? property : 'm_' + property;
-    updatedBlock = targetBlock.replace(
-      /(\n)(--- !u!|$)/,
-      `\n  ${addProp}: ${new_value}$1$2`
-    );
+  // If still unchanged, either property doesn't exist or value is already set
+  if (updatedBlock === targetBlock) {
+    // If we found a current value earlier, the property exists — this is a no-op (value already matches)
+    if (currentValue !== null) {
+      return {
+        success: true,
+        file_path,
+        file_id,
+        class_id: classId,
+        bytes_written: 0
+      };
+    }
+    return {
+      success: false,
+      file_path,
+      error: `Property "${property}" not found in component ${file_id} (class ${classId}). Use inspect to view available properties.`
+    };
   }
 
   blocks[targetBlockIndex] = updatedBlock;
@@ -1614,6 +1651,68 @@ function remapFileIds(blockText: string, idMap: Map<number, number>): string {
   });
 
   return result;
+}
+
+/**
+ * Validate that new_value is type-compatible with the current value.
+ * Returns an error message string if invalid, or null if valid.
+ */
+function validate_value_type(current_value: string, new_value: string): string | null {
+    const current = current_value.trim();
+    const incoming = new_value.trim();
+
+    // 1. Reference: current is {fileID:...} -> new must also be {fileID:...}
+    if (/^\{fileID:/.test(current)) {
+        if (!/^\{fileID:/.test(incoming)) {
+            return `Expected a reference value ({fileID: ...}), got "${incoming}"`;
+        }
+        return null;
+    }
+
+    // 2. Compound: current is an inline object like {x: 0, y: 1} -> reject scalar
+    if (/^\{.+:.+\}$/.test(current)) {
+        if (!incoming.startsWith('{')) {
+            return `Expected a compound value (e.g. {x: ..., y: ...}), got "${incoming}"`;
+        }
+        return null;
+    }
+
+    // 3. Numeric: current is a number -> new must also be numeric
+    if (/^-?\d+(\.\d+)?$/.test(current)) {
+        if (!/^-?\d+(\.\d+)?$/.test(incoming)) {
+            return `Expected numeric value, got "${incoming}"`;
+        }
+        return null;
+    }
+
+    // 4. String/other: accept anything
+    return null;
+}
+
+/**
+ * Extract the current value of a property from a Unity YAML block.
+ * Returns the value string or null if not found.
+ */
+function extract_current_value(block: string, propertyPath: string): string | null {
+    if (propertyPath.includes('.') && !propertyPath.includes('Array')) {
+        // Dotted path (e.g., m_LocalPosition.x) — sub-field of inline object
+        const parts = propertyPath.split('.');
+        const rootProp = parts[0];
+        const subField = parts.slice(1).join('.');
+        const rootPattern = new RegExp(`^\\s*${rootProp}:\\s*(.*)$`, 'm');
+        const rootMatch = block.match(rootPattern);
+        if (!rootMatch) return null;
+        const objStr = rootMatch[1].trim();
+        // Extract sub-field value from inline object like {x: 0, y: 1, z: -10}
+        const subPattern = new RegExp(`${subField}:\\s*([^,}]+)`);
+        const subMatch = objStr.match(subPattern);
+        return subMatch ? subMatch[1].trim() : null;
+    }
+
+    // Simple path
+    const propPattern = new RegExp(`^\\s*${propertyPath}:\\s*(.*)$`, 'm');
+    const match = block.match(propPattern);
+    return match ? match[1].trim() : null;
 }
 
 /**

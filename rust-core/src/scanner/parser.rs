@@ -178,4 +178,36 @@ MonoBehaviour:
         let refs = UnityYamlParser::parse_component_refs(block);
         assert_eq!(refs, vec!["111", "222", "333"]);
     }
+
+    /// Verify that pre-normalized content (CRLF → LF) parses correctly.
+    /// This simulates what read_unity_file does before content reaches the parser.
+    #[test]
+    fn test_extract_gameobjects_after_crlf_normalization() {
+        // Simulate a Windows-origin Unity file with CRLF line endings
+        let crlf_content = "--- !u!1 &1234567890\r\nGameObject:\r\n  m_ObjectHideFlags: 0\r\n  m_Name: CRLFObject\r\n  m_IsActive: 1\r\n  m_Layer: 0\r\n";
+        // This would fail without normalization
+        let normalized = crlf_content.replace("\r\n", "\n");
+        let objects = UnityYamlParser::extract_gameobjects(&normalized);
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0].name, "CRLFObject");
+        assert!(objects[0].active);
+    }
+
+    #[test]
+    fn test_parse_all_blocks_after_crlf_normalization() {
+        let crlf_content = "--- !u!1 &100\r\nGameObject:\r\n  m_Name: Obj1\r\n--- !u!114 &200\r\nMonoBehaviour:\r\n  m_Name: Script1\r\n";
+        let normalized = crlf_content.replace("\r\n", "\n");
+        let blocks = UnityYamlParser::parse_all_blocks(&normalized);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].0, 1);   // class_id
+        assert_eq!(blocks[1].0, 114); // class_id
+    }
+
+    /// Confirm that raw CRLF content FAILS without normalization (documents the bug).
+    #[test]
+    fn test_extract_gameobjects_fails_on_raw_crlf() {
+        let crlf_content = "--- !u!1 &1234567890\r\nGameObject:\r\n  m_ObjectHideFlags: 0\r\n  m_Name: CRLFObject\r\n  m_IsActive: 1\r\n";
+        let objects = UnityYamlParser::extract_gameobjects(crlf_content);
+        assert_eq!(objects.len(), 0, "Raw CRLF should fail to parse — regex uses literal \\n");
+    }
 }

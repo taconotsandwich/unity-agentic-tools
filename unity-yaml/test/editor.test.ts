@@ -2445,7 +2445,7 @@ describe('editComponentByFileId', () => {
         expect(transformBlock![0]).toContain('serializedVersion: 99');
     });
 
-    it('should append a property that does not exist', () => {
+    it('should return error for non-existent property instead of creating it', () => {
         const result = editComponentByFileId({
             file_path: temp_fixture.temp_path,
             file_id: '1847675924',
@@ -2453,12 +2453,54 @@ describe('editComponentByFileId', () => {
             new_value: 'hello'
         });
 
-        expect(result.success).toBe(true);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
 
-        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-        const transformBlock = content.match(/--- !u!4 &1847675924[\s\S]*?(?=--- !u!|$)/);
-        expect(transformBlock).not.toBeNull();
-        expect(transformBlock![0]).toContain('m_NewCustomProp: hello');
+    it('should reject invalid same-file fileID reference', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'm_Father',
+            new_value: '{fileID: 9999999}'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('fileID 9999999 does not exist');
+    });
+
+    it('should allow fileID 0 (null reference)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'm_Father',
+            new_value: '{fileID: 0}'
+        });
+
+        expect(result.success).toBe(true);
+    });
+
+    it('should allow cross-file reference (contains guid)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'm_Father',
+            new_value: '{fileID: 11400000, guid: abcdef1234567890abcdef1234567890, type: 2}'
+        });
+
+        // Cross-file refs skip same-file validation — may fail at property level but not fileID validation
+        expect(result.error || '').not.toContain('does not exist in this file');
+    });
+
+    it('should allow valid same-file fileID reference', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'm_Father',
+            new_value: '{fileID: 508316495}'
+        });
+
+        expect(result.success).toBe(true);
     });
 
     it('should return error for non-existent file', () => {
@@ -2483,6 +2525,69 @@ describe('editComponentByFileId', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('not found');
+    });
+
+    // ========== Value-Type Validation Tests ==========
+
+    it('should reject string value for numeric property', () => {
+        // m_ObjectHideFlags is 0 (numeric) in the Transform block
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'm_ObjectHideFlags',
+            new_value: 'hello'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('numeric');
+    });
+
+    it('should reject scalar value for reference property', () => {
+        // m_GameObject is {fileID: ...} in the Transform block
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'm_GameObject',
+            new_value: '42'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('reference');
+    });
+
+    it('should allow reference-for-reference replacement', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'm_Father',
+            new_value: '{fileID: 0}'
+        });
+
+        expect(result.success).toBe(true);
+    });
+
+    it('should reject string for dotted sub-field (numeric)', () => {
+        // m_LocalPosition.x is a number
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'm_LocalPosition.x',
+            new_value: 'abc'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('numeric');
+    });
+
+    it('should allow number-for-number replacement', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'm_ObjectHideFlags',
+            new_value: '1'
+        });
+
+        expect(result.success).toBe(true);
     });
 });
 

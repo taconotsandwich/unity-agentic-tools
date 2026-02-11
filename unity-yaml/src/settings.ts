@@ -559,6 +559,16 @@ export function edit_layer(options: LayerEditOptions): EditSettingsResult {
  */
 export function edit_sorting_layer(options: SortingLayerEditOptions): EditSettingsResult {
     const { project_path, action, name } = options;
+
+    if (!name || !name.trim()) {
+        return {
+            success: false,
+            project_path,
+            setting: 'TagManager',
+            error: 'Sorting layer name cannot be empty',
+        };
+    }
+
     const file_path = resolve_setting_path(project_path, 'TagManager');
 
     if (!existsSync(file_path)) {
