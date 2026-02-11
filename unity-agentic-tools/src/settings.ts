@@ -503,6 +503,16 @@ export function edit_layer(options: LayerEditOptions): EditSettingsResult {
         };
     }
 
+    const nameError = validate_name(name, 'Layer name');
+    if (nameError) {
+        return {
+            success: false,
+            project_path,
+            setting: 'TagManager',
+            error: nameError,
+        };
+    }
+
     let content: string;
     try {
         content = read_setting_file(file_path);
