@@ -2110,6 +2110,15 @@ describe('duplicateGameObject', () => {
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content).toContain('m_Name: DupParentCopy');
+
+        // cloned_objects should list all cloned GameObjects with names and fileIDs
+        expect(result.cloned_objects).toBeDefined();
+        expect(result.cloned_objects!.length).toBe(2); // DupParentCopy + DupChild
+        const names = result.cloned_objects!.map(o => o.name).sort();
+        expect(names).toEqual(['DupChild', 'DupParentCopy']);
+        for (const obj of result.cloned_objects!) {
+            expect(obj.file_id).toBeGreaterThan(0);
+        }
     });
 
     it('should use default "(1)" name when no new_name provided', () => {
