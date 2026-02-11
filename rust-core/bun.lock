@@ -7,6 +7,12 @@
       "devDependencies": {
         "@napi-rs/cli": "^2.18.0",
       },
+      "optionalDependencies": {
+        "unity-agentic-tool-darwin-arm64": "0.1.0",
+        "unity-agentic-tool-darwin-x64": "0.1.0",
+        "unity-agentic-tool-linux-x64-gnu": "0.1.0",
+        "unity-agentic-tool-win32-x64-msvc": "0.1.0",
+      },
     },
   },
   "packages": {

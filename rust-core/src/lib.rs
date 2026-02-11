@@ -4,6 +4,7 @@ pub mod common;
 pub mod scanner;
 pub mod indexer;
 pub mod embeddings;
+pub mod walker;
 
 use napi_derive::napi;
 

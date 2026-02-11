@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::common::{Component, FindResult, GameObject, GameObjectDetail, InspectOptions, PrefabInstanceInfo, SceneInspection, ScanOptions, PaginationOptions, PaginatedInspection};
+use crate::common::{self, Component, FindResult, GameObject, GameObjectDetail, InspectOptions, PrefabInstanceInfo, SceneInspection, ScanOptions, PaginationOptions, PaginatedInspection};
 use parser::UnityYamlParser;
 use config::ComponentConfig;
 
@@ -64,7 +64,7 @@ impl Scanner {
             return Vec::new();
         }
 
-        let content = match fs::read_to_string(path) {
+        let content = match common::read_unity_file(path) {
             Ok(c) => c,
             Err(_) => return Vec::new(),
         };
@@ -80,7 +80,7 @@ impl Scanner {
             return Vec::new();
         }
 
-        let content = match fs::read_to_string(path) {
+        let content = match common::read_unity_file(path) {
             Ok(c) => c,
             Err(_) => return Vec::new(),
         };
@@ -94,7 +94,14 @@ impl Scanner {
             .into_iter()
             .map(|obj| {
                 let components = self.get_components_for_gameobject(&content, &obj.file_id, &file);
-                self.build_gameobject_output(&obj, &components, verbose, false)
+                let mut output = self.build_gameobject_output(&obj, &components, verbose, false);
+
+                // Always include tag and layer for search filtering support
+                let (tag, layer, _, _) = gameobject::extract_metadata(&content, &obj.file_id);
+                output["tag"] = serde_json::json!(tag);
+                output["layer"] = serde_json::json!(layer);
+
+                output
             })
             .collect();
 
@@ -127,7 +134,7 @@ impl Scanner {
             return Vec::new();
         }
 
-        let content = match fs::read_to_string(path) {
+        let content = match common::read_unity_file(path) {
             Ok(c) => c,
             Err(_) => return Vec::new(),
         };
@@ -138,23 +145,38 @@ impl Scanner {
         let prefab_instances = prefab::extract_prefab_instances(&content, &self.guid_cache);
 
         if fuzzy {
+            let glob_re = glob_to_regex(&pattern);
             let lower_pattern = pattern.to_lowercase();
 
             let mut matches: Vec<FindResult> = Vec::new();
 
             for go in &gameobjects {
-                let lower_name = go.name.to_lowercase();
-                if lower_name.contains(&lower_pattern) {
-                    let score = calculate_fuzzy_score(&lower_pattern, &lower_name);
-                    matches.push(FindResult::from_game_object(go, Some(score)));
+                if let Some(ref re) = glob_re {
+                    if re.is_match(&go.name) {
+                        let score = 80.0; // glob match score
+                        matches.push(FindResult::from_game_object(go, Some(score)));
+                    }
+                } else {
+                    let lower_name = go.name.to_lowercase();
+                    if lower_name.contains(&lower_pattern) {
+                        let score = calculate_fuzzy_score(&lower_pattern, &lower_name);
+                        matches.push(FindResult::from_game_object(go, Some(score)));
+                    }
                 }
             }
 
             for pi in &prefab_instances {
-                let lower_name = pi.name.to_lowercase();
-                if lower_name.contains(&lower_pattern) {
-                    let score = calculate_fuzzy_score(&lower_pattern, &lower_name);
-                    matches.push(FindResult::from_prefab_instance(pi, Some(score)));
+                if let Some(ref re) = glob_re {
+                    if re.is_match(&pi.name) {
+                        let score = 80.0;
+                        matches.push(FindResult::from_prefab_instance(pi, Some(score)));
+                    }
+                } else {
+                    let lower_name = pi.name.to_lowercase();
+                    if lower_name.contains(&lower_pattern) {
+                        let score = calculate_fuzzy_score(&lower_pattern, &lower_name);
+                        matches.push(FindResult::from_prefab_instance(pi, Some(score)));
+                    }
                 }
             }
 
@@ -167,16 +189,27 @@ impl Scanner {
 
             matches
         } else {
+            let glob_re = glob_to_regex(&pattern);
             let mut matches: Vec<FindResult> = Vec::new();
 
             for go in &gameobjects {
-                if go.name == pattern {
+                let matched = if let Some(ref re) = glob_re {
+                    re.is_match(&go.name)
+                } else {
+                    go.name == pattern
+                };
+                if matched {
                     matches.push(FindResult::from_game_object(go, None));
                 }
             }
 
             for pi in &prefab_instances {
-                if pi.name == pattern {
+                let matched = if let Some(ref re) = glob_re {
+                    re.is_match(&pi.name)
+                } else {
+                    pi.name == pattern
+                };
+                if matched {
                     matches.push(FindResult::from_prefab_instance(pi, None));
                 }
             }
@@ -193,7 +226,7 @@ impl Scanner {
             return None;
         }
 
-        let content = match fs::read_to_string(path) {
+        let content = match common::read_unity_file(path) {
             Ok(c) => c,
             Err(_) => return None,
         };
@@ -207,21 +240,56 @@ impl Scanner {
             identifier.clone()
         } else {
             let matches = self.find_by_name(options.file.clone(), identifier.clone(), true);
+            if matches.len() > 1 {
+                let ids: Vec<String> = matches.iter().map(|m| m.file_id.clone()).collect();
+                return Some(serde_json::json!({
+                    "error": format!("Multiple GameObjects named \"{}\" found (fileIDs: {}). Use numeric fileID.", identifier, ids.join(", ")),
+                    "is_error": true
+                }));
+            }
             matches.first()?.file_id.clone()
         };
+
+        let include_properties = options.include_properties.unwrap_or(false);
 
         // Check if target_file_id matches a PrefabInstance
         let prefabs = prefab::extract_prefab_instances(&content, &self.guid_cache);
         if let Some(pi) = prefabs.iter().find(|p| p.file_id == target_file_id) {
-            return Some(self.build_prefab_instance_output(pi));
+            return Some(self.build_prefab_instance_output(pi, Some(&content), include_properties));
         }
 
         let gameobjects = UnityYamlParser::extract_gameobjects(&content);
-        let target_obj = gameobjects.iter().find(|o| o.file_id == target_file_id)?;
+        let target_obj = match gameobjects.iter().find(|o| o.file_id == target_file_id) {
+            Some(obj) => obj,
+            None => {
+                // Check if the ID matches any block (could be a non-GO or stripped GO)
+                let block_pattern = format!("--- !u!(\\d+) &{}(?: stripped)?", target_file_id);
+                if let Ok(re) = regex::Regex::new(&block_pattern) {
+                    if let Some(caps) = re.captures(&content) {
+                        let class_id: u32 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
+                        let full_match = caps.get(0).map_or("", |m| m.as_str());
+                        let is_stripped = full_match.contains("stripped");
+
+                        if class_id == 1 && is_stripped {
+                            return Some(serde_json::json!({
+                                "error": format!("ID {} is a stripped PrefabInstance GameObject — it has no inspectable data. Use the PrefabInstance ID instead, or unpack the prefab first.", target_file_id),
+                                "is_error": true
+                            }));
+                        }
+
+                        let type_name = class_id_to_name(class_id);
+                        return Some(serde_json::json!({
+                            "error": format!("ID {} is a {} (class_id {}), not a GameObject. Use the parent GameObject's ID or name instead.", target_file_id, type_name, class_id),
+                            "is_error": true
+                        }));
+                    }
+                }
+                return None;
+            }
+        };
 
         let components = self.get_components_for_gameobject(&content, &target_file_id, &options.file);
         let verbose = options.verbose.unwrap_or(false);
-        let include_properties = options.include_properties.unwrap_or(false);
 
         let detail = self.extract_gameobject_details(&content, target_obj, &components);
 
@@ -241,7 +309,7 @@ impl Scanner {
             };
         }
 
-        let content = match fs::read_to_string(path) {
+        let content = match common::read_unity_file(path) {
             Ok(c) => c,
             Err(_) => {
                 return SceneInspection {
@@ -308,7 +376,7 @@ impl Scanner {
         let path = Path::new(&file);
         if !path.exists() {
             return PaginatedInspection {
-                file,
+                file: file.clone(),
                 total: 0,
                 cursor,
                 next_cursor: None,
@@ -316,14 +384,15 @@ impl Scanner {
                 page_size,
                 gameobjects: Vec::new(),
                 prefab_instances: None,
+                error: Some(format!("File not found: {}", file)),
             };
         }
 
-        let content = match fs::read_to_string(path) {
+        let content = match common::read_unity_file(path) {
             Ok(c) => c,
             Err(_) => {
                 return PaginatedInspection {
-                    file,
+                    file: file.clone(),
                     total: 0,
                     cursor,
                     next_cursor: None,
@@ -331,6 +400,7 @@ impl Scanner {
                     page_size,
                     gameobjects: Vec::new(),
                     prefab_instances: None,
+                    error: Some(format!("Cannot read file: {}", file)),
                 }
             }
         };
@@ -360,13 +430,12 @@ impl Scanner {
             })
             .collect();
 
-        // Apply max_depth filter: compute depth from parent_transform_id chains
+        // Apply max_depth filter: exclude objects deeper than max_depth
         if max_depth < 50 {
             // Build a map of transform_id → parent_transform_id
             let mut parent_map: HashMap<String, String> = HashMap::new();
             for detail in &detailed {
                 if let Some(ref parent_id) = detail.parent_transform_id {
-                    // Find this object's transform file_id from its components
                     for comp in &detail.components {
                         if comp.class_id == 4 || comp.class_id == 224 {
                             parent_map.insert(comp.file_id.clone(), parent_id.clone());
@@ -376,26 +445,38 @@ impl Scanner {
                 }
             }
 
-            // Compute depth for each object
-            detailed.retain(|detail| {
+            // Compute depth by walking parent chain; stop early once past limit
+            let compute_depth = |tid: &str| -> u32 {
+                let mut depth = 0u32;
+                let mut current = tid.to_string();
+                loop {
+                    match parent_map.get(&current) {
+                        Some(parent) if parent != "0" && !parent.is_empty() => {
+                            depth += 1;
+                            if depth > max_depth {
+                                break;
+                            }
+                            current = parent.clone();
+                        }
+                        _ => break,
+                    }
+                }
+                depth
+            };
+
+            // Remove objects deeper than max_depth; clear children at the boundary
+            detailed.retain_mut(|detail| {
                 let transform_id = detail.components.iter()
                     .find(|c| c.class_id == 4 || c.class_id == 224)
                     .map(|c| c.file_id.clone());
 
                 if let Some(tid) = transform_id {
-                    let mut depth = 0u32;
-                    let mut current = tid;
-                    loop {
-                        match parent_map.get(&current) {
-                            Some(parent) if parent != "0" && !parent.is_empty() => {
-                                depth += 1;
-                                if depth > max_depth {
-                                    return false;
-                                }
-                                current = parent.clone();
-                            }
-                            _ => break,
-                        }
+                    let depth = compute_depth(&tid);
+                    if depth > max_depth {
+                        return false;
+                    }
+                    if depth == max_depth {
+                        detail.children = None;
                     }
                 }
                 true
@@ -433,7 +514,86 @@ impl Scanner {
             page_size,
             gameobjects: page,
             prefab_instances,
+            error: None,
         }
+    }
+
+    /// Read a .asset file and return its root objects with properties
+    #[napi]
+    pub fn read_asset(&mut self, file: String) -> serde_json::Value {
+        let path = Path::new(&file);
+        if !path.exists() {
+            return serde_json::json!([]);
+        }
+
+        let content = match common::read_unity_file(path) {
+            Ok(c) => c,
+            Err(_) => return serde_json::json!([]),
+        };
+
+        self.ensure_guid_resolver(&file);
+
+        let blocks = UnityYamlParser::extract_asset_objects(&content);
+        let mut objects = Vec::new();
+
+        for (class_id, file_id, block_content) in &blocks {
+            // Extract m_Name from block
+            let name = regex::Regex::new(r"m_Name:\s*(.+)")
+                .ok()
+                .and_then(|re| re.captures(block_content))
+                .and_then(|caps| caps.get(1))
+                .map(|m| m.as_str().trim().to_string())
+                .unwrap_or_default();
+
+            // Determine type name from block (first line after header like "MonoBehaviour:")
+            let type_name = regex::Regex::new(r"^([A-Za-z][A-Za-z0-9_]*):")
+                .ok()
+                .and_then(|re| re.captures(block_content))
+                .and_then(|caps| caps.get(1))
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_else(|| format!("ClassID_{}", class_id));
+
+            // Extract script GUID for MonoBehaviour (class_id 114)
+            let mut script_guid: Option<String> = None;
+            let mut script_path: Option<String> = None;
+
+            if *class_id == 114 {
+                let guid_re = regex::Regex::new(r"m_Script:\s*\{[^}]*guid:\s*([a-f0-9]{32})").ok();
+                if let Some(re) = guid_re {
+                    if let Some(caps) = re.captures(block_content) {
+                        if let Some(guid_match) = caps.get(1) {
+                            let guid = guid_match.as_str().to_string();
+                            script_guid = Some(guid.clone());
+                            script_path = self.guid_cache.get(&guid).cloned();
+                        }
+                    }
+                }
+            }
+
+            // Extract properties using existing infrastructure
+            // We need the full content with header for extract_properties
+            let full_block = format!("--- !u!{} &{}\n{}", class_id, file_id, block_content);
+            let properties = component::extract_properties(&full_block, file_id, *class_id, &self.guid_cache);
+
+            let mut obj = serde_json::json!({
+                "class_id": class_id,
+                "file_id": file_id,
+                "type_name": type_name,
+                "name": name,
+                "properties": properties,
+            });
+
+            if let Some(ref guid) = script_guid {
+                obj["script_guid"] = serde_json::json!(guid);
+            }
+            if let Some(ref path) = script_path {
+                obj["script_path"] = serde_json::json!(path);
+            }
+
+            objects.push(obj);
+        }
+
+        serde_json::json!(objects)
     }
 
     fn ensure_guid_resolver(&mut self, file: &str) {
@@ -459,7 +619,7 @@ impl Scanner {
                 if path.is_dir() {
                     self.scan_meta_files(&path, project_root);
                 } else if path.extension().map_or(false, |e| e == "meta") {
-                    if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(content) = common::read_unity_file(&path) {
                         if let Some(guid) = extract_guid_from_meta(&content) {
                             // Remove .meta extension
                             let asset_path = path.with_extension("");
@@ -557,7 +717,7 @@ impl Scanner {
         output
     }
 
-    fn build_prefab_instance_output(&self, pi: &PrefabInstanceInfo) -> serde_json::Value {
+    fn build_prefab_instance_output(&self, pi: &PrefabInstanceInfo, content: Option<&str>, include_properties: bool) -> serde_json::Value {
         let mut output = serde_json::json!({
             "type": "PrefabInstance",
             "name": pi.name,
@@ -567,6 +727,23 @@ impl Scanner {
         });
         if let Some(ref src) = pi.source_prefab {
             output["source_prefab"] = serde_json::json!(src);
+        }
+        if include_properties {
+            if let Some(content) = content {
+                if let Some(block) = prefab::extract_prefab_block(content, &pi.file_id) {
+                    let mods = prefab::extract_modifications(&block);
+                    // Group by target_file_id
+                    let mut grouped: std::collections::HashMap<String, Vec<serde_json::Value>> = std::collections::HashMap::new();
+                    for m in &mods {
+                        let entry = grouped.entry(m.target_file_id.clone()).or_default();
+                        entry.push(serde_json::json!({
+                            "propertyPath": m.property_path,
+                            "value": m.value,
+                        }));
+                    }
+                    output["modifications"] = serde_json::json!(grouped);
+                }
+            }
         }
         output
     }
@@ -618,6 +795,28 @@ impl Scanner {
     }
 }
 
+/// Convert a glob pattern (with `*` and `?`) to a case-insensitive regex.
+/// Returns None if the pattern contains no glob characters.
+fn glob_to_regex(pattern: &str) -> Option<regex::Regex> {
+    if !pattern.contains('*') && !pattern.contains('?') {
+        return None;
+    }
+    let mut regex_str = String::from("(?i)^");
+    for ch in pattern.chars() {
+        match ch {
+            '*' => regex_str.push_str(".*"),
+            '?' => regex_str.push('.'),
+            '.' | '+' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '\\' => {
+                regex_str.push('\\');
+                regex_str.push(ch);
+            }
+            _ => regex_str.push(ch),
+        }
+    }
+    regex_str.push('$');
+    regex::Regex::new(&regex_str).ok()
+}
+
 fn calculate_fuzzy_score(pattern: &str, text: &str) -> f64 {
     if pattern == text {
         return 100.0;
@@ -653,6 +852,43 @@ fn find_project_root(file_path: &str) -> Option<String> {
     }
 }
 
+/// Map common Unity class IDs to human-readable names.
+fn class_id_to_name(class_id: u32) -> &'static str {
+    match class_id {
+        1 => "GameObject",
+        2 => "Component",
+        4 => "Transform",
+        8 => "Behaviour",
+        12 => "ParticleAnimator",
+        20 => "Camera",
+        23 => "MeshRenderer",
+        25 => "Renderer",
+        33 => "MeshFilter",
+        54 => "Rigidbody",
+        64 => "MeshCollider",
+        65 => "BoxCollider",
+        82 => "AudioSource",
+        108 => "Light",
+        111 => "Animation",
+        114 => "MonoBehaviour",
+        115 => "MonoScript",
+        120 => "LineRenderer",
+        124 => "Behaviour",
+        135 => "SphereCollider",
+        136 => "CapsuleCollider",
+        137 => "SkinnedMeshRenderer",
+        198 => "ParticleSystem",
+        205 => "LODGroup",
+        212 => "SpriteRenderer",
+        222 => "CanvasRenderer",
+        223 => "Canvas",
+        224 => "RectTransform",
+        225 => "CanvasGroup",
+        1001 => "PrefabInstance",
+        _ => "Unknown",
+    }
+}
+
 fn extract_guid_from_meta(content: &str) -> Option<String> {
     let re = regex::Regex::new(r"^guid:\s*([a-f0-9]{32})").ok()?;
     for line in content.lines() {
@@ -661,4 +897,166 @@ fn extract_guid_from_meta(content: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_glob_to_regex_no_glob_chars() {
+        assert!(glob_to_regex("Camera").is_none());
+        assert!(glob_to_regex("MainCamera").is_none());
+        assert!(glob_to_regex("").is_none());
+    }
+
+    #[test]
+    fn test_glob_star_both_sides() {
+        let re = glob_to_regex("*Star*").unwrap();
+        assert!(re.is_match("NorthStar"));
+        assert!(re.is_match("StarField"));
+        assert!(re.is_match("Star"));
+        assert!(re.is_match("Stare")); // *Star* matches anything containing "Star"
+    }
+
+    #[test]
+    fn test_glob_star_both_sides_matches() {
+        let re = glob_to_regex("*Star*").unwrap();
+        assert!(re.is_match("NorthStar"));
+        assert!(re.is_match("StarField"));
+        assert!(re.is_match("Star"));
+        assert!(re.is_match("NorthStarField"));
+    }
+
+    #[test]
+    fn test_glob_trailing_star() {
+        let re = glob_to_regex("Star*").unwrap();
+        assert!(re.is_match("StarField"));
+        assert!(re.is_match("Star"));
+        assert!(!re.is_match("NorthStar"));
+    }
+
+    #[test]
+    fn test_glob_leading_star() {
+        let re = glob_to_regex("*Camera").unwrap();
+        assert!(re.is_match("MainCamera"));
+        assert!(re.is_match("Camera"));
+        assert!(!re.is_match("CameraRig"));
+    }
+
+    #[test]
+    fn test_glob_question_mark() {
+        let re = glob_to_regex("?tar").unwrap();
+        assert!(re.is_match("Star"));
+        assert!(!re.is_match("Sttar"));
+        assert!(!re.is_match("tar"));
+    }
+
+    #[test]
+    fn test_glob_case_insensitive() {
+        let re = glob_to_regex("*camera*").unwrap();
+        assert!(re.is_match("MainCamera"));
+        assert!(re.is_match("CAMERA"));
+        assert!(re.is_match("camera_rig"));
+    }
+
+    #[test]
+    fn test_glob_special_chars_escaped() {
+        let re = glob_to_regex("test.name*").unwrap();
+        assert!(re.is_match("test.name_foo"));
+        assert!(!re.is_match("testXname_foo")); // dot is escaped, not wildcard
+    }
+
+    #[test]
+    fn test_calculate_fuzzy_score_exact() {
+        assert_eq!(calculate_fuzzy_score("camera", "camera"), 100.0);
+    }
+
+    #[test]
+    fn test_calculate_fuzzy_score_prefix() {
+        assert_eq!(calculate_fuzzy_score("cam", "camera"), 85.0);
+    }
+
+    #[test]
+    fn test_calculate_fuzzy_score_substring() {
+        assert_eq!(calculate_fuzzy_score("amer", "camera"), 70.0);
+    }
+
+    #[test]
+    fn test_extract_gameobjects_duplicate_names() {
+        // Bug #1: Two GOs with the same name should both be extracted
+        let content = r#"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &100
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 200}
+  m_Layer: 0
+  m_Name: Cube
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!1 &101
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 201}
+  m_Layer: 0
+  m_Name: Cube
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+"#;
+        let gos = UnityYamlParser::extract_gameobjects(content);
+        assert_eq!(gos.len(), 2, "Both duplicate-named GOs should be extracted");
+        assert_eq!(gos[0].name, "Cube");
+        assert_eq!(gos[1].name, "Cube");
+        assert_ne!(gos[0].file_id, gos[1].file_id);
+    }
+
+    #[test]
+    fn test_extract_gameobjects_skips_stripped() {
+        // Bug #1/#3: Stripped GO blocks should NOT be extracted
+        let content = r#"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &500 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 100, guid: abc123, type: 3}
+  m_PrefabInstance: {fileID: 600}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &101
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 201}
+  m_Layer: 0
+  m_Name: RealObject
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+"#;
+        let gos = UnityYamlParser::extract_gameobjects(content);
+        assert_eq!(gos.len(), 1, "Stripped GO should not be extracted");
+        assert_eq!(gos[0].name, "RealObject");
+        assert_eq!(gos[0].file_id, "101");
+    }
 }

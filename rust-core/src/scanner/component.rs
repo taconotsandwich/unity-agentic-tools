@@ -152,7 +152,7 @@ fn resolve_guid_in_value(value: &str, guid_cache: &HashMap<String, String>) -> S
     value.to_string()
 }
 
-fn extract_properties(content: &str, file_id: &str, class_id: u32, guid_cache: &HashMap<String, String>) -> serde_json::Value {
+pub(crate) fn extract_properties(content: &str, file_id: &str, class_id: u32, guid_cache: &HashMap<String, String>) -> serde_json::Value {
     // Find the start of this block
     let header = format!("--- !u!{} &{}", class_id, file_id);
     let start_pos = match content.find(&header) {

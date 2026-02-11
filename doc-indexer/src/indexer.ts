@@ -1,8 +1,9 @@
 import { readFileSync, readdirSync, statSync } from 'fs';
-import { resolve } from 'path';
+import { resolve, relative } from 'path';
 import { estimateTokens } from './tokenizer';
 import { load_embedding_generator } from './native';
-import type { DocStorage, StoredChunk } from './storage';
+import type { DocStorage, StoredChunk, SourceManifest, FileManifestEntry } from './storage';
+import type { DocSource } from './sources';
 
 /** Maximum tokens per chunk before splitting */
 const MAX_CHUNK_TOKENS = 1024;
@@ -201,6 +202,42 @@ function chunkProse(content: string, filePath: string): Chunk[] {
   return chunks;
 }
 
+/** Strip HTML tags, scripts, styles, and decode common entities */
+export function stripHtml(html: string): string {
+  let text = html;
+  // Remove script and style blocks entirely (replace with space to avoid merging adjacent text)
+  text = text.replace(/<script[\s\S]*?<\/script>/gi, ' ');
+  text = text.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  // Strip remaining HTML tags
+  text = text.replace(/<[^>]+>/g, ' ');
+  // Decode common HTML entities
+  text = text.replace(/&nbsp;/g, ' ');
+  text = text.replace(/&amp;/g, '&');
+  text = text.replace(/&lt;/g, '<');
+  text = text.replace(/&gt;/g, '>');
+  text = text.replace(/&quot;/g, '"');
+  text = text.replace(/&#39;/g, "'");
+  // Collapse whitespace
+  text = text.replace(/\s+/g, ' ').trim();
+  return text;
+}
+
+/** Recursively walk a directory and return all file paths */
+function walkDirectory(dir: string): string[] {
+  const results: string[] = [];
+  const entries = readdirSync(dir);
+  for (const entry of entries) {
+    const fullPath = resolve(dir, entry);
+    const stat = statSync(fullPath);
+    if (stat.isDirectory()) {
+      results.push(...walkDirectory(fullPath));
+    } else if (stat.isFile()) {
+      results.push(fullPath);
+    }
+  }
+  return results;
+}
+
 let chunkId = 0;
 
 function generateId(): string {
@@ -259,30 +296,53 @@ export function indexMarkdownFile(filePath: string, storage?: DocStorage): Index
   };
 }
 
+export function indexHtmlFile(filePath: string, storage?: DocStorage): IndexResult {
+  const startTime = Date.now();
+  const html = readFileSync(filePath, 'utf-8');
+  const text = stripHtml(html);
+
+  const chunks = chunkProse(text, filePath);
+
+  let embeddingsGenerated = 0;
+  if (storage) {
+    store_chunks(chunks, storage).then(n => { embeddingsGenerated = n; });
+  }
+
+  const totalTokens = chunks.reduce((sum, chunk) => sum + chunk.tokens, 0);
+
+  return {
+    chunks_indexed: chunks.length,
+    total_tokens: totalTokens,
+    files_processed: 1,
+    elapsed_ms: Date.now() - startTime,
+    embeddings_generated: embeddingsGenerated
+  };
+}
+
 export async function indexDocsDirectory(
   dirPath: string,
-  extensions: string[] = ['.md', '.txt'],
+  extensions: string[] = ['.md', '.txt', '.html'],
   storage?: DocStorage
 ): Promise<IndexResult> {
   const startTime = Date.now();
-  const files = readdirSync(dirPath);
+  const files = walkDirectory(dirPath);
   const allChunks: Chunk[] = [];
 
   let filesProcessed = 0;
 
-  for (const file of files) {
-    const ext = file.substring(file.lastIndexOf('.'));
+  for (const fullPath of files) {
+    const ext = fullPath.substring(fullPath.lastIndexOf('.'));
     if (!extensions.includes(ext)) continue;
-
-    const fullPath = resolve(dirPath, file);
-    const stat = statSync(fullPath);
-
-    if (!stat.isFile()) continue;
 
     const content = readFileSync(fullPath, 'utf-8');
 
-    allChunks.push(...extractCodeBlocks(content));
-    allChunks.push(...chunkProse(content.replace(/```[\s\S]+?```/g, ''), fullPath));
+    if (ext === '.html') {
+      const text = stripHtml(content);
+      allChunks.push(...chunkProse(text, fullPath));
+    } else {
+      allChunks.push(...extractCodeBlocks(content));
+      allChunks.push(...chunkProse(content.replace(/```[\s\S]+?```/g, ''), fullPath));
+    }
 
     filesProcessed++;
   }
@@ -382,4 +442,115 @@ export async function indexUnityPackage(packageName: string, storage?: DocStorag
     elapsed_ms: Date.now() - startTime,
     embeddings_generated: embeddingsGenerated
   };
+}
+
+// --- Source-aware indexing ---
+
+interface FileSnapshot {
+    relativePath: string;
+    fullPath: string;
+    mtime: number;
+}
+
+/** Scan a source directory and collect file mtimes for .md and .html files. */
+function scan_source_files(sourcePath: string): FileSnapshot[] {
+    const files = walkDirectory(sourcePath);
+    const snapshots: FileSnapshot[] = [];
+
+    for (const fullPath of files) {
+        const ext = fullPath.substring(fullPath.lastIndexOf('.'));
+        if (ext !== '.md' && ext !== '.html' && ext !== '.txt') continue;
+
+        try {
+            const stat = statSync(fullPath);
+            snapshots.push({
+                relativePath: relative(sourcePath, fullPath),
+                fullPath,
+                mtime: stat.mtimeMs,
+            });
+        } catch {
+            // Skip files we can't stat
+        }
+    }
+
+    return snapshots;
+}
+
+/** Check if a source has changed by comparing current file mtimes against stored manifest. */
+export async function checkSourceChanged(source: DocSource, storage: DocStorage): Promise<boolean> {
+    const manifest = await storage.getSourceManifest(source.id);
+    if (!manifest) return true; // Never indexed
+
+    const currentFiles = scan_source_files(source.path);
+    const storedFiles = manifest.files;
+
+    // Check for new or modified files
+    for (const file of currentFiles) {
+        const stored = storedFiles[file.relativePath];
+        if (!stored) return true; // New file
+        if (file.mtime > stored.mtime) return true; // Modified
+    }
+
+    // Check for deleted files
+    const currentPaths = new Set(currentFiles.map(f => f.relativePath));
+    for (const storedPath of Object.keys(storedFiles)) {
+        if (!currentPaths.has(storedPath)) return true; // Deleted
+    }
+
+    return false;
+}
+
+/** Index a single source: chunk all files, store chunks, build manifest. */
+export async function indexSource(source: DocSource, storage: DocStorage): Promise<IndexResult> {
+    const startTime = Date.now();
+
+    // Remove old chunks for this source
+    await storage.removeChunksBySource(source.id);
+
+    const currentFiles = scan_source_files(source.path);
+    const manifestFiles: Record<string, FileManifestEntry> = {};
+    const allChunks: Chunk[] = [];
+    let filesProcessed = 0;
+
+    for (const file of currentFiles) {
+        const content = readFileSync(file.fullPath, 'utf-8');
+        const ext = file.fullPath.substring(file.fullPath.lastIndexOf('.'));
+        const fileChunks: Chunk[] = [];
+
+        if (ext === '.html') {
+            const text = stripHtml(content);
+            fileChunks.push(...chunkProse(text, file.fullPath));
+        } else {
+            fileChunks.push(...extractCodeBlocks(content, file.fullPath));
+            fileChunks.push(...chunkProse(content.replace(/```[\s\S]+?```/g, ''), file.fullPath));
+        }
+
+        manifestFiles[file.relativePath] = {
+            mtime: file.mtime,
+            chunk_ids: fileChunks.map(c => c.id),
+        };
+
+        allChunks.push(...fileChunks);
+        filesProcessed++;
+    }
+
+    const embeddingsGenerated = await store_chunks(allChunks, storage);
+
+    // Store the manifest
+    const manifest: SourceManifest = {
+        path: source.path,
+        files: manifestFiles,
+        last_indexed: Date.now(),
+    };
+    await storage.storeSourceManifest(source.id, manifest);
+
+    const totalTokens = allChunks.reduce((sum, chunk) => sum + chunk.tokens, 0);
+
+    return {
+        chunks_indexed: allChunks.length,
+        total_tokens: totalTokens,
+        files_processed: filesProcessed,
+        elapsed_ms: Date.now() - startTime,
+        embeddings_generated: embeddingsGenerated,
+    };
 }

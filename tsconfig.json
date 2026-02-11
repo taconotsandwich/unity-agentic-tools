@@ -1,7 +1,7 @@
 {
   "files": [],
   "references": [
-    { "path": "./unity-yaml/tsconfig.json" },
+    { "path": "./unity-agentic-tools/tsconfig.json" },
     { "path": "./doc-indexer/tsconfig.json" }
   ]
 }

@@ -1,14 +1,19 @@
 {
-  "name": "unity-agentic-core",
+  "name": "unity-file-tools",
   "version": "0.1.0",
   "description": "High-performance Unity YAML parser - Rust native module",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
-    "name": "unity-agentic-core",
+    "name": "unity-file-tools",
     "triples": {
-      "defaults": true,
-      "additional": []
+      "defaults": false,
+      "additional": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc"
+      ]
     }
   },
   "scripts": {

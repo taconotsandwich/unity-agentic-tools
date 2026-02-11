@@ -1,7 +1,7 @@
 use regex::Regex;
 use std::collections::HashMap;
 
-use crate::common::PrefabInstanceInfo;
+use crate::common::{PrefabInstanceInfo, PrefabModification};
 
 /// Extract all PrefabInstance blocks (!u!1001) from Unity YAML content
 pub fn extract_prefab_instances(
@@ -34,7 +34,7 @@ pub fn extract_prefab_instances(
 }
 
 /// Extract the block content for a PrefabInstance by file ID
-fn extract_prefab_block(content: &str, file_id: &str) -> Option<String> {
+pub fn extract_prefab_block(content: &str, file_id: &str) -> Option<String> {
     let header = format!("--- !u!1001 &{}", file_id);
     let start_pos = content.find(&header)?;
     let after_header = &content[start_pos..];
@@ -79,6 +79,59 @@ pub fn count_modifications(block: &str) -> u32 {
     block.lines()
         .filter(|line| line.trim_start().starts_with("- target:"))
         .count() as u32
+}
+
+/// Extract all modifications from a PrefabInstance block as structured data
+pub fn extract_modifications(block: &str) -> Vec<PrefabModification> {
+    let mut modifications = Vec::new();
+    let lines: Vec<&str> = block.lines().collect();
+
+    let target_re = Regex::new(r"fileID:\s*(\d+)").expect("Invalid regex");
+    let guid_re = Regex::new(r"guid:\s*([a-f0-9]{32})").expect("Invalid regex");
+    let value_re = Regex::new(r"^\s*value:\s*(.*)$").expect("Invalid regex");
+    let property_re = Regex::new(r"^\s*propertyPath:\s*(.+)$").expect("Invalid regex");
+
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i].trim_start();
+        if line.starts_with("- target:") {
+            // Parse target line
+            let target_file_id = target_re.captures(line)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
+            let target_guid = guid_re.captures(line)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().to_string());
+
+            // Look ahead for propertyPath and value
+            let mut property_path = String::new();
+            let mut value = String::new();
+
+            for j in (i + 1)..lines.len().min(i + 5) {
+                if let Some(caps) = property_re.captures(lines[j]) {
+                    property_path = caps.get(1).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+                }
+                if let Some(caps) = value_re.captures(lines[j]) {
+                    value = caps.get(1).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+                }
+                // Stop at next modification entry or section
+                if j > i + 1 && lines[j].trim_start().starts_with("- target:") {
+                    break;
+                }
+            }
+
+            modifications.push(PrefabModification {
+                target_file_id,
+                target_guid,
+                property_path,
+                value,
+            });
+        }
+        i += 1;
+    }
+
+    modifications
 }
 
 #[cfg(test)]
@@ -197,6 +250,39 @@ PrefabInstance:
         assert_eq!(instances[0].file_id, "700000");
         assert_eq!(instances[1].name, "MyAlly");
         assert_eq!(instances[1].file_id, "800000");
+    }
+
+    #[test]
+    fn test_extract_modifications() {
+        let mods = extract_modifications(PREFAB_BLOCK);
+        assert_eq!(mods.len(), 3);
+
+        assert_eq!(mods[0].target_file_id, "100000");
+        assert_eq!(mods[0].property_path, "m_Name");
+        assert_eq!(mods[0].value, "MyEnemy");
+        assert_eq!(mods[0].target_guid, Some("a1b2c3d4e5f6789012345678abcdef12".to_string()));
+
+        assert_eq!(mods[1].target_file_id, "400000");
+        assert_eq!(mods[1].property_path, "m_LocalPosition.x");
+        assert_eq!(mods[1].value, "5");
+
+        assert_eq!(mods[2].target_file_id, "400000");
+        assert_eq!(mods[2].property_path, "m_LocalPosition.y");
+        assert_eq!(mods[2].value, "0");
+    }
+
+    #[test]
+    fn test_extract_modifications_grouped() {
+        let mods = extract_modifications(PREFAB_BLOCK);
+        // Group by target_file_id
+        let mut grouped: HashMap<String, Vec<&PrefabModification>> = HashMap::new();
+        for m in &mods {
+            grouped.entry(m.target_file_id.clone()).or_default().push(m);
+        }
+        // Should have 2 groups: fileID 100000 (1 mod) and fileID 400000 (2 mods)
+        assert_eq!(grouped.len(), 2);
+        assert_eq!(grouped["100000"].len(), 1);
+        assert_eq!(grouped["400000"].len(), 2);
     }
 
     #[test]

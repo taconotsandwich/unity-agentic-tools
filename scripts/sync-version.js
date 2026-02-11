@@ -3,7 +3,7 @@
  * Version Synchronization Script
  *
  * Ensures version consistency across:
- * - unity-yaml/package.json (source of truth)
+ * - unity-agentic-tools/package.json (source of truth)
  * - .claude-plugin/plugin.json
  * - marketplace.json
  *
@@ -19,7 +19,8 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 
 const FILES = {
-  source: path.join(ROOT, 'unity-yaml', 'package.json'),
+  source: path.join(ROOT, 'unity-agentic-tools', 'package.json'),
+  rustCore: path.join(ROOT, 'rust-core', 'package.json'),
   plugin: path.join(ROOT, '.claude-plugin', 'plugin.json'),
   marketplace: path.join(ROOT, 'marketplace.json'),
 };
@@ -45,6 +46,11 @@ function getVersions() {
     versions.source = source.version;
   }
 
+  const rustCore = readJSON(FILES.rustCore);
+  if (rustCore) {
+    versions.rustCore = rustCore.version;
+  }
+
   const plugin = readJSON(FILES.plugin);
   if (plugin) {
     versions.plugin = plugin.version;
@@ -64,7 +70,8 @@ function checkVersions() {
   const versions = getVersions();
 
   console.log('Current versions:');
-  console.log(`  unity-yaml/package.json: ${versions.source || 'not found'}`);
+  console.log(`  unity-agentic-tools/package.json: ${versions.source || 'not found'}`);
+  console.log(`  rust-core/package.json: ${versions.rustCore || 'not found'}`);
   console.log(`  .claude-plugin/plugin.json: ${versions.plugin || 'not found'}`);
   console.log(`  marketplace.json: ${versions.marketplace || 'not found'}`);
 
@@ -100,7 +107,15 @@ function syncVersions(targetVersion) {
   if (targetVersion && source) {
     source.version = version;
     writeJSON(FILES.source, source);
-    console.log(`  Updated: unity-yaml/package.json`);
+    console.log(`  Updated: unity-agentic-tools/package.json`);
+  }
+
+  // Update rust-core/package.json
+  const rustCore = readJSON(FILES.rustCore);
+  if (rustCore) {
+    rustCore.version = version;
+    writeJSON(FILES.rustCore, rustCore);
+    console.log(`  Updated: rust-core/package.json`);
   }
 
   // Update plugin.json

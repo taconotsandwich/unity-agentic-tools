@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build-native:
@@ -16,16 +17,16 @@ jobs:
         include:
           - os: macos-14
             target: aarch64-apple-darwin
-            binary: unity-agentic-core.darwin-arm64.node
+            binary: unity-file-tools.darwin-arm64.node
           - os: macos-15
             target: x86_64-apple-darwin
-            binary: unity-agentic-core.darwin-x64.node
+            binary: unity-file-tools.darwin-x64.node
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            binary: unity-agentic-core.linux-x64-gnu.node
+            binary: unity-file-tools.linux-x64-gnu.node
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            binary: unity-agentic-core.win32-x64-msvc.node
+            binary: unity-file-tools.win32-x64-msvc.node
 
     runs-on: ${{ matrix.os }}
 
@@ -61,7 +62,7 @@ jobs:
           path: rust-core/${{ matrix.binary }}
           if-no-files-found: error
 
-  release:
+  test:
     needs: build-native
     runs-on: ubuntu-latest
 
@@ -84,21 +85,11 @@ jobs:
           workspaces: rust-core -> target
 
       - name: Install dependencies
-        run: |
-          bun install
-          cd unity-yaml && bun install
-          cd ../doc-indexer && bun install
-          cd ../unity-build-settings && bun install
-          cd ../rust-core && bun install
+        run: bun install
 
       - name: Build native module
         working-directory: ./rust-core
         run: bun run build
-
-      - name: Copy native binary to host location
-        run: |
-          mkdir -p ~/.claude/unity-agentic-tools/bin
-          cp rust-core/*.node ~/.claude/unity-agentic-tools/bin/
 
       - name: Build TypeScript packages
         run: bun run build
@@ -116,13 +107,55 @@ jobs:
       - name: Check version sync
         run: bun scripts/sync-version.js --check
 
+  publish:
+    needs: [build-native, test]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update npm for trusted publishing
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build TypeScript
+        run: bun run build
+
       - name: Download all native binaries
         uses: actions/download-artifact@v4
         with:
-          path: binaries
+          path: artifacts
 
-      - name: List binaries
-        run: find binaries -name "*.node" -ls
+      - name: Bundle native module into unity-agentic-tools
+        run: |
+          mkdir -p unity-agentic-tools/native
+          cp rust-core/index.js unity-agentic-tools/native/
+          cp rust-core/index.d.ts unity-agentic-tools/native/
+          for dir in artifacts/*/; do
+            cp "$dir"*.node unity-agentic-tools/native/
+          done
+          echo "Bundled native files:"
+          ls -la unity-agentic-tools/native/
+
+      - name: Publish package
+        working-directory: ./unity-agentic-tools
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Extract version from tag
         id: version
@@ -157,23 +190,17 @@ jobs:
             /plugin marketplace add taconotsandwich/unity-agentic-tools
             /plugin install unity-agentic-tools@unity-agentic-tools-marketplace
             ```
-            Then run `/initial-install` to download the native binary for your platform.
 
-            ### Direct CLI Usage
+            ### npm
             ```bash
-            git clone https://github.com/taconotsandwich/unity-agentic-tools.git
-            bun unity-agentic-tools/unity-yaml/dist/cli.js --help
+            bun add -g unity-agentic-tools
             ```
 
-            ## Native Binaries
-
-            | Platform | File |
-            |----------|------|
-            | macOS ARM64 (Apple Silicon) | `unity-agentic-core.darwin-arm64.node` |
-            | macOS x64 (Intel) | `unity-agentic-core.darwin-x64.node` |
-            | Linux x64 | `unity-agentic-core.linux-x64-gnu.node` |
-            | Windows x64 | `unity-agentic-core.win32-x64-msvc.node` |
-          files: binaries/**/*.node
+            ### From Source
+            ```bash
+            git clone https://github.com/taconotsandwich/unity-agentic-tools.git
+            cd unity-agentic-tools && bun install
+            ```
           draft: false
           prerelease: false
         env:
