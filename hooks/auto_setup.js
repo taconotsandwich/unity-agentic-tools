@@ -23,7 +23,7 @@ async function readStdin() {
 function ensureSetup() {
     const pluginRoot = path.resolve(__dirname, '..');
     const needsInstall = !fs.existsSync(path.join(pluginRoot, 'node_modules'));
-    const needsBuild = !fs.existsSync(path.join(pluginRoot, 'unity-yaml', 'dist', 'cli.js'));
+    const needsBuild = !fs.existsSync(path.join(pluginRoot, 'unity-agentic-tools', 'dist', 'cli.js'));
 
     if (!needsInstall && !needsBuild) return false;
 

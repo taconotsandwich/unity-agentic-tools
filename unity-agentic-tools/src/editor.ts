@@ -2321,7 +2321,7 @@ export function unpackPrefab(options: UnpackPrefabOptions): UnpackPrefabResult {
   }
 
   if (!sourcePrefabPath || !existsSync(sourcePrefabPath)) {
-    return { success: false, file_path, error: `Could not resolve source prefab with GUID ${sourcePrefabGuid}. Provide --project path or run 'unity-yaml setup'.` };
+    return { success: false, file_path, error: `Could not resolve source prefab with GUID ${sourcePrefabGuid}. Provide --project path or run 'unity-agentic-tools setup'.` };
   }
 
   // Read source prefab

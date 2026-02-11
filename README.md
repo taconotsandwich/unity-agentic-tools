@@ -66,7 +66,7 @@ Or use slash commands directly:
 commands/         Slash commands
 skills/           Agent skills
 hooks/            Event handlers
-unity-yaml/       TypeScript CLI
+unity-agentic-tools/       TypeScript CLI
 rust-core/        Native Rust module (napi-rs)
 doc-indexer/      Documentation indexing module
 ```

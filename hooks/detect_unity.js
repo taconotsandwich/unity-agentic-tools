@@ -3,7 +3,7 @@
  * Hook: UserPromptSubmit
  * Fires on every user prompt. Scans the prompt text for Unity file references
  * (.unity, .prefab, .asset) and, when found, injects a context tip suggesting
- * the unity-yaml CLI commands (list, find, edit) instead of reading files raw.
+ * the unity-agentic-tools CLI commands (list, find, edit) instead of reading files raw.
  * Does nothing if no Unity file paths are detected in the prompt.
  */
 
@@ -31,7 +31,7 @@ async function main() {
     const uniqueFiles = [...new Set(matches)];
 
     if (uniqueFiles.length > 0) {
-      data.context = '# Use unity-yaml CLI (read scene/gameobject, find, search, create, update, delete) instead of reading Unity files raw.\n' + (data.context || '');
+      data.context = '# Use unity-agentic-tools CLI (read scene/gameobject, find, search, create, update, delete) instead of reading Unity files raw.\n' + (data.context || '');
     }
 
     console.log(JSON.stringify(data));

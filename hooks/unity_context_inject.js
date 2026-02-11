@@ -2,7 +2,7 @@
 /**
  * Hook: PreToolUse (Read)
  * Runs before any Read tool call targeting a Unity file (.unity, .prefab, .asset).
- * Injects a context tip suggesting the unity-yaml CLI commands (list, find, get, edit)
+ * Injects a context tip suggesting the unity-agentic-tools CLI commands (list, find, get, edit)
  * as alternatives to reading the raw YAML, which is verbose and wastes tokens.
  * Does nothing for non-Unity files. Does not block the Read — only adds suggestions.
  */
@@ -38,7 +38,7 @@ async function main() {
       const filePath = toolInput.filePath || toolInput.path || toolInput.file_path || '';
 
       if (isUnityFile(filePath)) {
-        data.context = `# Prefer unity-yaml CLI over raw Read for "${path.basename(filePath)}" — use read scene/gameobject or find commands.\n` + (data.context || '');
+        data.context = `# Prefer unity-agentic-tools CLI over raw Read for "${path.basename(filePath)}" — use read scene/gameobject or find commands.\n` + (data.context || '');
       }
     }
 

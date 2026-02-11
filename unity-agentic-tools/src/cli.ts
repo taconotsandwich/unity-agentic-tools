@@ -17,7 +17,7 @@ const { exec } = require('child_process');
 if (!(process as any).versions.bun) {
   console.error('CRITICAL ERROR: This tool MUST be run with BUN.');
   console.error('You are currently using: Node.js');
-  console.error('Please run with: bun unity-yaml/dist/cli.js <command>');
+  console.error('Please run with: bun unity-agentic-tools/dist/cli.js <command>');
   process.exit(1);
 }
 
@@ -35,7 +35,7 @@ function getScanner(): UnityScanner {
 }
 
 program
-  .name('unity-yaml')
+  .name('unity-agentic-tools')
   .description('Fast, token-efficient Unity YAML parser')
   .version('1.0.0');
 

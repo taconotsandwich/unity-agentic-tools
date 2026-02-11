@@ -137,19 +137,19 @@ jobs:
         with:
           path: artifacts
 
-      - name: Bundle native module into unity-yaml
+      - name: Bundle native module into unity-agentic-tools
         run: |
-          mkdir -p unity-yaml/native
-          cp rust-core/index.js unity-yaml/native/
-          cp rust-core/index.d.ts unity-yaml/native/
+          mkdir -p unity-agentic-tools/native
+          cp rust-core/index.js unity-agentic-tools/native/
+          cp rust-core/index.d.ts unity-agentic-tools/native/
           for dir in artifacts/*/; do
-            cp "$dir"*.node unity-yaml/native/
+            cp "$dir"*.node unity-agentic-tools/native/
           done
           echo "Bundled native files:"
-          ls -la unity-yaml/native/
+          ls -la unity-agentic-tools/native/
 
       - name: Publish package
-        working-directory: ./unity-yaml
+        working-directory: ./unity-agentic-tools
         run: npm publish --provenance --access public
 
       - name: Extract version from tag
@@ -188,7 +188,7 @@ jobs:
 
             ### npm
             ```bash
-            bun add -g unity-yaml
+            bun add -g unity-agentic-tools
             ```
 
             ### From Source

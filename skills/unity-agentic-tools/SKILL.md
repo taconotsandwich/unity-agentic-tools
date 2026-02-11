@@ -1,11 +1,11 @@
 ---
-name: unity-yaml
-description: "Use when working with Unity projects, Unity YAML files (.unity, .prefab, .asset), or the unity-yaml CLI tool. Covers parsing, inspecting, editing, searching, and testing Unity files via native Rust CLI. Use instead of raw Read for Unity files. Load this skill before any Unity-related task. Not for C# or shaders. Requires /initial-install."
+name: unity-agentic-tools
+description: "Use when working with Unity projects, Unity YAML files (.unity, .prefab, .asset), or the unity-agentic-tools CLI tool. Covers parsing, inspecting, editing, searching, and testing Unity files via native Rust CLI. Use instead of raw Read for Unity files. Load this skill before any Unity-related task. Not for C# or shaders. Requires /initial-install."
 ---
 
 # Unity YAML CLI
 
-CLI: `unity-yaml <command>`
+CLI: `unity-agentic-tools <command>`
 
 ## read — Read Unity files, settings, and build data
 

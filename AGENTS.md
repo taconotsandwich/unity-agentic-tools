@@ -7,9 +7,9 @@ This document provides essential guidelines for agentic coding tools working in 
 TypeScript CLI providing token-efficient Unity file manipulation utilities for Claude Code.
 
 **Core Structure:**
-- `unity-yaml/src/` - TypeScript source code
-- `unity-yaml/dist/` - Compiled JavaScript output (built by Bun)
-- `unity-yaml/test/` - TypeScript tests
+- `unity-agentic-tools/src/` - TypeScript source code
+- `unity-agentic-tools/dist/` - Compiled JavaScript output (built by Bun)
+- `unity-agentic-tools/test/` - TypeScript tests
 - `.claude-plugin/` - Claude Code plugin manifest
 - `doc-indexer/` - Documentation indexing module
 
@@ -66,7 +66,7 @@ bun run dev
 
 ## CLI Commands Reference
 
-All commands use `bun unity-yaml/dist/cli.js <command>`:
+All commands use `bun unity-agentic-tools/dist/cli.js <command>`:
 - `read scene <file>` - List GameObject hierarchy (`--properties` for values, `--summary` for counts)
 - `read gameobject <file> <id>` - Get single object by name or file ID (`-c <type>` for component filter)
 - `read scriptable-object <file>` - Read .asset file

@@ -1,5 +1,5 @@
 {
-  "name": "unity-yaml",
+  "name": "unity-agentic-tools",
   "packageManager": "bun@latest",
   "version": "0.1.0",
   "description": "Fast, token-efficient Unity YAML parser for AI agents",
@@ -42,7 +42,7 @@
   },
   "type": "commonjs",
   "bin": {
-    "unity-yaml": "./dist/cli.js"
+    "unity-agentic-tools": "./dist/cli.js"
   },
   "engines": {
     "bun": ">=1.0.0"

@@ -8,7 +8,7 @@ export interface TempFixture {
 }
 
 export function create_temp_fixture(source_path: string): TempFixture {
-    const temp_dir = mkdtempSync(join(tmpdir(), 'unity-yaml-test-'));
+    const temp_dir = mkdtempSync(join(tmpdir(), 'uat-test-'));
     const temp_path = join(temp_dir, basename(source_path));
     copyFileSync(source_path, temp_path);
 

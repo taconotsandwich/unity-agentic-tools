@@ -6,12 +6,12 @@ The Unity Agentic Tools plugin provides token-efficient file operations and docu
 
 ## Usage
 
-Interaction is handled through the `unity-yaml` CLI.
+Interaction is handled through the `unity-agentic-tools` CLI.
 
 ### Core Commands
 
 Always use `bun` to run the CLI:
-`bun unity-yaml/dist/cli.js <command> [args]`
+`bun unity-agentic-tools/dist/cli.js <command> [args]`
 
 - **read scene**: List GameObject hierarchy (`--properties` for values)
 - **read gameobject**: Get single object by name or file ID (`-c <type>` for component filter)
