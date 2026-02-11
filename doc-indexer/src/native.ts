@@ -7,7 +7,14 @@ export function load_embedding_generator(): any | null {
 
     try {
         const nativeRequire = createRequire(import.meta.url || __filename);
-        const mod = nativeRequire('unity-file-tools');
+        let mod: any;
+        try {
+            // Published package: native/ directory bundled alongside dist/
+            mod = nativeRequire('../native/index.js');
+        } catch {
+            // Dev workspace: resolve via workspace link
+            mod = nativeRequire('unity-file-tools');
+        }
         _cachedEmbedder = new mod.EmbeddingGenerator();
         return _cachedEmbedder;
     } catch {

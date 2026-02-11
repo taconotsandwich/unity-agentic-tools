@@ -18,7 +18,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "bun run build:lib && bun run build:cli",
+    "build": "bun run build:lib && bun run build:cli && cp ../doc-indexer/dist/cli.js dist/doc-indexer-cli.js",
     "build:lib": "bun build src/index.ts --outdir=dist --target=bun --format=cjs --external unity-file-tools",
     "build:cli": "bun build src/cli.ts --outdir=dist --target=bun --format=cjs --external unity-file-tools",
     "build:rust": "cd ../rust-core && bun run build",
