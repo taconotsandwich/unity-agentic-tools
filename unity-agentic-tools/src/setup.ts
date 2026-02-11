@@ -2,6 +2,9 @@ import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, statSy
 import { join, relative, resolve } from 'path';
 import { getNativeBuildGuidCache } from './scanner';
 
+const pkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf-8'));
+const VERSION = pkg.version;
+
 const CONFIG_DIR = '.unity-agentic';
 const CONFIG_FILE = 'config.json';
 const GUID_CACHE_FILE = 'guid-cache.json';
@@ -54,7 +57,7 @@ export function setup(options: SetupOptions = {}): SetupResult {
 
   // Create config.json
   const config = {
-    version: '1.0.0',
+    version: VERSION,
     project_path: projectPath,
     created_at: new Date().toISOString(),
     rust_enabled: isRustAvailable(),
