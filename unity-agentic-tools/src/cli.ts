@@ -170,7 +170,12 @@ program.command('docs <query>')
   .option('-c, --compress', 'Compress results')
   .option('-j, --json', 'Output as JSON')
   .action((query, options) => {
-    const docIndexerPath = path.join(__dirname, '..', '..', 'doc-indexer', 'dist', 'cli.js');
+    const { existsSync } = require('fs');
+    // Bundled (npm install): dist/doc-indexer-cli.js alongside dist/cli.js
+    // Dev (workspace): ../../doc-indexer/dist/cli.js from dist/
+    const bundledPath = path.join(__dirname, 'doc-indexer-cli.js');
+    const workspacePath = path.join(__dirname, '..', '..', 'doc-indexer', 'dist', 'cli.js');
+    const docIndexerPath = existsSync(bundledPath) ? bundledPath : workspacePath;
     const projectRoot = find_unity_project_root();
     const globalArgs: string[] = [];
     if (projectRoot) {

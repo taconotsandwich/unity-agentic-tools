@@ -2,7 +2,7 @@
   "packageManager": "bun@latest",
   "workspaces": ["rust-core", "unity-agentic-tools", "doc-indexer"],
   "scripts": {
-    "build": "bun run build:unity-agentic-tools && bun run build:doc-indexer",
+    "build": "bun run build:doc-indexer && bun run build:unity-agentic-tools",
     "build:unity-agentic-tools": "cd unity-agentic-tools && bun run build",
     "build:doc-indexer": "cd doc-indexer && bun run build",
     "build:rust": "cd rust-core && bun run build",
