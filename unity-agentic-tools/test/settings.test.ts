@@ -195,6 +195,28 @@ describe('Settings Editor', () => {
             expect(result.success).toBe(false);
             expect(result.error).toContain('not found');
         });
+
+        it('should reject tag with forward slashes', () => {
+            const result = edit_tag({
+                project_path: temp.project_path,
+                action: 'add',
+                tag: 'Bad/Tag',
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('forward slashes');
+        });
+
+        it('should reject tag with newlines', () => {
+            const result = edit_tag({
+                project_path: temp.project_path,
+                action: 'add',
+                tag: 'Bad\nTag',
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('newlines');
+        });
     });
 
     describe('edit_layer', () => {

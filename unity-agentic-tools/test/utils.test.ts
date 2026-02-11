@@ -2,7 +2,7 @@ import { describe, expect, it, afterEach } from 'vitest';
 import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { generateGuid, atomicWrite } from '../src/utils';
+import { generateGuid, atomicWrite, validate_name } from '../src/utils';
 
 describe('generateGuid', () => {
     it('should return a 32-character lowercase hex string', () => {
@@ -113,5 +113,47 @@ describe('atomicWrite', () => {
         expect(result.success).toBe(true);
         expect(result.bytes_written).toBe(0);
         expect(readFileSync(filePath, 'utf-8')).toBe('');
+    });
+});
+
+describe('validate_name', () => {
+    it('should accept valid names', () => {
+        expect(validate_name('Player', 'Test')).toBeNull();
+        expect(validate_name('Main Camera', 'Test')).toBeNull();
+        expect(validate_name('Object (1)', 'Test')).toBeNull();
+        expect(validate_name('Enemy_Boss_v2', 'Test')).toBeNull();
+    });
+
+    it('should accept Unicode names', () => {
+        expect(validate_name('敵キャラ', 'Test')).toBeNull();
+        expect(validate_name('Spieler', 'Test')).toBeNull();
+    });
+
+    it('should reject forward slashes', () => {
+        const result = validate_name('Parent/Child', 'GameObject name');
+        expect(result).not.toBeNull();
+        expect(result).toContain('forward slashes');
+        expect(result).toContain('GameObject name');
+    });
+
+    it('should reject backslashes', () => {
+        const result = validate_name('Path\\Name', 'Tag name');
+        expect(result).not.toBeNull();
+        expect(result).toContain('backslashes');
+    });
+
+    it('should reject newlines', () => {
+        expect(validate_name('Line1\nLine2', 'Test')).toContain('newlines');
+        expect(validate_name('Line1\rLine2', 'Test')).toContain('newlines');
+        expect(validate_name('Line1\r\nLine2', 'Test')).toContain('newlines');
+    });
+
+    it('should reject null bytes', () => {
+        expect(validate_name('Name\0Bad', 'Test')).toContain('null bytes');
+    });
+
+    it('should include the label in error messages', () => {
+        const result = validate_name('Bad/Name', 'Tag name');
+        expect(result).toContain('Tag name');
     });
 });

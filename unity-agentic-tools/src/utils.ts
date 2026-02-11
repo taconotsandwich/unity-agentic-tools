@@ -86,6 +86,26 @@ export function glob_match(pattern: string, text: string): boolean {
 }
 
 /**
+ * Validate a name (GameObject, tag, etc.) for characters that are illegal in Unity.
+ * Returns an error string if invalid, or null if the name is acceptable.
+ */
+export function validate_name(name: string, label: string): string | null {
+    if (name.includes('/')) {
+        return `${label} cannot contain forward slashes (/) — Unity uses them as hierarchy path separators`;
+    }
+    if (name.includes('\\')) {
+        return `${label} cannot contain backslashes (\\)`;
+    }
+    if (name.includes('\n') || name.includes('\r')) {
+        return `${label} cannot contain newlines — they corrupt YAML structure`;
+    }
+    if (name.includes('\0')) {
+        return `${label} cannot contain null bytes`;
+    }
+    return null;
+}
+
+/**
  * Generate a new GUID (32 hex characters).
  */
 export function generateGuid(): string {
