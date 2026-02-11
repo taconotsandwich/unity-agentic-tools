@@ -11,30 +11,34 @@ A Claude Code plugin providing token-efficient CLI tools for parsing, analyzing,
 ## Build & Test
 
 ```bash
-bun install           # Install deps (root, unity-yaml, rust-core, doc-indexer)
-bun run build         # Build TypeScript
+bun install           # Install all deps (workspaces resolve native module)
 bun run build:rust    # Build Rust native module
-bun run build:all     # Build everything
+bun run build         # Build TypeScript
 bun run test          # Unit tests
 bun run test:integration  # CLI integration tests (bash)
+```
+
+## Dev Setup
+
+```bash
+cd unity-agentic-tools && npm link   # Register unity-agentic-tools CLI globally (one-time)
 ```
 
 ## Architecture
 
 ```
-.claude-plugin/     Plugin manifest (autodiscovers commands/, skills/, agents/)
+.claude-plugin/     Plugin manifest (autodiscovers commands/, skills/)
 commands/           Slash commands for Claude Code
-skills/             Agent skills (unity-yaml parsing instructions)
-agents/             Subagents: unity-scanner, unity-analyst, unity-editor
+skills/             Agent skills (unity-agentic-tools parsing instructions)
 hooks/              Event handlers (detect_unity.js, pre/post validation)
-unity-yaml/         TypeScript CLI + Vitest tests
+unity-agentic-tools/         TypeScript CLI + Vitest tests
 rust-core/          Native Rust module (napi-rs)
 doc-indexer/        Documentation indexing module
 ```
 
 ## Key Design Patterns
 
-- **Native Module on Host**: Binary stored at `~/.claude/unity-agentic-tools/bin/`, loaded by `scanner.ts`. Run `/initial-install` to download.
+- **Native Module via npm**: Published as `unity-file-tools` — a single package shipping all platform binaries. `bun install` auto-downloads. Workspace link resolves in dev.
 - **Safe YAML Editing**: `editor.ts` preserves GUIDs, comments, class IDs. Uses temp files for atomic writes.
 - **GUID Cache**: `setup.ts` creates `.unity-agentic/` mapping script GUIDs to file paths.
 - **Token Efficiency**: `inspect` without `--properties` returns structure only. Use `--properties` when component values are needed.

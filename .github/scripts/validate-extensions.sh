@@ -82,35 +82,35 @@ echo "Checking version synchronization..."
 
 # Check version synchronization across files
 PLUGIN_VERSION=$(jq -r '.version // "not set"' .claude-plugin/plugin.json 2>/dev/null)
-UNITY_YAML_VERSION=$(jq -r '.version // "not set"' unity-yaml/package.json 2>/dev/null)
+UNITY_YAML_VERSION=$(jq -r '.version // "not set"' unity-agentic-tools/package.json 2>/dev/null)
 
 echo "  plugin.json version: $PLUGIN_VERSION"
-echo "  unity-yaml/package.json version: $UNITY_YAML_VERSION"
+echo "  unity-agentic-tools/package.json version: $UNITY_YAML_VERSION"
 
 # Compare versions (warn if different, don't error)
 if [ "$PLUGIN_VERSION" != "not set" ] && [ "$UNITY_YAML_VERSION" != "not set" ]; then
     if [ "$PLUGIN_VERSION" != "$UNITY_YAML_VERSION" ]; then
-        print_warning "Version mismatch: plugin.json ($PLUGIN_VERSION) != unity-yaml/package.json ($UNITY_YAML_VERSION)"
+        print_warning "Version mismatch: plugin.json ($PLUGIN_VERSION) != unity-agentic-tools/package.json ($UNITY_YAML_VERSION)"
     else
         print_success "Versions are synchronized"
     fi
 fi
 
 echo ""
-echo "Validating unity-yaml CLI..."
+echo "Validating unity-agentic-tools CLI..."
 
 # Check if CLI is built
-if [ -f "unity-yaml/dist/cli.js" ]; then
-    print_success "unity-yaml CLI is built"
+if [ -f "unity-agentic-tools/dist/cli.js" ]; then
+    print_success "unity-agentic-tools CLI is built"
 
     # Test CLI help command
-    if bun unity-yaml/dist/cli.js --help > /dev/null 2>&1; then
+    if bun unity-agentic-tools/dist/cli.js --help > /dev/null 2>&1; then
         print_success "CLI help command works"
     else
         print_error "CLI help command failed"
     fi
 else
-    print_warning "unity-yaml CLI not built (run: bun run build)"
+    print_warning "unity-agentic-tools CLI not built (run: bun run build)"
 fi
 
 echo ""

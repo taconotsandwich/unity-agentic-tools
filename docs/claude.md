@@ -6,20 +6,23 @@ The Unity Agentic Tools plugin provides token-efficient file operations and docu
 
 ## Usage
 
-Interaction is handled through the `unity-yaml` CLI.
+Interaction is handled through the `unity-agentic-tools` CLI.
 
 ### Core Commands
 
 Always use `bun` to run the CLI:
-`bun unity-yaml/dist/cli.js <command> [args]`
+`bun unity-agentic-tools/dist/cli.js <command> [args]`
 
-- **list**: List GameObject hierarchy
-- **find**: Find GameObjects by name
-- **get**: Get raw GameObject data
-- **inspect**: Detailed inspection (recommended)
-- **edit**: Safely edit property values
-- **search-docs**: Search Unity documentation
-- **index-docs**: Index local documentation
+- **read scene**: List GameObject hierarchy (`--properties` for values)
+- **read gameobject**: Get single object by name or file ID (`-c <type>` for component filter)
+- **read scriptable-object / settings / build**: Read assets, project settings, build config
+- **create**: Create GameObjects, scenes, components, prefabs, build-scene
+- **update**: Modify properties (gameobject, component, transform, scriptable-object, build-scene)
+- **delete**: Remove GameObjects, components, build-scene
+- **find / search / grep**: Search within files or across projects
+- **clone**: Duplicate a GameObject and its hierarchy
+- **version**: Read Unity project version
+- **docs**: Search Unity documentation (auto-indexes)
 
 ## Agents
 

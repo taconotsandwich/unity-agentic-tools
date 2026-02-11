@@ -143,6 +143,36 @@ describe('DocStorage', () => {
         expect(results.length).toBeLessThanOrEqual(5);
     });
 
+    it('should find results for single-word query against large chunks', async () => {
+        const storage = makeStorage();
+        // Simulate a real doc chunk: many words, query term appears a few times
+        const largeChunk = 'The Rigidbody component allows a GameObject to be affected by physics. ' +
+            'When a Rigidbody is attached, the object will respond to gravity and collisions. ' +
+            'You can configure mass, drag, and angular drag on the Rigidbody to control behavior. ' +
+            'Use AddForce to apply forces to the Rigidbody during gameplay. ' +
+            'The Rigidbody must be on the same GameObject as the Collider for physics to work correctly.';
+        await storage.storeChunk(makeChunk('doc1', largeChunk));
+        await storage.storeChunk(makeChunk('doc2', 'BoxCollider defines a box-shaped collision boundary for physics interactions'));
+
+        const results = await storage.keywordSearch('Rigidbody');
+
+        expect(results.length).toBeGreaterThanOrEqual(1);
+        expect(results[0].id).toBe('doc1');
+        expect(results[0].score).toBeGreaterThan(0);
+    });
+
+    it('should rank chunks with more term occurrences higher', async () => {
+        const storage = makeStorage();
+        await storage.storeChunk(makeChunk('sparse', 'The Rigidbody component is used in Unity for physics simulation on objects'));
+        await storage.storeChunk(makeChunk('dense', 'Rigidbody handles physics. Configure Rigidbody mass. Rigidbody drag matters.'));
+
+        const results = await storage.keywordSearch('Rigidbody');
+
+        expect(results.length).toBe(2);
+        // Dense chunk should score higher (more occurrences per word)
+        expect(results[0].id).toBe('dense');
+    });
+
     it('should sort results by score descending', async () => {
         const storage = makeStorage();
         // "unity development" has higher overlap with query "unity development"
@@ -170,5 +200,124 @@ describe('DocStorage', () => {
         expect(results).toHaveProperty('keyword');
         expect(Array.isArray(results.semantic)).toBe(true);
         expect(Array.isArray(results.keyword)).toBe(true);
+    });
+
+    // --- Source manifest tests ---
+
+    it('should store and retrieve a source manifest', async () => {
+        const storage = makeStorage();
+        const manifest = {
+            path: '/some/docs',
+            files: {
+                'index.md': { mtime: 1000, chunk_ids: ['c1', 'c2'] },
+            },
+            last_indexed: Date.now(),
+        };
+
+        await storage.storeSourceManifest('pkg:test', manifest);
+        const retrieved = await storage.getSourceManifest('pkg:test');
+
+        expect(retrieved).not.toBeNull();
+        expect(retrieved!.path).toBe('/some/docs');
+        expect(retrieved!.files['index.md'].chunk_ids).toEqual(['c1', 'c2']);
+    });
+
+    it('should return null for unknown source manifest', async () => {
+        const storage = makeStorage();
+        const result = await storage.getSourceManifest('pkg:nonexistent');
+
+        expect(result).toBeNull();
+    });
+
+    it('should remove chunks by source and delete manifest', async () => {
+        const storage = makeStorage();
+        // Store chunks that belong to a source
+        await storage.storeChunks([
+            makeChunk('src_c1', 'source chunk one'),
+            makeChunk('src_c2', 'source chunk two'),
+            makeChunk('other', 'unrelated chunk'),
+        ]);
+
+        // Store manifest linking the source to its chunks
+        await storage.storeSourceManifest('pkg:removable', {
+            path: '/docs',
+            files: {
+                'a.md': { mtime: 1000, chunk_ids: ['src_c1', 'src_c2'] },
+            },
+            last_indexed: Date.now(),
+        });
+
+        const removed = await storage.removeChunksBySource('pkg:removable');
+
+        expect(removed).toBe(2);
+
+        // The manifest should be gone
+        const manifest = await storage.getSourceManifest('pkg:removable');
+        expect(manifest).toBeNull();
+
+        // The unrelated chunk should still be searchable
+        const results = await storage.keywordSearch('unrelated chunk');
+        expect(results.length).toBe(1);
+        expect(results[0].id).toBe('other');
+    });
+
+    it('should return 0 when removing chunks for unknown source', async () => {
+        const storage = makeStorage();
+        const removed = await storage.removeChunksBySource('pkg:ghost');
+
+        expect(removed).toBe(0);
+    });
+
+    it('should list all source IDs', async () => {
+        const storage = makeStorage();
+        await storage.storeSourceManifest('pkg:a', {
+            path: '/a', files: {}, last_indexed: Date.now(),
+        });
+        await storage.storeSourceManifest('pkg:b', {
+            path: '/b', files: {}, last_indexed: Date.now(),
+        });
+
+        const ids = await storage.getSourceIds();
+
+        expect(ids).toContain('pkg:a');
+        expect(ids).toContain('pkg:b');
+        expect(ids.length).toBe(2);
+    });
+
+    it('should auto-create parent directory on save', async () => {
+        const deepPath = join(temp_dir, 'nested', 'dir', 'doc-index.json');
+        const storage = new DocStorage(deepPath);
+        await storage.storeChunk(makeChunk('auto_dir', 'auto directory creation'));
+
+        expect(existsSync(deepPath)).toBe(true);
+    });
+
+    it('should clear sources along with chunks', async () => {
+        const storage = makeStorage();
+        await storage.storeChunk(makeChunk('c1', 'content'));
+        await storage.storeSourceManifest('pkg:test', {
+            path: '/test', files: {}, last_indexed: Date.now(),
+        });
+
+        await storage.clearOldChunks();
+
+        const ids = await storage.getSourceIds();
+        expect(ids.length).toBe(0);
+    });
+
+    it('should persist source manifests across instances', async () => {
+        const storagePath = join(temp_dir, 'persist-sources.json');
+        const s1 = new DocStorage(storagePath);
+        await s1.storeSourceManifest('pkg:persist', {
+            path: '/persist',
+            files: { 'a.md': { mtime: 500, chunk_ids: [] } },
+            last_indexed: Date.now(),
+        });
+
+        const s2 = new DocStorage(storagePath);
+        const manifest = await s2.getSourceManifest('pkg:persist');
+
+        expect(manifest).not.toBeNull();
+        expect(manifest!.path).toBe('/persist');
     });
 });

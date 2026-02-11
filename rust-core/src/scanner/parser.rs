@@ -14,8 +14,10 @@ impl UnityYamlParser {
     /// Extract all GameObjects from Unity YAML content with custom config
     pub fn extract_gameobjects_with_config(content: &str, config: &ComponentConfig) -> Vec<GameObject> {
         // Use (?s) for DOTALL mode to match across newlines
+        // Use \n (not \s*\n) after fileID to reject stripped blocks like "--- !u!1 &123 stripped"
+        // which lack m_Name/m_IsActive and cause the lazy .*? to bleed into the next block
         let pattern_str = format!(
-            r"(?s)--- !u!{} &(\d+)\s*\nGameObject:\s*\n.*?m_Name:\s*([^\n]+).*?m_IsActive:\s*(\d)",
+            r"(?s)--- !u!{} &(\d+)\nGameObject:\s*\n.*?m_Name:\s*([^\n]+).*?m_IsActive:\s*(\d)",
             config.gameobject_class_id
         );
         let pattern = Regex::new(&pattern_str).expect("Invalid regex pattern");
@@ -60,6 +62,15 @@ impl UnityYamlParser {
         pattern
             .captures_iter(go_block)
             .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
+            .collect()
+    }
+
+    /// Extract all non-GameObject root blocks from .asset files.
+    /// Returns (class_id, file_id, block_content) for each block where class_id != 1.
+    pub fn extract_asset_objects(content: &str) -> Vec<(u32, String, String)> {
+        let blocks = Self::parse_all_blocks(content);
+        blocks.into_iter()
+            .filter(|(class_id, _, _)| *class_id != 1)
             .collect()
     }
 
@@ -121,6 +132,42 @@ GameObject:
     }
 
     #[test]
+    fn test_extract_asset_objects() {
+        let content = r#"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_Script: {fileID: 13312, guid: 0000000000000000e000000000000000, type: 0}
+  m_Name: Sign_1
+  m_Sprite: {fileID: 21300000, guid: 4991c79370c017c48b0b21e681ecd400, type: 3}
+"#;
+        let objects = UnityYamlParser::extract_asset_objects(content);
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0].0, 114); // class_id
+        assert_eq!(objects[0].1, "11400000"); // file_id
+        assert!(objects[0].2.contains("m_Name: Sign_1"));
+    }
+
+    #[test]
+    fn test_extract_asset_objects_filters_gameobjects() {
+        let content = r#"%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &100
+GameObject:
+  m_Name: SomeObject
+  m_IsActive: 1
+--- !u!114 &200
+MonoBehaviour:
+  m_Name: MyAsset
+"#;
+        let objects = UnityYamlParser::extract_asset_objects(content);
+        // Should only include the MonoBehaviour, not the GameObject
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0].0, 114);
+    }
+
+    #[test]
     fn test_parse_component_refs() {
         let block = r#"
   m_Component:
@@ -130,5 +177,37 @@ GameObject:
 "#;
         let refs = UnityYamlParser::parse_component_refs(block);
         assert_eq!(refs, vec!["111", "222", "333"]);
+    }
+
+    /// Verify that pre-normalized content (CRLF → LF) parses correctly.
+    /// This simulates what read_unity_file does before content reaches the parser.
+    #[test]
+    fn test_extract_gameobjects_after_crlf_normalization() {
+        // Simulate a Windows-origin Unity file with CRLF line endings
+        let crlf_content = "--- !u!1 &1234567890\r\nGameObject:\r\n  m_ObjectHideFlags: 0\r\n  m_Name: CRLFObject\r\n  m_IsActive: 1\r\n  m_Layer: 0\r\n";
+        // This would fail without normalization
+        let normalized = crlf_content.replace("\r\n", "\n");
+        let objects = UnityYamlParser::extract_gameobjects(&normalized);
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0].name, "CRLFObject");
+        assert!(objects[0].active);
+    }
+
+    #[test]
+    fn test_parse_all_blocks_after_crlf_normalization() {
+        let crlf_content = "--- !u!1 &100\r\nGameObject:\r\n  m_Name: Obj1\r\n--- !u!114 &200\r\nMonoBehaviour:\r\n  m_Name: Script1\r\n";
+        let normalized = crlf_content.replace("\r\n", "\n");
+        let blocks = UnityYamlParser::parse_all_blocks(&normalized);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].0, 1);   // class_id
+        assert_eq!(blocks[1].0, 114); // class_id
+    }
+
+    /// Confirm that raw CRLF content FAILS without normalization (documents the bug).
+    #[test]
+    fn test_extract_gameobjects_fails_on_raw_crlf() {
+        let crlf_content = "--- !u!1 &1234567890\r\nGameObject:\r\n  m_ObjectHideFlags: 0\r\n  m_Name: CRLFObject\r\n  m_IsActive: 1\r\n";
+        let objects = UnityYamlParser::extract_gameobjects(crlf_content);
+        assert_eq!(objects.len(), 0, "Raw CRLF should fail to parse — regex uses literal \\n");
     }
 }

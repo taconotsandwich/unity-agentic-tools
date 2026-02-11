@@ -48,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun ${CLAUDE_PLUGIN_ROOT}/hooks/auto_install_binary.js"
+            "command": "bun ${CLAUDE_PLUGIN_ROOT}/hooks/auto_setup.js"
           }
         ]
       },

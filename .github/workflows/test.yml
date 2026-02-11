@@ -35,36 +35,12 @@ jobs:
         with:
           workspaces: rust-core -> target
 
-      - name: Install root dependencies
-        run: bun install
-
-      - name: Install unity-yaml dependencies
-        working-directory: ./unity-yaml
-        run: bun install
-
-      - name: Install doc-indexer dependencies
-        working-directory: ./doc-indexer
-        run: bun install
-
-      - name: Install unity-build-settings dependencies
-        working-directory: ./unity-build-settings
-        run: bun install
-
-      - name: Install rust-core dependencies
-        working-directory: ./rust-core
+      - name: Install dependencies
         run: bun install
 
       - name: Build native module
         working-directory: ./rust-core
         run: bun run build
-
-      - name: Copy native binary to host location
-        shell: bash
-        run: |
-          mkdir -p ~/.claude/unity-agentic-tools/bin
-          find rust-core -name "*.node" -exec cp {} ~/.claude/unity-agentic-tools/bin/ \;
-          echo "Copied binary to host location:"
-          ls -la ~/.claude/unity-agentic-tools/bin/
 
       - name: Build TypeScript packages
         run: bun run build
@@ -78,7 +54,7 @@ jobs:
 
       - name: Run CLI integration tests (Unix)
         if: runner.os != 'Windows'
-        working-directory: ./unity-yaml
+        working-directory: ./unity-agentic-tools
         run: bash test/cli-integration.test.sh
 
       - name: Validate extension configurations (Unix)
@@ -104,12 +80,12 @@ jobs:
             cat .claude-plugin/plugin.json | jq .
           fi
 
-      - name: Test CLI with native module from host location (Unix)
+      - name: Test CLI with native module (Unix)
         if: runner.os != 'Windows'
         run: |
-          echo "Testing CLI with native module from host location..."
-          bun unity-yaml/dist/cli.js status
-          echo "Native module loaded successfully from ~/.claude/unity-agentic-tools/bin/"
+          echo "Testing CLI with native module via workspace..."
+          bun unity-agentic-tools/dist/cli.js status
+          echo "Native module loaded successfully via workspace resolution"
 
       - name: Generate test coverage
         if: matrix.os == 'ubuntu-latest'
@@ -119,9 +95,9 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v4
         with:
-          files: ./unity-yaml/coverage/coverage-final.json
+          files: ./unity-agentic-tools/coverage/coverage-final.json
           flags: unittests
-          name: unity-yaml-coverage
+          name: unity-agentic-tools-coverage
           fail_ci_if_error: false
           verbose: true
         env:

@@ -6,6 +6,8 @@ import {
     indexMarkdownFile,
     indexDocsDirectory,
     indexScriptableObject,
+    indexHtmlFile,
+    stripHtml,
 } from '../../src/indexer';
 
 const fixtures_dir = resolve(__dirname, '..', 'fixtures');
@@ -96,6 +98,110 @@ describe('indexScriptableObject', () => {
 
         expect(result.chunks_indexed).toBeGreaterThan(0);
         expect(result.total_tokens).toBeGreaterThan(0);
+    });
+});
+
+describe('stripHtml', () => {
+    it('should strip HTML tags', () => {
+        expect(stripHtml('<p>Hello <b>world</b></p>')).toBe('Hello world');
+    });
+
+    it('should remove script blocks', () => {
+        expect(stripHtml('Before<script>alert("xss")</script>After')).toBe('Before After');
+    });
+
+    it('should remove style blocks', () => {
+        expect(stripHtml('Before<style>.red { color: red; }</style>After')).toBe('Before After');
+    });
+
+    it('should decode common HTML entities', () => {
+        expect(stripHtml('&amp; &lt; &gt; &quot; &nbsp;')).toBe('& < > "');
+    });
+
+    it('should collapse whitespace', () => {
+        expect(stripHtml('<p>  lots   of   space  </p>')).toBe('lots of space');
+    });
+});
+
+describe('indexHtmlFile', () => {
+    let temp_dir: string | undefined;
+
+    afterEach(() => {
+        if (temp_dir && existsSync(temp_dir)) {
+            rmSync(temp_dir, { recursive: true, force: true });
+        }
+        temp_dir = undefined;
+    });
+
+    it('should index HTML content and produce chunks', () => {
+        temp_dir = mkdtempSync(join(tmpdir(), 'indexer-html-'));
+        const htmlContent = '<html><body><h2>Section Title</h2><p>Some documentation about Unity components.</p></body></html>';
+        const filePath = join(temp_dir, 'doc.html');
+        writeFileSync(filePath, htmlContent);
+
+        const result = indexHtmlFile(filePath);
+
+        expect(result.files_processed).toBe(1);
+        expect(result.chunks_indexed).toBeGreaterThan(0);
+        expect(result.total_tokens).toBeGreaterThan(0);
+    });
+
+    it('should strip scripts and styles before indexing', () => {
+        temp_dir = mkdtempSync(join(tmpdir(), 'indexer-html-'));
+        const htmlContent = '<html><head><style>body{}</style></head><body><script>var x=1;</script><p>Clean content here.</p></body></html>';
+        const filePath = join(temp_dir, 'doc.html');
+        writeFileSync(filePath, htmlContent);
+
+        const result = indexHtmlFile(filePath);
+
+        expect(result.chunks_indexed).toBeGreaterThan(0);
+    });
+});
+
+describe('indexDocsDirectory - recursive', () => {
+    let temp_dir: string | undefined;
+
+    afterEach(() => {
+        if (temp_dir && existsSync(temp_dir)) {
+            rmSync(temp_dir, { recursive: true, force: true });
+        }
+        temp_dir = undefined;
+    });
+
+    it('should find files in subdirectories', async () => {
+        temp_dir = mkdtempSync(join(tmpdir(), 'indexer-recursive-'));
+        const subDir = join(temp_dir, 'sub');
+        require('fs').mkdirSync(subDir);
+        writeFileSync(join(temp_dir, 'top.md'), '## Top\n\nContent.');
+        writeFileSync(join(subDir, 'nested.md'), '## Nested\n\nMore content.');
+
+        const result = await indexDocsDirectory(temp_dir);
+
+        expect(result.files_processed).toBe(2);
+        expect(result.chunks_indexed).toBeGreaterThan(0);
+    });
+
+    it('should process .html files in directory mode', async () => {
+        temp_dir = mkdtempSync(join(tmpdir(), 'indexer-html-dir-'));
+        writeFileSync(join(temp_dir, 'page.html'), '<html><body><p>HTML page content.</p></body></html>');
+        writeFileSync(join(temp_dir, 'readme.md'), '## Readme\n\nMarkdown content.');
+
+        const result = await indexDocsDirectory(temp_dir);
+
+        expect(result.files_processed).toBe(2);
+        expect(result.chunks_indexed).toBeGreaterThan(0);
+    });
+
+    it('should find HTML files in nested directories', async () => {
+        temp_dir = mkdtempSync(join(tmpdir(), 'indexer-nested-html-'));
+        const subDir = join(temp_dir, 'ScriptReference');
+        require('fs').mkdirSync(subDir);
+        writeFileSync(join(subDir, 'GameObject.html'), '<html><body><p>Unity GameObject API docs.</p></body></html>');
+
+        const result = await indexDocsDirectory(temp_dir);
+
+        expect(result.files_processed).toBe(1);
+        expect(result.chunks_indexed).toBeGreaterThan(0);
     });
 });
 

@@ -24,11 +24,18 @@ export interface SearchResults {
 
 export class DocSearch {
     private storage: DocStorage;
-    private embedder: any | null;
+    private _embedder: any | null | undefined = undefined;
 
     constructor(storage: DocStorage) {
         this.storage = storage;
-        this.embedder = load_embedding_generator();
+    }
+
+    /** Lazy-load the embedding model on first use (avoids blocking constructor). */
+    private get embedder(): any | null {
+        if (this._embedder === undefined) {
+            this._embedder = load_embedding_generator();
+        }
+        return this._embedder;
     }
 
     async search(options: SearchOptions): Promise<SearchResults> {
