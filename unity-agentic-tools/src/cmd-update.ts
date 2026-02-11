@@ -21,21 +21,24 @@ function parseVector(str: string): { x: number; y: number; z: number } {
 
 /** Resolve a GameObject name or numeric fileID to a Transform fileID. */
 function resolve_transform_id(scanner: UnityScanner, file: string, identifier: string): number | null {
-    // All digits → already a transform fileID
+    // Look up by name or fileID via the scanner (verbose needed for class_id/file_id on components)
+    const result = scanner.inspect({ file, identifier, verbose: true });
+
+    if (result && !(result as any).is_error) {
+        // Found a GameObject — resolve to its Transform component
+        const transform = result.components?.find(
+            (c: any) => c.class_id === 4 || c.class_id === 224
+        );
+        if (transform) return parseInt(transform.file_id, 10);
+    }
+
+    // If inspect didn't find a GameObject (e.g. the ID is already a Transform fileID),
+    // return numeric identifiers as-is for direct Transform lookup
     if (/^\d+$/.test(identifier)) {
         return parseInt(identifier, 10);
     }
 
-    // Look up by name via the scanner (verbose needed for class_id/file_id on components)
-    const result = scanner.inspect({ file, identifier, verbose: true });
-    if (!result) return null;
-
-    // Find the Transform (class_id 4) or RectTransform (class_id 224) component
-    const transform = result.components?.find(
-        (c: any) => c.class_id === 4 || c.class_id === 224
-    );
-
-    return transform ? parseInt(transform.file_id, 10) : null;
+    return null;
 }
 
 export function build_update_command(getScanner: () => UnityScanner): Command {

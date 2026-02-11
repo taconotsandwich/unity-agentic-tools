@@ -151,6 +151,61 @@ describeIfNative('search_project', () => {
             expect(result.truncated).toBe(false);
         }
     });
+
+    it('should find GameObjects by tag', () => {
+        const result = search_project({
+            project_path: EXTERNAL_FIXTURES,
+            tag: 'MainCamera',
+            scan_all: true,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.total_matches).toBeGreaterThanOrEqual(1);
+        for (const match of result.matches) {
+            expect(match.tag).toBe('MainCamera');
+        }
+    });
+
+    it('should find GameObjects by tag (killzone)', () => {
+        const result = search_project({
+            project_path: EXTERNAL_FIXTURES,
+            tag: 'killzone',
+            scan_all: true,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.total_matches).toBe(1);
+        expect(result.matches[0].tag).toBe('killzone');
+    });
+
+    it('should find GameObjects by layer', () => {
+        const result = search_project({
+            project_path: EXTERNAL_FIXTURES,
+            layer: 5,
+            scan_all: true,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.total_matches).toBeGreaterThanOrEqual(6);
+        for (const match of result.matches) {
+            expect(match.layer).toBe(5);
+        }
+    });
+
+    it('should combine tag and name filters', () => {
+        const result = search_project({
+            project_path: EXTERNAL_FIXTURES,
+            tag: 'MainCamera',
+            name: '*Camera*',
+            scan_all: true,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.total_matches).toBeGreaterThanOrEqual(1);
+        for (const match of result.matches) {
+            expect(match.tag).toBe('MainCamera');
+        }
+    });
 });
 
 // ========== Native vs JS Parity Tests ==========
