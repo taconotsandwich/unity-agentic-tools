@@ -1,27 +1,31 @@
 # Unity Agentic Tools
 
-A Claude Code plugin for reading and editing Unity scenes, prefabs, and assets with minimal token usage.
+A Claude Code plugin and CLI for reading and editing Unity scenes, prefabs, and assets with minimal token usage. Powered by a native Rust backend (napi-rs) for fast parsing of large files.
 
 ## Features
 
-- **Scene Analysis** - List hierarchies, search GameObjects, inspect components
-- **Prefab Support** - Same capabilities for prefab files
-- **Safe Editing** - Modify properties while preserving Unity's YAML format
-- **Fast Parsing** - Rust-powered backend for large files
+- **Scene Analysis** - List hierarchies, search GameObjects, inspect components with pagination
+- **Prefab Support** - Inspect, create variants, unpack instances
+- **Safe Editing** - Modify properties, transforms, components while preserving Unity's YAML format
+- **Project Settings** - Read/edit tags, layers, sorting layers, physics, quality, time settings
+- **Build Settings** - Manage build scene list and profiles
+- **Project Search** - Find GameObjects across all scenes/prefabs, regex grep across project files
+- **Documentation** - Auto-indexing local Unity docs with semantic search
+- **Fast Parsing** - Rust-powered backend with parallel I/O for large projects
 
 ## Installation
 
-### From Marketplace
+### npm
 
 ```bash
-# Add the marketplace (run in Claude Code)
-/plugin
+bun add -g unity-agentic-tools
+```
 
-# Navigate to Marketplaces → Add:
-https://github.com/taconotsandwich/unity-agentic-tools
+### Claude Code Plugin
 
-# Then install the plugin
-/plugin install unity-agentic-tools@unity-agentic-tools-marketplace
+```bash
+# From marketplace (run in Claude Code)
+/plugin install unity-agentic-tools
 ```
 
 ### From Source
@@ -29,120 +33,75 @@ https://github.com/taconotsandwich/unity-agentic-tools
 ```bash
 git clone https://github.com/taconotsandwich/unity-agentic-tools.git
 cd unity-agentic-tools
-
-# Install all dependencies (workspace resolves native module)
-bun install
-
-# Build Rust core (requires Rust toolchain)
-bun run build:rust
-
-# Build TypeScript CLI
-bun run build
-
-# Load plugin locally
-claude --plugin-dir ./
+bun install              # workspace links + dev deps
+bun run build:rust       # compile native .node binary (requires Rust)
+bun run build            # build TypeScript
 ```
 
-## Usage
-
-Ask Claude naturally:
-
-- "List all GameObjects in SampleScene.unity"
-- "Find objects with Camera component"
-- "Inspect the Player prefab"
-- "Set Player's m_IsActive to 0"
-
-Or use slash commands directly:
+## CLI Usage
 
 ```bash
-/inspect Assets/Scenes/Main.unity
-/edit Assets/Prefabs/Player.prefab
+# Read
+unity-agentic-tools read scene <file>                      # GameObject hierarchy
+unity-agentic-tools read gameobject <file> <id>             # Single object by name or file ID
+unity-agentic-tools read settings <project> -s tags         # Project settings
+unity-agentic-tools read build <project>                    # Build scene list
+
+# Create
+unity-agentic-tools create gameobject <file> <name>         # New GameObject
+unity-agentic-tools create scene <path>                     # New .unity file
+unity-agentic-tools create component <file> <name> <type>   # Add component
+
+# Update
+unity-agentic-tools update gameobject <file> <name> <prop> <value>
+unity-agentic-tools update transform <file> <id> -p 1,2,3 -r 0,90,0
+unity-agentic-tools update tag <project> add MyTag
+
+# Delete
+unity-agentic-tools delete gameobject <file> <name>
+unity-agentic-tools delete component <file> <file_id>
+
+# Search
+unity-agentic-tools find <file> <pattern>                   # Find by name in file
+unity-agentic-tools search <project> -n <pattern>           # Search across project
+unity-agentic-tools grep <project> <regex>                  # Regex search
+unity-agentic-tools docs <query>                            # Search Unity docs
 ```
 
 ## Project Structure
 
 ```
-.claude-plugin/   Plugin manifest
-commands/         Slash commands
-skills/           Agent skills
-hooks/            Event handlers
-unity-agentic-tools/       TypeScript CLI
-rust-core/        Native Rust module (napi-rs)
-doc-indexer/      Documentation indexing module
+.claude-plugin/          Plugin manifest
+commands/                Slash commands for Claude Code
+skills/                  Agent skills (CLI reference)
+hooks/                   Event handlers (auto-setup, Unity file detection)
+unity-agentic-tools/     TypeScript CLI + tests
+rust-core/               Native Rust module (napi-rs)
+doc-indexer/             Documentation indexing module
 ```
 
 ## Development
 
 Requires: Rust toolchain, Bun runtime.
 
-### First-time setup
-
-```bash
-git clone https://github.com/taconotsandwich/unity-agentic-tools.git
-cd unity-agentic-tools
-bun install                # workspace links + dev deps
-bun run build:rust         # compile native .node binary (requires Rust)
-bun run build              # build TypeScript
-```
-
-### Testing in Claude Code
-
-```bash
-# Load the plugin from your local checkout
-claude --plugin-dir /path/to/unity-agentic-tools
-```
-
-The SessionStart hook checks for `node_modules/` and `dist/cli.js` and runs
-`bun install` + `bun run build` if missing. Since you already built locally,
-the hook exits instantly.
-
-The native module resolves via the workspace link to `rust-core/`, which finds
-your locally-built `.node` file directly -- no npm download needed.
-
-### Rebuild after changes
-
 ```bash
 bun run build:rust         # after Rust code changes
 bun run build              # after TypeScript changes
-bun run test               # unit tests (299 + 50 + 50)
-bun run test:integration   # CLI integration tests
+bun run test               # unit tests (378 + 82)
+bun run test:integration   # CLI integration tests (13)
 bun run type-check         # tsc --noEmit
 ```
 
-### How users differ from devs
-
-| | User (marketplace) | Dev (local) |
-|-|-------------------|-------------|
-| Install | git clone via marketplace | git clone manually |
-| Native binary | `bun install` downloads from npm | `bun run build:rust` compiles locally |
-| Setup | SessionStart hook runs automatically | Manual `bun install` + `bun run build:rust` + `bun run build` |
-| Rust toolchain | Not needed | Required |
-
-Both resolve the native module through the same `rust-core/index.js` loader.
-It checks for a local `.node` file first (dev path), then falls back to the
-npm platform package (user path).
-
-### Testing npm package changes
-
-After changing `rust-core/package.json` or `rust-core/index.js`:
+### Testing npm package
 
 ```bash
-# Verify package contents (should list index.js, index.d.ts, *.node, package.json)
-cd rust-core && npm publish --dry-run
-
-# Create tarball to test install from scratch
-cd rust-core && npm pack                          # -> unity-file-tools-0.1.0.tgz
-
-# Test in an isolated directory
-mkdir /tmp/npm-test && cd /tmp/npm-test
-npm init -y
-npm install /path/to/rust-core/unity-file-tools-0.1.0.tgz
-bun -e "const m = require('unity-file-tools'); console.log(typeof m.Scanner)"
-# Should print: function
+# Dry-run to verify package contents
+cd unity-agentic-tools
+mkdir -p native
+cp ../rust-core/index.js ../rust-core/index.d.ts ../rust-core/*.node native/
+npm publish --dry-run
+rm -rf native
 ```
-
-The `npm pack` + install-from-tarball flow simulates what a real npm consumer
-gets, without publishing anything.
 
 ## License
 
