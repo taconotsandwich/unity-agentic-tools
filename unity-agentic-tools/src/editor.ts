@@ -572,13 +572,85 @@ function generateFileId(existingIds: Set<number>): number {
 }
 
 /**
+ * Calculate the next m_RootOrder for a new child under a given parent.
+ * For root-level (parentTransformId === 0): count transforms with m_Father: {fileID: 0}
+ * For children: count entries in the parent's m_Children array
+ */
+function calculate_root_order(content: string, parentTransformId: number): number {
+    if (parentTransformId === 0) {
+        const matches = content.match(/m_Father:\s*\{fileID:\s*0\}/g);
+        return matches ? matches.length : 0;
+    }
+    // Count entries in parent's m_Children
+    const blocks = content.split(/(?=--- !u!)/);
+    const parentPattern = new RegExp(`^--- !u!4 &${parentTransformId}\\b`);
+    for (const block of blocks) {
+        if (parentPattern.test(block)) {
+            const childMatches = block.match(/m_Children:[\s\S]*?(?=\s*m_Father:)/);
+            if (childMatches) {
+                const entries = childMatches[0].match(/\{fileID:\s*\d+\}/g);
+                return entries ? entries.length : 0;
+            }
+            return 0;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Update or insert m_RootOrder in a Transform block string.
+ */
+function update_root_order_in_block(block: string, rootOrder: number): string {
+    if (/m_RootOrder:\s*\d+/.test(block)) {
+        return block.replace(/m_RootOrder:\s*\d+/, `m_RootOrder: ${rootOrder}`);
+    }
+    // Insert after m_Father line
+    return block.replace(
+        /(m_Father:\s*\{fileID:\s*\d+\})/,
+        `$1\n  m_RootOrder: ${rootOrder}`
+    );
+}
+
+/**
+ * Look up the m_Layer value from a parent Transform's associated GameObject.
+ * Returns 0 for root-level or if lookup fails.
+ */
+function get_layer_from_parent(content: string, parentTransformId: number): number {
+    if (parentTransformId === 0) return 0;
+    const blocks = content.split(/(?=--- !u!)/);
+    const parentPattern = new RegExp(`^--- !u!4 &${parentTransformId}\\b`);
+    // Find parent Transform block -> get m_GameObject fileID
+    let parentGoId: number | null = null;
+    for (const block of blocks) {
+        if (parentPattern.test(block)) {
+            const goMatch = block.match(/m_GameObject:\s*\{fileID:\s*(\d+)\}/);
+            if (goMatch) parentGoId = parseInt(goMatch[1], 10);
+            break;
+        }
+    }
+    if (parentGoId === null) return 0;
+    // Find that GameObject block -> get m_Layer
+    const goPattern = new RegExp(`^--- !u!1 &${parentGoId}\\b`);
+    for (const block of blocks) {
+        if (goPattern.test(block)) {
+            const layerMatch = block.match(/m_Layer:\s*(\d+)/);
+            if (layerMatch) return parseInt(layerMatch[1], 10);
+            break;
+        }
+    }
+    return 0;
+}
+
+/**
  * Create YAML blocks for a new GameObject with Transform.
  */
 function createGameObjectYAML(
   gameObjectId: number,
   transformId: number,
   name: string,
-  parentTransformId: number = 0
+  parentTransformId: number = 0,
+  rootOrder: number = 0,
+  layer: number = 0
 ): string {
   return `--- !u!1 &${gameObjectId}
 GameObject:
@@ -589,7 +661,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: ${transformId}}
-  m_Layer: 0
+  m_Layer: ${layer}
   m_Name: ${name}
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -610,6 +682,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: ${parentTransformId}}
+  m_RootOrder: ${rootOrder}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 `;
 }
@@ -753,6 +826,10 @@ export function createGameObject(options: CreateGameObjectOptions): CreateGameOb
     }
   }
 
+  // Calculate root order and layer inheritance
+  const rootOrder = calculate_root_order(content, parentTransformId);
+  const layer = get_layer_from_parent(content, parentTransformId);
+
   // Extract existing file IDs to avoid collisions
   const existingIds = extractExistingFileIds(content);
 
@@ -762,7 +839,7 @@ export function createGameObject(options: CreateGameObjectOptions): CreateGameOb
   const transformId = generateFileId(existingIds);
 
   // Create the YAML blocks
-  const newBlocks = createGameObjectYAML(gameObjectId, transformId, name.trim(), parentTransformId);
+  const newBlocks = createGameObjectYAML(gameObjectId, transformId, name.trim(), parentTransformId, rootOrder, layer);
 
   // Append to file (ensure trailing newline before new blocks)
   let finalContent = content.endsWith('\n')
@@ -1675,23 +1752,47 @@ function validate_value_type(current_value: string, new_value: string): string |
         return null;
     }
 
-    // 2. Compound: current is an inline object like {x: 0, y: 1} -> reject scalar
+    // 2. Compound: current is an inline object like {x: 0, y: 1} -> validate struct
     if (/^\{.+:.+\}$/.test(current)) {
-        if (!incoming.startsWith('{')) {
+        if (!incoming.startsWith('{') || !incoming.endsWith('}')) {
             return `Expected a compound value (e.g. {x: ..., y: ...}), got "${incoming}"`;
+        }
+        // Validate that field values inside the struct are numeric (or fileID references)
+        const inner = incoming.slice(1, -1).trim();
+        if (inner.length > 0) {
+            const fields = inner.split(',');
+            for (const field of fields) {
+                const kv = field.split(':');
+                if (kv.length < 2) {
+                    return `Malformed struct field in "${incoming}" — expected "key: value" pairs`;
+                }
+                const val = kv.slice(1).join(':').trim();
+                // Allow fileID references and numeric values (int, float, scientific notation)
+                if (!/^-?\d+(\.\d+)?(e[+-]?\d+)?$/i.test(val) && !/^\{fileID:/.test(val)) {
+                    return `Non-numeric value "${val}" in struct "${incoming}" — expected numeric or {fileID: N}`;
+                }
+            }
         }
         return null;
     }
 
-    // 3. Numeric: current is a number -> new must also be numeric
-    if (/^-?\d+(\.\d+)?$/.test(current)) {
-        if (!/^-?\d+(\.\d+)?$/.test(incoming)) {
+    // 3. Array: current is an array (inline [] or multiline "  - ...") -> reject non-array
+    if (/^\[/.test(current) || /^\n?\s*-\s/.test(current)) {
+        if (!incoming.startsWith('[') && incoming !== '[]') {
+            return `Expected an array value (e.g. [] or [...]), got "${incoming}"`;
+        }
+        return null;
+    }
+
+    // 4. Numeric: current is a number -> new must also be numeric
+    if (/^-?\d+(\.\d+)?(e[+-]?\d+)?$/i.test(current)) {
+        if (!/^-?\d+(\.\d+)?(e[+-]?\d+)?$/i.test(incoming)) {
             return `Expected numeric value, got "${incoming}"`;
         }
         return null;
     }
 
-    // 4. String/other: accept anything
+    // 5. String/other: accept anything
     return null;
 }
 
@@ -2119,6 +2220,18 @@ export function duplicateGameObject(options: DuplicateGameObjectOptions): Duplic
         `$1${finalName}`
       );
       break;
+    }
+  }
+
+  // Set m_RootOrder on the cloned root Transform (calculate from original content before appending)
+  if (transformId !== null) {
+    const clonedTransformId = idMap.get(transformId)!;
+    const rootOrder = calculate_root_order(content, fatherId);
+    for (let i = 0; i < clonedBlocks.length; i++) {
+      if (clonedBlocks[i].startsWith(`--- !u!4 &${clonedTransformId}`)) {
+        clonedBlocks[i] = update_root_order_in_block(clonedBlocks[i], rootOrder);
+        break;
+      }
     }
   }
 
@@ -2689,6 +2802,27 @@ export function reparentGameObject(options: ReparentGameObjectOptions): Reparent
   );
   content = content.replace(fatherPattern, `$1{fileID: ${newParentTransformId}}`);
 
+  // Calculate and update m_RootOrder for the reparented Transform
+  {
+    let newRootOrder: number;
+    if (newParentTransformId === 0) {
+      // Moving to root: count root transforms, subtract 1 because our m_Father is already set to 0
+      newRootOrder = calculate_root_order(content, 0) - 1;
+    } else {
+      // Moving under a parent: count existing children (before we add ourselves)
+      newRootOrder = calculate_root_order(content, newParentTransformId);
+    }
+    const reparentBlocks = content.split(/(?=--- !u!)/);
+    const childPattern = new RegExp(`^--- !u!4 &${childTransformId}\\b`);
+    for (let i = 0; i < reparentBlocks.length; i++) {
+      if (childPattern.test(reparentBlocks[i])) {
+        reparentBlocks[i] = update_root_order_in_block(reparentBlocks[i], newRootOrder);
+        break;
+      }
+    }
+    content = reparentBlocks.join('');
+  }
+
   // Add to new parent's m_Children (if not reparenting to root)
   if (newParentTransformId !== 0) {
     content = addChildToParent(content, newParentTransformId, childTransformId);
@@ -2958,6 +3092,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
+  m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!20 &519420031
 Camera:
@@ -3049,6 +3184,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
+  m_RootOrder: 1
   m_LocalEulerAnglesHint: {x: 50, y: -30, z: 0}
 --- !u!108 &705507994
 Light:
