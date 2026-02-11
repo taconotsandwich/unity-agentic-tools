@@ -2122,6 +2122,18 @@ export function duplicateGameObject(options: DuplicateGameObjectOptions): Duplic
     }
   }
 
+  // Collect cloned GameObject names and fileIDs for caller reference
+  const clonedObjects: Array<{ name: string; file_id: number }> = [];
+  for (const block of clonedBlocks) {
+    const headerMatch = block.match(/^--- !u!1 &(\d+)/);
+    if (headerMatch) {
+      const fileId = parseInt(headerMatch[1], 10);
+      const nameMatch = block.match(/m_Name:\s*(.+)/);
+      const name = nameMatch ? nameMatch[1].trim() : '';
+      clonedObjects.push({ name, file_id: fileId });
+    }
+  }
+
   // If source had a parent, add cloned Transform to parent's m_Children
   const newTransformId = transformId !== null ? idMap.get(transformId)! : null;
   let finalContent = content.endsWith('\n')
@@ -2146,7 +2158,8 @@ export function duplicateGameObject(options: DuplicateGameObjectOptions): Duplic
     file_path,
     game_object_id: idMap.get(goId),
     transform_id: newTransformId ?? undefined,
-    total_duplicated: allOldIds.size
+    total_duplicated: allOldIds.size,
+    cloned_objects: clonedObjects
   };
 }
 

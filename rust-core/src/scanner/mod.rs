@@ -423,13 +423,12 @@ impl Scanner {
             })
             .collect();
 
-        // Apply max_depth filter: compute depth from parent_transform_id chains
+        // Apply max_depth filter: exclude objects deeper than max_depth
         if max_depth < 50 {
             // Build a map of transform_id → parent_transform_id
             let mut parent_map: HashMap<String, String> = HashMap::new();
             for detail in &detailed {
                 if let Some(ref parent_id) = detail.parent_transform_id {
-                    // Find this object's transform file_id from its components
                     for comp in &detail.components {
                         if comp.class_id == 4 || comp.class_id == 224 {
                             parent_map.insert(comp.file_id.clone(), parent_id.clone());
@@ -439,31 +438,42 @@ impl Scanner {
                 }
             }
 
-            // Truncate hierarchy display: clear children for objects at depth >= max_depth
-            // (keeps all objects in the list so total count stays accurate)
-            for detail in detailed.iter_mut() {
+            // Compute depth by walking parent chain; stop early once past limit
+            let compute_depth = |tid: &str| -> u32 {
+                let mut depth = 0u32;
+                let mut current = tid.to_string();
+                loop {
+                    match parent_map.get(&current) {
+                        Some(parent) if parent != "0" && !parent.is_empty() => {
+                            depth += 1;
+                            if depth > max_depth {
+                                break;
+                            }
+                            current = parent.clone();
+                        }
+                        _ => break,
+                    }
+                }
+                depth
+            };
+
+            // Remove objects deeper than max_depth; clear children at the boundary
+            detailed.retain_mut(|detail| {
                 let transform_id = detail.components.iter()
                     .find(|c| c.class_id == 4 || c.class_id == 224)
                     .map(|c| c.file_id.clone());
 
                 if let Some(tid) = transform_id {
-                    let mut depth = 0u32;
-                    let mut current = tid;
-                    loop {
-                        match parent_map.get(&current) {
-                            Some(parent) if parent != "0" && !parent.is_empty() => {
-                                depth += 1;
-                                if depth > max_depth {
-                                    detail.children = None;
-                                    break;
-                                }
-                                current = parent.clone();
-                            }
-                            _ => break,
-                        }
+                    let depth = compute_depth(&tid);
+                    if depth > max_depth {
+                        return false;
+                    }
+                    if depth == max_depth {
+                        detail.children = None;
                     }
                 }
-            }
+                true
+            });
         }
 
         let total = detailed.len() as u32;

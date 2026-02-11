@@ -269,6 +269,7 @@ export interface DuplicateGameObjectResult {
   game_object_id?: number;
   transform_id?: number;
   total_duplicated?: number;
+  cloned_objects?: Array<{ name: string; file_id: number }>;
   error?: string;
 }
 
