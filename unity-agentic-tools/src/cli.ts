@@ -12,7 +12,11 @@ import { search_project, grep_project } from './project-search';
 import { read_project_version } from './build-version';
 import { find_unity_project_root } from './utils';
 import * as path from 'path';
+import * as fs from 'fs';
 const { exec } = require('child_process');
+
+const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8'));
+const VERSION = pkg.version;
 
 if (!(process as any).versions.bun) {
   console.error('CRITICAL ERROR: This tool MUST be run with BUN.');
@@ -37,7 +41,7 @@ function getScanner(): UnityScanner {
 program
   .name('unity-agentic-tools')
   .description('Fast, token-efficient Unity YAML parser')
-  .version('1.0.0');
+  .version(VERSION);
 
 // CRUD command groups
 program.addCommand(build_create_command());
@@ -264,7 +268,7 @@ program.command('status')
       config: config,
       guid_cache_count: guidCacheCount,
       runtime: 'bun',
-      version: '1.0.0',
+      version: VERSION,
       native_module: isNativeModuleAvailable(),
       native_module_error: isNativeModuleAvailable() ? null : getNativeModuleError(),
     };
