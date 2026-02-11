@@ -282,6 +282,24 @@ describe('Settings Editor', () => {
 
             expect(result.success).toBe(false);
         });
+
+        it('should reject layer name with invalid characters', () => {
+            const newline = edit_layer({
+                project_path: temp.project_path,
+                index: 8,
+                name: 'Bad\nLayer',
+            });
+            expect(newline.success).toBe(false);
+            expect(newline.error).toContain('newline');
+
+            const slash = edit_layer({
+                project_path: temp.project_path,
+                index: 8,
+                name: 'Bad/Layer',
+            });
+            expect(slash.success).toBe(false);
+            expect(slash.error).toContain('forward slash');
+        });
     });
 
     describe('edit_sorting_layer', () => {
