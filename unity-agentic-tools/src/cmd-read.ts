@@ -113,6 +113,15 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 console.log(JSON.stringify({ error: validationErr }, null, 2));
                 return;
             }
+            // Check for duplicate names before inspect
+            if (!/^\d+$/.test(object_id)) {
+                const matches = getScanner().find_by_name(file, object_id, true);
+                if (matches.length > 1) {
+                    const ids = matches.map((m: any) => m.file_id).join(', ');
+                    console.log(JSON.stringify({ error: `Multiple GameObjects named "${object_id}" found (fileIDs: ${ids}). Use numeric fileID.` }, null, 2));
+                    return;
+                }
+            }
             const result = getScanner().inspect({
                 file,
                 identifier: object_id,

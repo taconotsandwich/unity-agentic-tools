@@ -3188,3 +3188,319 @@ describe('Bug #10/#11: GO property validation', () => {
         }
     });
 });
+
+// ========== Part A: m_RootOrder + Layer Inheritance ==========
+
+describe('m_RootOrder', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should set m_RootOrder on new root-level GameObject', () => {
+        // SampleScene has 4 root-level GOs, so next should be m_RootOrder: 4
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'RootOrderTest'
+        });
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const transformBlock = content.split(/(?=--- !u!4 )/).find(b => b.includes(`--- !u!4 &${result.transform_id}`));
+        expect(transformBlock).toBeDefined();
+        expect(transformBlock).toContain('m_RootOrder: 4');
+    });
+
+    it('should assign sequential m_RootOrder for multiple root GOs', () => {
+        const r1 = createGameObject({ file_path: temp_fixture.temp_path, name: 'SeqRoot1' });
+        const r2 = createGameObject({ file_path: temp_fixture.temp_path, name: 'SeqRoot2' });
+        expect(r1.success).toBe(true);
+        expect(r2.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const blocks = content.split(/(?=--- !u!4 )/);
+
+        const b1 = blocks.find(b => b.includes(`--- !u!4 &${r1.transform_id}`));
+        const b2 = blocks.find(b => b.includes(`--- !u!4 &${r2.transform_id}`));
+        expect(b1).toContain('m_RootOrder: 4');
+        expect(b2).toContain('m_RootOrder: 5');
+    });
+
+    it('should set m_RootOrder: 0 for first child under a parent', () => {
+        const parent = createGameObject({ file_path: temp_fixture.temp_path, name: 'ParentRO' });
+        const child = createGameObject({ file_path: temp_fixture.temp_path, name: 'ChildRO', parent: 'ParentRO' });
+        expect(parent.success).toBe(true);
+        expect(child.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const childBlock = content.split(/(?=--- !u!4 )/).find(b => b.includes(`--- !u!4 &${child.transform_id}`));
+        expect(childBlock).toContain('m_RootOrder: 0');
+    });
+
+    it('should assign sequential m_RootOrder for multiple children', () => {
+        createGameObject({ file_path: temp_fixture.temp_path, name: 'ParentMulti' });
+        const c1 = createGameObject({ file_path: temp_fixture.temp_path, name: 'Child1', parent: 'ParentMulti' });
+        const c2 = createGameObject({ file_path: temp_fixture.temp_path, name: 'Child2', parent: 'ParentMulti' });
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const blocks = content.split(/(?=--- !u!4 )/);
+        const b1 = blocks.find(b => b.includes(`--- !u!4 &${c1.transform_id}`));
+        const b2 = blocks.find(b => b.includes(`--- !u!4 &${c2.transform_id}`));
+        expect(b1).toContain('m_RootOrder: 0');
+        expect(b2).toContain('m_RootOrder: 1');
+    });
+
+    it('should set correct m_RootOrder when duplicating root GO', () => {
+        const result = duplicateGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'Player',
+            new_name: 'PlayerClone'
+        });
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const clonedBlock = content.split(/(?=--- !u!4 )/).find(b => b.includes(`--- !u!4 &${result.transform_id}`));
+        expect(clonedBlock).toBeDefined();
+        expect(clonedBlock).toContain('m_RootOrder: 4');
+    });
+
+    it('should set correct m_RootOrder when reparenting to root', () => {
+        // Create a parent with a child, then reparent child to root
+        createGameObject({ file_path: temp_fixture.temp_path, name: 'TempParent' });
+        const child = createGameObject({ file_path: temp_fixture.temp_path, name: 'ReparentChild', parent: 'TempParent' });
+
+        const result = reparentGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'ReparentChild',
+            new_parent: 'root'
+        });
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const childBlock = content.split(/(?=--- !u!4 )/).find(b => b.includes(`--- !u!4 &${child.transform_id}`));
+        expect(childBlock).toBeDefined();
+        // After reparenting to root, m_RootOrder should reflect position among root siblings
+        expect(childBlock).toMatch(/m_RootOrder:\s*\d+/);
+    });
+
+    it('should set correct m_RootOrder when reparenting under a new parent', () => {
+        createGameObject({ file_path: temp_fixture.temp_path, name: 'NewParent' });
+        createGameObject({ file_path: temp_fixture.temp_path, name: 'ExistingChild', parent: 'NewParent' });
+        createGameObject({ file_path: temp_fixture.temp_path, name: 'MovingChild' });
+
+        const result = reparentGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'MovingChild',
+            new_parent: 'NewParent'
+        });
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const movingBlock = content.split(/(?=--- !u!4 )/).find(b => b.includes(`--- !u!4 &${result.child_transform_id}`));
+        expect(movingBlock).toBeDefined();
+        // Should be second child (after ExistingChild)
+        expect(movingBlock).toContain('m_RootOrder: 1');
+    });
+});
+
+describe('layer inheritance', () => {
+    it('should inherit parent layer when creating child GO', () => {
+        const temp = create_temp_fixture(resolve(__dirname, 'fixtures', 'SampleScene.unity'));
+        try {
+            // First set Player to layer 5
+            safeUnityYAMLEdit(temp.temp_path, 'Player', 'm_Layer', '5');
+
+            // Create a child under Player
+            const child = createGameObject({
+                file_path: temp.temp_path,
+                name: 'LayerChild',
+                parent: 'Player'
+            });
+            expect(child.success).toBe(true);
+
+            const content = readFileSync(temp.temp_path, 'utf-8');
+            // Find the child's GO block
+            const goBlock = content.split(/(?=--- !u!1 )/).find(b => b.includes(`--- !u!1 &${child.game_object_id}`));
+            expect(goBlock).toBeDefined();
+            expect(goBlock).toContain('m_Layer: 5');
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+
+    it('should use layer 0 for root-level GO', () => {
+        const temp = create_temp_fixture(resolve(__dirname, 'fixtures', 'SampleScene.unity'));
+        try {
+            const result = createGameObject({
+                file_path: temp.temp_path,
+                name: 'RootLayerTest'
+            });
+            expect(result.success).toBe(true);
+
+            const content = readFileSync(temp.temp_path, 'utf-8');
+            const goBlock = content.split(/(?=--- !u!1 )/).find(b => b.includes(`--- !u!1 &${result.game_object_id}`));
+            expect(goBlock).toBeDefined();
+            expect(goBlock).toContain('m_Layer: 0');
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+});
+
+// ========== Part B: Value Validation ==========
+
+describe('value validation (validate_value_type)', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should reject struct with missing closing brace', () => {
+        // Transform 508316495 (Main Camera) has m_LocalPosition: {x: 0, y: 1, z: -10}
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '508316495',
+            property: 'm_LocalPosition',
+            new_value: '{x: 1, y: 2, z: 3'
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('compound value');
+    });
+
+    it('should reject struct with non-numeric values', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '508316495',
+            property: 'm_LocalPosition',
+            new_value: '{x: abc, y: def, z: ghi}'
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Non-numeric');
+    });
+
+    it('should accept valid struct values', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '508316495',
+            property: 'm_LocalPosition',
+            new_value: '{x: 1, y: 2.5, z: -3}'
+        });
+        expect(result.success).toBe(true);
+    });
+});
+
+// ========== Part C: Duplicate Name Handling ==========
+
+describe('duplicate name handling', () => {
+    it('should reject edit of duplicate-named GameObject by name', () => {
+        const temp = create_temp_fixture(resolve(__dirname, 'fixtures', 'SampleScene.unity'));
+        try {
+            // Create two GOs with the same name
+            createGameObject({ file_path: temp.temp_path, name: 'DuplicateName' });
+            // Manually write a second one with the same name
+            const content = readFileSync(temp.temp_path, 'utf-8');
+            const newBlocks = `--- !u!1 &999999901
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 999999902}
+  m_Layer: 0
+  m_Name: DuplicateName
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &999999902
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 999999901}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 99
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+`;
+            writeFileSync(temp.temp_path, content + newBlocks, 'utf-8');
+
+            // Editing by name should fail with duplicate error
+            const result = safeUnityYAMLEdit(temp.temp_path, 'DuplicateName', 'm_IsActive', '0');
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Multiple GameObjects named');
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+});
+
+// ========== Part D: Tab Character Validation ==========
+
+describe('tab character validation', () => {
+    it('should reject GameObject name with tab character', () => {
+        const temp = create_temp_fixture(resolve(__dirname, 'fixtures', 'SampleScene.unity'));
+        try {
+            const result = createGameObject({
+                file_path: temp.temp_path,
+                name: 'Tab\there'
+            });
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('tab characters');
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+});
+
+// ========== Part A8: createScene m_RootOrder ==========
+
+describe('createScene m_RootOrder', () => {
+    const sceneDir = join(tmpdir(), `unity-rootorder-test-${Date.now()}`);
+
+    beforeEach(() => {
+        mkdirSync(sceneDir, { recursive: true });
+    });
+
+    afterEach(() => {
+        rmSync(sceneDir, { recursive: true, force: true });
+    });
+
+    it('should include m_RootOrder in default scene transforms', () => {
+        const scenePath = join(sceneDir, 'TestRO.unity');
+        const result = createScene({ output_path: scenePath, include_defaults: true });
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(scenePath, 'utf-8');
+        // Main Camera transform should have m_RootOrder: 0
+        const cameraTransform = content.split(/(?=--- !u!4 )/).find(b => b.includes('&519420032'));
+        expect(cameraTransform).toContain('m_RootOrder: 0');
+
+        // Directional Light transform should have m_RootOrder: 1
+        const lightTransform = content.split(/(?=--- !u!4 )/).find(b => b.includes('&705507995'));
+        expect(lightTransform).toContain('m_RootOrder: 1');
+    });
+});

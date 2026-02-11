@@ -99,6 +99,9 @@ export function validate_name(name: string, label: string): string | null {
     if (name.includes('\n') || name.includes('\r')) {
         return `${label} cannot contain newlines — they corrupt YAML structure`;
     }
+    if (name.includes('\t')) {
+        return `${label} cannot contain tab characters — they break YAML indentation`;
+    }
     if (name.includes('\0')) {
         return `${label} cannot contain null bytes`;
     }

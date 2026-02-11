@@ -21,6 +21,15 @@ function parseVector(str: string): { x: number; y: number; z: number } {
 
 /** Resolve a GameObject name or numeric fileID to a Transform fileID. */
 function resolve_transform_id(scanner: UnityScanner, file: string, identifier: string): number | null {
+    // Check for duplicate names before inspect
+    if (!/^\d+$/.test(identifier)) {
+        const matches = scanner.find_by_name(file, identifier, true);
+        if (matches.length > 1) {
+            const ids = matches.map((m: any) => m.file_id).join(', ');
+            console.log(JSON.stringify({ error: `Multiple GameObjects named "${identifier}" found (fileIDs: ${ids}). Use numeric fileID.` }, null, 2));
+            return null;
+        }
+    }
     // Look up by name or fileID via the scanner (verbose needed for class_id/file_id on components)
     const result = scanner.inspect({ file, identifier, verbose: true });
 

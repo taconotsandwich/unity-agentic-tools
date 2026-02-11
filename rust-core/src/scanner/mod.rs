@@ -240,6 +240,13 @@ impl Scanner {
             identifier.clone()
         } else {
             let matches = self.find_by_name(options.file.clone(), identifier.clone(), true);
+            if matches.len() > 1 {
+                let ids: Vec<String> = matches.iter().map(|m| m.file_id.clone()).collect();
+                return Some(serde_json::json!({
+                    "error": format!("Multiple GameObjects named \"{}\" found (fileIDs: {}). Use numeric fileID.", identifier, ids.join(", ")),
+                    "is_error": true
+                }));
+            }
             matches.first()?.file_id.clone()
         };
 
