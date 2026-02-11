@@ -6,6 +6,7 @@ import {
     editComponentByFileId,
     unpackPrefab,
     reparentGameObject,
+    editPrefabOverride,
 } from './editor';
 import { edit_settings, edit_tag, edit_layer, edit_sorting_layer } from './settings';
 import { enable_scene, disable_scene, move_scene } from './build-editor';
@@ -228,6 +229,24 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 file_path: file,
                 prefab_instance: prefab_instance,
                 project_path: options.project,
+            });
+
+            console.log(JSON.stringify(result, null, 2));
+        });
+
+    cmd.command('override <file> <prefab_instance> <property_path> <value>')
+        .description('Edit or add a property override in a PrefabInstance m_Modifications list')
+        .option('--object-reference <ref>', 'Object reference value (default: {fileID: 0})')
+        .option('--target <target>', 'Target reference for new entries (e.g., "{fileID: 400000, guid: abc, type: 3}")')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, prefab_instance, property_path, value, options) => {
+            const result = editPrefabOverride({
+                file_path: file,
+                prefab_instance,
+                property_path,
+                new_value: value,
+                object_reference: options.objectReference,
+                target: options.target,
             });
 
             console.log(JSON.stringify(result, null, 2));

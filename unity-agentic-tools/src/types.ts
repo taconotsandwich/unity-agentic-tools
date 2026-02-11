@@ -356,6 +356,26 @@ export interface EditComponentResult {
   error?: string;
 }
 
+// ========== Prefab Override Types ==========
+
+export interface EditPrefabOverrideOptions {
+  file_path: string;
+  prefab_instance: string;      // fileID of the PrefabInstance block (e.g., "700000")
+  property_path: string;        // e.g., "m_LocalPosition.x" or "m_Name"
+  new_value: string;
+  object_reference?: string;    // e.g., "{fileID: 12345}" -- defaults to "{fileID: 0}"
+  target?: string;              // Target reference for new entries (e.g., "{fileID: 400000, guid: abc, type: 3}")
+}
+
+export interface EditPrefabOverrideResult {
+  success: boolean;
+  file_path: string;
+  prefab_instance_id?: string;
+  property_path?: string;
+  action?: 'updated' | 'added';
+  error?: string;
+}
+
 // ========== Settings Types ==========
 
 export interface ReadSettingsOptions {

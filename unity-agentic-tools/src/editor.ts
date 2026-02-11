@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import * as path from 'path';
-import type { CreateGameObjectOptions, CreateGameObjectResult, EditTransformOptions, Vector3, AddComponentOptions, AddComponentResult, CreatePrefabVariantOptions, CreatePrefabVariantResult, Quaternion, PropertyEdit, EditComponentByFileIdOptions, EditComponentResult, RemoveComponentOptions, RemoveComponentResult, DeleteGameObjectOptions, DeleteGameObjectResult, CopyComponentOptions, CopyComponentResult, DuplicateGameObjectOptions, DuplicateGameObjectResult, CreateScriptableObjectOptions, CreateScriptableObjectResult, UnpackPrefabOptions, UnpackPrefabResult, ReparentGameObjectOptions, ReparentGameObjectResult, CreateMetaFileOptions, CreateMetaFileResult, CreateSceneOptions, CreateSceneResult } from './types';
+import type { CreateGameObjectOptions, CreateGameObjectResult, EditTransformOptions, Vector3, AddComponentOptions, AddComponentResult, CreatePrefabVariantOptions, CreatePrefabVariantResult, Quaternion, PropertyEdit, EditComponentByFileIdOptions, EditComponentResult, RemoveComponentOptions, RemoveComponentResult, DeleteGameObjectOptions, DeleteGameObjectResult, CopyComponentOptions, CopyComponentResult, DuplicateGameObjectOptions, DuplicateGameObjectResult, CreateScriptableObjectOptions, CreateScriptableObjectResult, UnpackPrefabOptions, UnpackPrefabResult, ReparentGameObjectOptions, ReparentGameObjectResult, CreateMetaFileOptions, CreateMetaFileResult, CreateSceneOptions, CreateSceneResult, EditPrefabOverrideOptions, EditPrefabOverrideResult } from './types';
 import { get_class_id, UNITY_CLASS_IDS } from './class-ids';
 import { atomicWrite, generateGuid, find_unity_project_root, validate_name } from './utils';
 import { getNativeBuildGuidCache } from './scanner';
@@ -349,6 +349,158 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
     class_id: classId,
     bytes_written: writeResult.bytes_written
   };
+}
+
+// ========== Prefab Override Editing ==========
+
+/**
+ * Edit or add a property override in a PrefabInstance's m_Modifications list.
+ */
+export function editPrefabOverride(options: EditPrefabOverrideOptions): EditPrefabOverrideResult {
+    const { file_path, prefab_instance, property_path, new_value, object_reference, target } = options;
+    const objRef = object_reference ?? '{fileID: 0}';
+
+    if (!existsSync(file_path)) {
+        return { success: false, file_path, error: `File not found: ${file_path}` };
+    }
+
+    let content: string;
+    try {
+        content = readFileSync(file_path, 'utf-8');
+    } catch (err) {
+        return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    // Find the PrefabInstance block (class 1001)
+    const blockPattern = new RegExp(`--- !u!1001 &${prefab_instance}\\b`);
+    if (!blockPattern.test(content)) {
+        return { success: false, file_path, error: `PrefabInstance with fileID ${prefab_instance} not found` };
+    }
+
+    // Split into blocks and find the target block
+    const blocks = content.split(/(?=--- !u!)/);
+    const targetBlockPattern = new RegExp(`^--- !u!1001 &${prefab_instance}\\b`);
+    let targetBlockIndex = -1;
+
+    for (let i = 0; i < blocks.length; i++) {
+        if (targetBlockPattern.test(blocks[i])) {
+            targetBlockIndex = i;
+            break;
+        }
+    }
+
+    if (targetBlockIndex === -1) {
+        return { success: false, file_path, error: `PrefabInstance block ${prefab_instance} not found` };
+    }
+
+    const block = blocks[targetBlockIndex];
+
+    // Find existing modification entry by propertyPath
+    const escapedPath = property_path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const entryPattern = new RegExp(
+        `(- target:\\s*\\{[^}]+\\}\\s*\\n\\s*propertyPath:\\s*)${escapedPath}(\\s*\\n\\s*value:\\s*)(.*)(\\s*\\n\\s*objectReference:\\s*)(.*)`,
+        'm'
+    );
+    const entryMatch = block.match(entryPattern);
+
+    if (entryMatch) {
+        // Update existing entry
+        let updatedBlock = block.replace(entryPattern,
+            `$1${property_path}$2${new_value}$4${objRef}`
+        );
+
+        blocks[targetBlockIndex] = updatedBlock;
+        const finalContent = blocks.join('');
+        const writeResult = atomicWrite(file_path, finalContent);
+
+        if (!writeResult.success) {
+            return { success: false, file_path, error: writeResult.error };
+        }
+
+        return {
+            success: true,
+            file_path,
+            prefab_instance_id: prefab_instance,
+            property_path,
+            action: 'updated',
+        };
+    }
+
+    // No existing entry -- need to add a new one
+    // Determine the target reference
+    let targetRef = target;
+    if (!targetRef) {
+        // Try to infer from sibling properties sharing same root path
+        const rootProp = property_path.split('.')[0];
+        const siblingPattern = new RegExp(
+            `- target:\\s*(\\{[^}]+\\})\\s*\\n\\s*propertyPath:\\s*${rootProp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+            'm'
+        );
+        const siblingMatch = block.match(siblingPattern);
+        if (siblingMatch) {
+            targetRef = siblingMatch[1];
+        }
+    }
+
+    if (!targetRef) {
+        return {
+            success: false,
+            file_path,
+            error: `Cannot infer target for new override "${property_path}". Provide --target (e.g., "{fileID: 400000, guid: ..., type: 3}").`
+        };
+    }
+
+    // Build the new modification entry
+    const newEntry = `    - target: ${targetRef}\n      propertyPath: ${property_path}\n      value: ${new_value}\n      objectReference: ${objRef}`;
+
+    // Insert before m_RemovedComponents (end of modifications list)
+    const removedPattern = /(\n\s*m_RemovedComponents:)/m;
+    const removedMatch = block.match(removedPattern);
+
+    if (removedMatch) {
+        const updatedBlock = block.replace(removedPattern, `\n${newEntry}$1`);
+        blocks[targetBlockIndex] = updatedBlock;
+    } else {
+        // Fallback: insert after the last modification entry
+        // Find the last objectReference line in m_Modifications
+        const lines = block.split('\n');
+        let lastObjRefIdx = -1;
+        let inModifications = false;
+        for (let i = 0; i < lines.length; i++) {
+            if (/m_Modifications:/.test(lines[i])) {
+                inModifications = true;
+                continue;
+            }
+            if (inModifications && /^\s*objectReference:/.test(lines[i])) {
+                lastObjRefIdx = i;
+            }
+            if (inModifications && /^\s*m_\w+:/.test(lines[i]) && !/objectReference/.test(lines[i]) && !/propertyPath/.test(lines[i])) {
+                if (lastObjRefIdx !== -1) break;
+            }
+        }
+
+        if (lastObjRefIdx !== -1) {
+            lines.splice(lastObjRefIdx + 1, 0, newEntry);
+            blocks[targetBlockIndex] = lines.join('\n');
+        } else {
+            return { success: false, file_path, error: 'Could not find insertion point in m_Modifications' };
+        }
+    }
+
+    const finalContent = blocks.join('');
+    const writeResult = atomicWrite(file_path, finalContent);
+
+    if (!writeResult.success) {
+        return { success: false, file_path, error: writeResult.error };
+    }
+
+    return {
+        success: true,
+        file_path,
+        prefab_instance_id: prefab_instance,
+        property_path,
+        action: 'added',
+    };
 }
 
 /**
@@ -1813,13 +1965,160 @@ function extract_current_value(block: string, propertyPath: string): string | nu
         // Extract sub-field value from inline object like {x: 0, y: 1, z: -10}
         const subPattern = new RegExp(`${subField}:\\s*([^,}]+)`);
         const subMatch = objStr.match(subPattern);
-        return subMatch ? subMatch[1].trim() : null;
+        if (subMatch) return subMatch[1].trim();
+
+        // Fall back to block-style nested YAML
+        const blockValue = extract_block_style_value(block, parts);
+        if (blockValue !== null) return blockValue;
+
+        return null;
     }
 
     // Simple path
     const propPattern = new RegExp(`^\\s*${propertyPath}:\\s*(.*)$`, 'm');
     const match = block.match(propPattern);
     return match ? match[1].trim() : null;
+}
+
+/**
+ * Extract a nested value from block-style YAML by walking indentation levels.
+ * For a path like ["m_Shadows", "m_Type"], finds:
+ *   m_Shadows:
+ *     m_Type: 2    <-- returns "2"
+ */
+function extract_block_style_value(block: string, parts: string[]): string | null {
+    const lines = block.split('\n');
+    let searchStart = 0;
+    let searchEnd = lines.length;
+
+    // Walk each segment except the last to narrow the search window
+    for (let seg = 0; seg < parts.length - 1; seg++) {
+        const segment = parts[seg];
+        let parentIdx = -1;
+        let parentIndent = -1;
+
+        // Find the parent line within the current window
+        for (let i = searchStart; i < searchEnd; i++) {
+            const match = lines[i].match(new RegExp(`^(\\s*)${segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*$`));
+            if (match) {
+                parentIdx = i;
+                parentIndent = match[1].length;
+                break;
+            }
+        }
+
+        if (parentIdx === -1) return null;
+
+        // Detect child indent from the first non-empty line after parent
+        let childIndent = -1;
+        for (let i = parentIdx + 1; i < searchEnd; i++) {
+            if (lines[i].trim() === '') continue;
+            const leadingSpaces = lines[i].match(/^(\s*)/);
+            if (leadingSpaces) {
+                const indent = leadingSpaces[1].length;
+                if (indent > parentIndent) {
+                    childIndent = indent;
+                    break;
+                }
+            }
+            break; // non-empty line at same or lower indent means no children
+        }
+
+        if (childIndent === -1) return null;
+
+        // Narrow search window to children of this parent
+        searchStart = parentIdx + 1;
+        for (let i = parentIdx + 1; i < searchEnd; i++) {
+            if (lines[i].trim() === '') continue;
+            const leadingSpaces = lines[i].match(/^(\s*)/);
+            if (leadingSpaces && leadingSpaces[1].length < childIndent) {
+                searchEnd = i;
+                break;
+            }
+        }
+    }
+
+    // Find the final property within the narrowed window
+    const finalProp = parts[parts.length - 1];
+    for (let i = searchStart; i < searchEnd; i++) {
+        const match = lines[i].match(new RegExp(`^\\s*${finalProp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*(.+)$`));
+        if (match) {
+            return match[1].trim();
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Resolve and replace a nested property value in block-style YAML.
+ * For a path like ["m_Shadows", "m_Type"] with value "1", finds:
+ *   m_Shadows:
+ *     m_Type: 2    <-- replaces "2" with "1"
+ * Returns the modified block, or null if any segment wasn't found.
+ */
+function resolve_block_style_path(block: string, segments: string[], value: string): string | null {
+    const lines = block.split('\n');
+    let searchStart = 0;
+    let searchEnd = lines.length;
+
+    // Walk each segment except the last to narrow the search window
+    for (let seg = 0; seg < segments.length - 1; seg++) {
+        const segment = segments[seg];
+        let parentIdx = -1;
+        let parentIndent = -1;
+
+        for (let i = searchStart; i < searchEnd; i++) {
+            const match = lines[i].match(new RegExp(`^(\\s*)${segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*$`));
+            if (match) {
+                parentIdx = i;
+                parentIndent = match[1].length;
+                break;
+            }
+        }
+
+        if (parentIdx === -1) return null;
+
+        // Detect child indent from first non-empty line after parent
+        let childIndent = -1;
+        for (let i = parentIdx + 1; i < searchEnd; i++) {
+            if (lines[i].trim() === '') continue;
+            const leadingSpaces = lines[i].match(/^(\s*)/);
+            if (leadingSpaces) {
+                const indent = leadingSpaces[1].length;
+                if (indent > parentIndent) {
+                    childIndent = indent;
+                    break;
+                }
+            }
+            break;
+        }
+
+        if (childIndent === -1) return null;
+
+        // Narrow to children
+        searchStart = parentIdx + 1;
+        for (let i = parentIdx + 1; i < searchEnd; i++) {
+            if (lines[i].trim() === '') continue;
+            const leadingSpaces = lines[i].match(/^(\s*)/);
+            if (leadingSpaces && leadingSpaces[1].length < childIndent) {
+                searchEnd = i;
+                break;
+            }
+        }
+    }
+
+    // Find and replace the final property
+    const finalProp = segments[segments.length - 1];
+    for (let i = searchStart; i < searchEnd; i++) {
+        const match = lines[i].match(new RegExp(`^(\\s*${finalProp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*).+$`));
+        if (match) {
+            lines[i] = match[1] + value;
+            return lines.join('\n');
+        }
+    }
+
+    return null;
 }
 
 /**
@@ -1853,6 +2152,11 @@ function applyModification(block: string, propertyPath: string, value: string, o
       const updatedFields = fields.replace(fieldPattern, `$1${value}`);
       return block.replace(inlinePattern, `$1${updatedFields}$3`);
     }
+
+    // Fall back to block-style nested YAML
+    const effectiveValue = objectReference && objectReference !== '{fileID: 0}' ? objectReference : value;
+    const blockResult = resolve_block_style_path(block, parts, effectiveValue);
+    if (blockResult !== null) return blockResult;
 
     return block;
   }
