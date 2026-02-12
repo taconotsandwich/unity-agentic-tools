@@ -25,6 +25,7 @@ const SETTING_ALIASES: Record<string, string> = {
     tags: 'TagManager',
     tagmanager: 'TagManager',
     physics: 'DynamicsManager',
+    dynamics: 'DynamicsManager',
     dynamicsmanager: 'DynamicsManager',
     quality: 'QualitySettings',
     qualitysettings: 'QualitySettings',
@@ -41,6 +42,7 @@ const SETTING_ALIASES: Record<string, string> = {
     physics2d: 'Physics2DSettings',
     physics2dsettings: 'Physics2DSettings',
     player: 'ProjectSettings',
+    project: 'ProjectSettings',
     projectsettings: 'ProjectSettings',
     navmesh: 'NavMeshAreas',
     navmeshareas: 'NavMeshAreas',
@@ -51,7 +53,12 @@ const SETTING_ALIASES: Record<string, string> = {
  */
 function resolve_setting_name(setting: string): string {
     const lower = setting.toLowerCase();
-    return SETTING_ALIASES[lower] || setting;
+    const resolved = SETTING_ALIASES[lower];
+    if (resolved) return resolved;
+    // If it matches an exact canonical name (e.g., "TagManager"), accept it
+    const canonical = Object.values(SETTING_ALIASES);
+    if (canonical.includes(setting)) return setting;
+    return setting;
 }
 
 /**

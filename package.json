@@ -15,7 +15,9 @@
     "test:integration": "cd unity-agentic-tools && bash test/cli-integration.test.sh",
     "test:coverage": "cd unity-agentic-tools && bun run test:coverage",
     "type-check": "cd unity-agentic-tools && tsc --noEmit && cd ../doc-indexer && tsc --noEmit",
-    "lint": "echo 'No linter configured'"
+    "lint": "echo 'No linter configured'",
+    "setup-dev": "bun install && bun run build:rust && bun run build && cd unity-agentic-tools && npm link",
+    "teardown-dev": "cd unity-agentic-tools && npm unlink -g unity-agentic-tools && rm -rf dist"
   },
   "devDependencies": {
     "@types/node": "^25.0.5",
