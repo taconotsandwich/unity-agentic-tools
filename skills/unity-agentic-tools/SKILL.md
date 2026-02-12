@@ -28,7 +28,7 @@ CLI: `unity-agentic-tools <command>`
 | `create meta <script_path>` | Generate .meta file (MonoImporter) |
 | `create component <file> <name> <component>` | Add component (built-in or script with `-p <project>`) |
 | `create component-copy <file> <src_id> <target_name>` | Copy component to another object |
-| `create build-scene <project> <scene>` | Add scene to build settings |
+| `create build <project> <scene>` | Add scene to build settings |
 
 ## update — Modify properties, transforms, settings
 
@@ -43,8 +43,14 @@ CLI: `unity-agentic-tools <command>`
 | `update layer <project> <index> <name>` | Set named layer (3-31) |
 | `update sorting-layer <project> add\|remove <name>` | Add/remove sorting layer |
 | `update parent <file> <name> <new_parent>` | Move under new parent ("root" for scene root) |
-| `update prefab <file> <instance>` | Unpack PrefabInstance to standalone objects |
-| `update build-scene <project> <scene>` | Enable (`--enable`), disable (`--disable`), or move (`--move <idx>`) scene in build |
+| `update prefab unpack <file> <instance>` | Unpack PrefabInstance to standalone objects |
+| `update prefab override <file> <instance> <path> <value>` | Edit/add property override |
+| `update prefab remove-override <file> <instance> <path>` | Remove property override |
+| `update prefab remove-component <file> <instance> <ref>` | Remove a component from prefab |
+| `update prefab restore-component <file> <instance> <ref>` | Restore a removed component |
+| `update prefab remove-gameobject <file> <instance> <ref>` | Remove a GameObject from prefab |
+| `update prefab restore-gameobject <file> <instance> <ref>` | Restore a removed GameObject |
+| `update build <project> <scene>` | Enable (`--enable`), disable (`--disable`), or move (`--move <idx>`) scene in build |
 
 ## delete — Remove objects and components
 
@@ -52,13 +58,14 @@ CLI: `unity-agentic-tools <command>`
 |---------|-------|
 | `delete gameobject <file> <name>` | Delete GameObject and hierarchy |
 | `delete component <file> <file_id>` | Remove component by file ID |
-| `delete build-scene <project> <scene>` | Remove scene from build settings |
+| `delete build <project> <scene>` | Remove scene from build settings |
+| `delete prefab <file> <instance>` | Delete PrefabInstance and stripped/added blocks |
 
 ## Top-level commands
 
 | Command | Usage |
 |---------|-------|
-| `find <file> <pattern>` | Find GameObjects by name (`--exact` for exact match) |
+| `search <file> <pattern>` | Find GameObjects by name in a file (`--exact` for exact match) |
 | `search <project> -n <pattern>` | Search across scenes/prefabs (`-c`, `-t`, `-l` filters, `-m <n>` max matches) |
 | `grep <project> <regex>` | Regex search across project files (`--type cs\|yaml\|all`) |
 | `clone <file> <name>` | Duplicate a GameObject and its hierarchy (`-n <new_name>`) |

@@ -30,7 +30,7 @@ export function build_delete_command(): Command {
             console.log(JSON.stringify(result, null, 2));
         });
 
-    cmd.command('build-scene <project_path> <scene_path>')
+    cmd.command('build <project_path> <scene_path>')
         .description('Remove a scene from build settings')
         .option('-j, --json', 'Output as JSON')
         .action((project_path, scene_path, _options) => {
@@ -42,7 +42,7 @@ export function build_delete_command(): Command {
             }
         });
 
-    cmd.command('prefab-instance <file> <prefab_instance>')
+    cmd.command('prefab <file> <prefab_instance>')
         .description('Delete a PrefabInstance and all its stripped/added blocks from a Unity file')
         .option('-j, --json', 'Output as JSON')
         .action((file, prefab_instance, _options) => {

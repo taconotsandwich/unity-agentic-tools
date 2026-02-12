@@ -43,13 +43,13 @@ else
     failures=$((failures + 1))
 fi
 
-# Test 2: Find GameObjects (exact)
+# Test 2: Search GameObjects in file (exact)
 echo ""
-echo "Test 2: Find GameObjects (exact match)"
-if run_cli "test2" bun dist/cli.js find test/fixtures/SampleScene.unity "Player" --exact --json; then
-    echo "✓ Find exact command works"
+echo "Test 2: Search GameObjects in file (exact match)"
+if run_cli "test2" bun dist/cli.js search test/fixtures/SampleScene.unity "Player" --exact --json; then
+    echo "✓ Search (file mode) exact command works"
 else
-    echo "✗ Find exact command failed"
+    echo "✗ Search (file mode) exact command failed"
     failures=$((failures + 1))
 fi
 
@@ -86,7 +86,7 @@ cp "$fixture_path" "$tmp_dir/create-test.unity"
 
 if run_cli "test5" bun dist/cli.js create gameobject "$tmp_dir/create-test.unity" "NewTestObject" --json; then
     # Verify the object was created by finding it
-    if bun dist/cli.js find "$tmp_dir/create-test.unity" "NewTestObject" --exact 2>/dev/null | grep -q '"count": 1'; then
+    if bun dist/cli.js search "$tmp_dir/create-test.unity" "NewTestObject" --exact 2>/dev/null | grep -q '"count": 1'; then
         echo "✓ Create command works"
     else
         echo "✗ Create command: object not found after creation"
@@ -179,29 +179,29 @@ else
     failures=$((failures + 1))
 fi
 
-# Test 10: Find PrefabInstance by name
+# Test 10: Search PrefabInstance by name in file
 echo ""
-echo "Test 10: Find PrefabInstance by name"
-find_prefab_output=$(bun dist/cli.js find test/fixtures/SceneWithPrefab.unity "MyEnemy" --json 2>&1)
-if echo "$find_prefab_output" | grep -q '"resultType": "PrefabInstance"'; then
-    echo "✓ Find returns PrefabInstance results"
+echo "Test 10: Search PrefabInstance by name in file"
+search_prefab_output=$(bun dist/cli.js search test/fixtures/SceneWithPrefab.unity "MyEnemy" --json 2>&1)
+if echo "$search_prefab_output" | grep -q '"resultType": "PrefabInstance"'; then
+    echo "✓ Search returns PrefabInstance results"
 else
-    echo "✗ Find did not return PrefabInstance results"
-    cat <<< "$find_prefab_output"
+    echo "✗ Search did not return PrefabInstance results"
+    cat <<< "$search_prefab_output"
     failures=$((failures + 1))
 fi
 
-# Test 11: Find returns mixed results (GO + PrefabInstance)
+# Test 11: Search returns mixed results (GO + PrefabInstance)
 echo ""
-echo "Test 11: Find mixed results (GameObject + PrefabInstance)"
-find_mixed_output=$(bun dist/cli.js find test/fixtures/SceneWithPrefab.unity "m" --json 2>&1)
-has_go=$(echo "$find_mixed_output" | grep -c '"resultType": "GameObject"' || true)
-has_pi=$(echo "$find_mixed_output" | grep -c '"resultType": "PrefabInstance"' || true)
+echo "Test 11: Search mixed results (GameObject + PrefabInstance)"
+search_mixed_output=$(bun dist/cli.js search test/fixtures/SceneWithPrefab.unity "m" --json 2>&1)
+has_go=$(echo "$search_mixed_output" | grep -c '"resultType": "GameObject"' || true)
+has_pi=$(echo "$search_mixed_output" | grep -c '"resultType": "PrefabInstance"' || true)
 if [ "$has_go" -gt 0 ] && [ "$has_pi" -gt 0 ]; then
-    echo "✓ Find returns both GameObjects and PrefabInstances"
+    echo "✓ Search returns both GameObjects and PrefabInstances"
 else
-    echo "✗ Find did not return both types (GO=$has_go, PI=$has_pi)"
-    cat <<< "$find_mixed_output"
+    echo "✗ Search did not return both types (GO=$has_go, PI=$has_pi)"
+    cat <<< "$search_mixed_output"
     failures=$((failures + 1))
 fi
 
@@ -256,12 +256,12 @@ if file "$tmp_dir/crlf-scene.unity" | grep -q "CRLF\|CR"; then
         failures=$((failures + 1))
     fi
 
-    # Find by name in CRLF file
-    crlf_find=$(bun dist/cli.js find "$tmp_dir/crlf-scene.unity" "Player" --exact --json 2>/dev/null)
-    if echo "$crlf_find" | grep -q '"count": 1'; then
-        echo "✓ CRLF find works"
+    # Search by name in CRLF file
+    crlf_search=$(bun dist/cli.js search "$tmp_dir/crlf-scene.unity" "Player" --exact --json 2>/dev/null)
+    if echo "$crlf_search" | grep -q '"count": 1'; then
+        echo "✓ CRLF search works"
     else
-        echo "✗ CRLF find failed"
+        echo "✗ CRLF search failed"
         failures=$((failures + 1))
     fi
 

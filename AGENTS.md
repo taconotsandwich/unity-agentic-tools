@@ -72,10 +72,10 @@ All commands use `bun unity-agentic-tools/dist/cli.js <command>`:
 - `read scriptable-object <file>` - Read .asset file
 - `read settings <project> -s <name>` - Read project settings
 - `read build <project>` - Read build settings
-- `create gameobject|scene|component|build-scene|...` - Create Unity objects
-- `update gameobject|transform|component|build-scene|...` - Modify properties
-- `delete gameobject|component|build-scene` - Remove objects
-- `find <file> <pattern>` - Find GameObjects by name
+- `create gameobject|scene|component|build|...` - Create Unity objects
+- `update gameobject|transform|component|build|prefab|...` - Modify properties
+- `delete gameobject|component|build|prefab` - Remove objects
+- `search <file> <pattern>` - Find GameObjects by name in a file
 - `search <project> -n <pattern>` - Search across scenes/prefabs
 - `grep <project> <regex>` - Regex search across project files
 - `clone <file> <name>` - Duplicate a GameObject and its hierarchy

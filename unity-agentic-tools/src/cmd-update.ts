@@ -235,7 +235,11 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify(result, null, 2));
         });
 
-    cmd.command('prefab <file> <prefab_instance>')
+    // Prefab command group — consolidates all prefab operations
+    const prefab_cmd = new Command('prefab')
+        .description('Prefab operations (unpack, override, remove-override, remove/restore component/gameobject)');
+
+    prefab_cmd.command('unpack <file> <prefab_instance>')
         .description('Unpack a PrefabInstance into standalone GameObjects')
         .option('-p, --project <path>', 'Unity project path (for GUID cache lookup)')
         .option('-j, --json', 'Output as JSON')
@@ -249,7 +253,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify(result, null, 2));
         });
 
-    cmd.command('override <file> <prefab_instance> <property_path> <value>')
+    prefab_cmd.command('override <file> <prefab_instance> <property_path> <value>')
         .description('Edit or add a property override in a PrefabInstance m_Modifications list')
         .option('--object-reference <ref>', 'Object reference value (default: {fileID: 0})')
         .option('--target <target>', 'Target reference for new entries (e.g., "{fileID: 400000, guid: abc, type: 3}")')
@@ -267,7 +271,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify(result, null, 2));
         });
 
-    cmd.command('build-scene <project_path> <scene_path>')
+    cmd.command('build <project_path> <scene_path>')
         .description('Enable, disable, or move a scene in build settings')
         .option('--enable', 'Enable the scene')
         .option('--disable', 'Disable the scene')
@@ -347,7 +351,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify(result, null, 2));
         });
 
-    cmd.command('remove-override <file> <prefab_instance> <property_path>')
+    prefab_cmd.command('remove-override <file> <prefab_instance> <property_path>')
         .description('Remove a property override from a PrefabInstance')
         .option('--target <ref>', 'Target reference to match (for disambiguation)')
         .option('-j, --json', 'Output as JSON')
@@ -361,7 +365,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify(result, null, 2));
         });
 
-    cmd.command('prefab-remove-component <file> <prefab_instance> <component_ref>')
+    prefab_cmd.command('remove-component <file> <prefab_instance> <component_ref>')
         .description('Add a component to the PrefabInstance m_RemovedComponents list')
         .option('-j, --json', 'Output as JSON')
         .action((file, prefab_instance, component_ref, _options) => {
@@ -373,7 +377,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify(result, null, 2));
         });
 
-    cmd.command('prefab-restore-component <file> <prefab_instance> <component_ref>')
+    prefab_cmd.command('restore-component <file> <prefab_instance> <component_ref>')
         .description('Remove a component from the PrefabInstance m_RemovedComponents list (restore it)')
         .option('-j, --json', 'Output as JSON')
         .action((file, prefab_instance, component_ref, _options) => {
@@ -385,7 +389,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify(result, null, 2));
         });
 
-    cmd.command('prefab-remove-gameobject <file> <prefab_instance> <gameobject_ref>')
+    prefab_cmd.command('remove-gameobject <file> <prefab_instance> <gameobject_ref>')
         .description('Add a GameObject to the PrefabInstance m_RemovedGameObjects list')
         .option('-j, --json', 'Output as JSON')
         .action((file, prefab_instance, gameobject_ref, _options) => {
@@ -397,7 +401,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify(result, null, 2));
         });
 
-    cmd.command('prefab-restore-gameobject <file> <prefab_instance> <gameobject_ref>')
+    prefab_cmd.command('restore-gameobject <file> <prefab_instance> <gameobject_ref>')
         .description('Remove a GameObject from the PrefabInstance m_RemovedGameObjects list (restore it)')
         .option('-j, --json', 'Output as JSON')
         .action((file, prefab_instance, gameobject_ref, _options) => {
@@ -408,6 +412,8 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             });
             console.log(JSON.stringify(result, null, 2));
         });
+
+    cmd.addCommand(prefab_cmd);
 
     return cmd;
 }
