@@ -27,6 +27,7 @@ export interface GameObjectDetail {
   active: boolean
   tag: string
   layer: number
+  depth?: number | undefined
   components: Array<Component>
   children?: string[] | undefined
   parentTransformId?: string | undefined
@@ -83,6 +84,7 @@ export interface PaginationOptions {
   pageSize?: number | undefined
   cursor?: number | undefined
   maxDepth?: number | undefined
+  filterComponent?: string | undefined
 }
 /** Paginated inspection result */
 export interface PaginatedInspection {

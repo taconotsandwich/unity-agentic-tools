@@ -39,6 +39,8 @@ pub struct GameObjectDetail {
     pub active: bool,
     pub tag: String,
     pub layer: u32,
+    #[napi(ts_type = "number | undefined")]
+    pub depth: Option<u32>,
     pub components: Vec<Component>,
     #[napi(ts_type = "string[] | undefined")]
     pub children: Option<Vec<String>>,
@@ -163,6 +165,8 @@ pub struct PaginationOptions {
     pub cursor: Option<u32>,
     #[napi(ts_type = "number | undefined")]
     pub max_depth: Option<u32>,
+    #[napi(ts_type = "string | undefined")]
+    pub filter_component: Option<String>,
 }
 
 /// Paginated inspection result
