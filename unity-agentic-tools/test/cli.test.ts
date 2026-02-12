@@ -135,10 +135,10 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('find command', () => {
-        it('should find objects by name', () => {
+    describe('search command (file mode)', () => {
+        it('should find objects by name in a file', () => {
             const result = run_cli([
-                'find',
+                'search',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 'Player',
                 '--json'
@@ -760,11 +760,11 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('find input validation', () => {
+    describe('search input validation (file mode)', () => {
         it('should reject empty pattern', () => {
             try {
                 run_cli([
-                    'find',
+                    'search',
                     resolve(fixtures_dir, 'SampleScene.unity'),
                     '',
                     '--json'
@@ -775,10 +775,10 @@ describeIfNative('CLI', () => {
             }
         });
 
-        it('should error on non-existent file', () => {
+        it('should error on non-existent path', () => {
             try {
                 run_cli([
-                    'find',
+                    'search',
                     '/nonexistent/file.unity',
                     'Camera',
                     '--json'
@@ -1135,7 +1135,7 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('update remove-override command', () => {
+    describe('update prefab remove-override command', () => {
         it('should remove prefab override', () => {
             const fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SceneWithPrefab.unity')
@@ -1143,7 +1143,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'update', 'remove-override',
+                    'update', 'prefab', 'remove-override',
                     fixture.temp_path,
                     '700000',
                     'm_LocalPosition.x',
@@ -1170,7 +1170,7 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('update prefab-remove-component command', () => {
+    describe('update prefab remove-component command', () => {
         it('should add component to m_RemovedComponents', () => {
             const fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SceneWithPrefab.unity')
@@ -1178,7 +1178,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'update', 'prefab-remove-component',
+                    'update', 'prefab', 'remove-component',
                     fixture.temp_path,
                     '700000',
                     '{fileID: 12345}',
@@ -1196,7 +1196,7 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('delete prefab-instance command', () => {
+    describe('delete prefab command', () => {
         it('should delete PrefabInstance by fileID', () => {
             const fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SceneWithPrefab.unity')
@@ -1204,7 +1204,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'delete', 'prefab-instance',
+                    'delete', 'prefab',
                     fixture.temp_path,
                     '700000',
                     '--json'
@@ -1230,7 +1230,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'delete', 'prefab-instance',
+                    'delete', 'prefab',
                     fixture.temp_path,
                     'MyEnemy',
                     '--json'

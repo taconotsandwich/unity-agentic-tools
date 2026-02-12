@@ -114,7 +114,7 @@ export function build_create_command(): Command {
             console.log(JSON.stringify(result, null, 2));
         });
 
-    cmd.command('build-scene <project_path> <scene_path>')
+    cmd.command('build <project_path> <scene_path>')
         .description('Add a scene to build settings')
         .option('--index <n>', 'Insert at position (0-based)')
         .option('-j, --json', 'Output as JSON')

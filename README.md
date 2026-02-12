@@ -62,8 +62,8 @@ unity-agentic-tools delete gameobject <file> <name>
 unity-agentic-tools delete component <file> <file_id>
 
 # Search
-unity-agentic-tools find <file> <pattern>                   # Find by name in file
-unity-agentic-tools search <project> -n <pattern>           # Search across project
+unity-agentic-tools search <file> <pattern>                  # Find by name in file
+unity-agentic-tools search <project> -n <pattern>            # Search across project
 unity-agentic-tools grep <project> <regex>                  # Regex search
 unity-agentic-tools docs <query>                            # Search Unity docs
 ```
