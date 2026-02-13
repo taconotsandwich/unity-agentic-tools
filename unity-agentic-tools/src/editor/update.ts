@@ -668,6 +668,15 @@ export function editTransform(options: EditTransformOptions): EditResult {
     };
   }
 
+  // Check if this is a stripped block (prefab variant reference -- no editable properties)
+  if (targetBlock.is_stripped) {
+    return {
+      success: false,
+      file_path,
+      error: `Transform ${transform_id} is a stripped reference in a prefab variant. Use \`update prefab override <file> <prefab_instance_id> <property_path> <value>\` to modify transform overrides (e.g., "m_LocalPosition.x").`
+    };
+  }
+
   let blockText = targetBlock.raw;
 
   // Update position if provided

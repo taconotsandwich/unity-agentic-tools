@@ -414,6 +414,22 @@ describe('UnityEditor', () => {
             const content = readFileSync(temp_fixture.temp_path, 'utf-8');
             expect(content).toBe(originalContent);
         });
+
+        it('should accept falsy values like 0 (BUG FIX #1)', () => {
+            const result = batchEditProperties(temp_fixture.temp_path, [
+                { object_name: 'Player', property: 'm_IsActive', new_value: '0' },
+                { object_name: 'Player', property: 'm_Layer', new_value: '0' }
+            ]);
+
+            expect(result.success).toBe(true);
+            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+
+            // Verify Player has both falsy values (0) applied
+            const playerSection = content.match(/--- !u!1 &1847675923[\s\S]*?(?=--- !u!)/);
+            expect(playerSection).not.toBeNull();
+            expect(playerSection![0]).toContain('m_IsActive: 0');
+            expect(playerSection![0]).toContain('m_Layer: 0');
+        });
     });
 
     describe('validateUnityYAML', () => {
@@ -2755,6 +2771,52 @@ describe('editComponentByFileId - block-style YAML paths', () => {
         const transformBlock = content.match(/--- !u!4 &1847675924[\s\S]*?(?=--- !u!|$)/);
         expect(transformBlock).not.toBeNull();
         expect(transformBlock![0]).toContain('m_LocalPosition: {x: 99, y: 0.5, z: 0}');
+    });
+});
+
+describe('editComponentByFileId - ParticleSystem block-style paths', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'TinyAquarium.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should edit startDelay.scalar on ParticleSystem (no m_ prefix)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '999291844',
+            property: 'startDelay.scalar',
+            new_value: '0.5'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const psBlock = content.match(/--- !u!198 &999291844[\s\S]*?(?=--- !u!|$)/);
+        expect(psBlock).not.toBeNull();
+        expect(psBlock![0]).toContain('scalar: 0.5');
+    });
+
+    it('should edit ringBufferLoopRange.x on ParticleSystem (inline, no m_ prefix)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '999291844',
+            property: 'ringBufferLoopRange.x',
+            new_value: '0.25'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const psBlock = content.match(/--- !u!198 &999291844[\s\S]*?(?=--- !u!|$)/);
+        expect(psBlock).not.toBeNull();
+        expect(psBlock![0]).toContain('ringBufferLoopRange: {x: 0.25, y: 1}');
     });
 });
 

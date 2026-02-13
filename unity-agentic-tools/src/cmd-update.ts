@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import type { UnityScanner } from './scanner';
-import type { FindResult, Component, AssetObject, ComponentPropertyEdit } from './types';
+import type { FindResult, Component, AssetObject, ComponentPropertyEdit, PropertyEdit } from './types';
 import {
     editProperty,
     editTransform,
@@ -322,30 +322,56 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         });
 
     cmd.command('batch <file> <edits_json>')
-        .description('Batch edit multiple GameObject properties in a single file operation')
+        .description('Batch edit multiple GameObject properties in a single file operation. JSON format: [{"object_name":"...","property":"...","value":"..."}]')
         .option('-j, --json', 'Output as JSON')
         .action((file, edits_json, _options) => {
-            let edits: Array<{ object_name: string; property: string; new_value: string }>;
+            let raw_edits: Array<{ object_name: string; property: string; new_value?: string; value?: string }>;
             try {
-                edits = JSON.parse(edits_json);
+                raw_edits = JSON.parse(edits_json);
             } catch {
                 console.log(JSON.stringify({ success: false, error: 'Invalid JSON for edits' }, null, 2));
                 process.exit(1);
+            }
+            // Normalize: accept both "value" and "new_value" keys
+            const edits: PropertyEdit[] = raw_edits.map(e => ({
+                object_name: e.object_name,
+                property: e.property,
+                new_value: e.new_value ?? e.value ?? '',
+            }));
+            // Validate no missing values (allow falsy values like false, 0, "")
+            for (const edit of edits) {
+                if (edit.new_value === undefined || edit.new_value === null) {
+                    console.log(JSON.stringify({ success: false, error: `Missing "value" for ${edit.object_name}.${edit.property}. JSON format: [{"object_name":"...","property":"...","value":"..."}]` }, null, 2));
+                    process.exit(1);
+                }
             }
             const result = batchEditProperties(file, edits);
             console.log(JSON.stringify(result, null, 2));
         });
 
     cmd.command('batch-components <file> <edits_json>')
-        .description('Batch edit multiple component properties by fileID in a single operation')
+        .description('Batch edit multiple component properties by fileID in a single operation. JSON format: [{"file_id":"...","property":"...","value":"..."}]')
         .option('-j, --json', 'Output as JSON')
         .action((file, edits_json, _options) => {
-            let edits: ComponentPropertyEdit[];
+            let raw_edits: Array<{ file_id: string; property: string; new_value?: string; value?: string }>;
             try {
-                edits = JSON.parse(edits_json);
+                raw_edits = JSON.parse(edits_json);
             } catch {
                 console.log(JSON.stringify({ success: false, error: 'Invalid JSON for edits' }, null, 2));
                 process.exit(1);
+            }
+            // Normalize: accept both "value" and "new_value" keys
+            const edits: ComponentPropertyEdit[] = raw_edits.map(e => ({
+                file_id: e.file_id,
+                property: e.property,
+                new_value: e.new_value ?? e.value ?? '',
+            }));
+            // Validate no missing values (allow falsy values like false, 0, "")
+            for (const edit of edits) {
+                if (edit.new_value === undefined || edit.new_value === null) {
+                    console.log(JSON.stringify({ success: false, error: `Missing "value" for component ${edit.file_id}.${edit.property}. JSON format: [{"file_id":"...","property":"...","value":"..."}]` }, null, 2));
+                    process.exit(1);
+                }
             }
             const result = batchEditComponentProperties(file, edits);
             console.log(JSON.stringify(result, null, 2));
