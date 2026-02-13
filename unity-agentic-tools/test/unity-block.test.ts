@@ -838,6 +838,40 @@ describe('UnityBlock', () => {
 
     // ========== Bug Fix: Block-Style Nested Paths (Bug #2) ==========
 
+    describe('ParticleSystem block-style nested paths (no m_ prefix)', () => {
+        it('should get_property for startDelay.scalar on ParticleSystem', () => {
+            const raw_blocks = load_blocks('TinyAquarium.unity');
+            const raw = find_raw_block(raw_blocks, '999291844');
+            const block = new UnityBlock(raw);
+
+            expect(block.class_id).toBe(198);
+            expect(block.get_property('startDelay.scalar')).toBe('0');
+            expect(block.get_property('startDelay.minMaxState')).toBe('0');
+            expect(block.get_property('startDelay.serializedVersion')).toBe('2');
+        });
+
+        it('should set_property for startDelay.scalar on ParticleSystem', () => {
+            const raw_blocks = load_blocks('TinyAquarium.unity');
+            const raw = find_raw_block(raw_blocks, '999291844');
+            const block = new UnityBlock(raw);
+
+            const modified = block.set_property('startDelay.scalar', '0.5');
+            expect(modified).toBe(true);
+            expect(block.get_property('startDelay.scalar')).toBe('0.5');
+            // Other fields should be preserved
+            expect(block.get_property('startDelay.minMaxState')).toBe('0');
+        });
+
+        it('should get_property for ringBufferLoopRange.x (inline on ParticleSystem)', () => {
+            const raw_blocks = load_blocks('TinyAquarium.unity');
+            const raw = find_raw_block(raw_blocks, '999291844');
+            const block = new UnityBlock(raw);
+
+            expect(block.get_property('ringBufferLoopRange.x')).toBe('0');
+            expect(block.get_property('ringBufferLoopRange.y')).toBe('1');
+        });
+    });
+
     describe('block-style nested paths with content after colon', () => {
         it('should get_property for block-style parent with pure colon line', () => {
             const raw = [
