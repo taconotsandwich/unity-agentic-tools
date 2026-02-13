@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-A Claude Code plugin providing token-efficient CLI tools for parsing, analyzing, and editing Unity YAML files (scenes, prefabs, assets). Uses a native Rust backend (napi-rs) for high-performance parsing.
+Token-efficient CLI tools for parsing, analyzing, and editing Unity YAML files (scenes, prefabs, assets). Uses a native Rust backend (napi-rs) for high-performance parsing.
+
+The Claude Code plugin (hooks, skills, manifest) lives in a separate repo: [unity-agentic-tools-claude-plugin](https://github.com/taconotsandwich/unity-agentic-tools-claude-plugin).
 
 **Always use `bun` — never use `node`.**
 
@@ -27,10 +29,6 @@ cd unity-agentic-tools && npm link   # Register unity-agentic-tools CLI globally
 ## Architecture
 
 ```
-.claude-plugin/     Plugin manifest (autodiscovers commands/, skills/)
-commands/           Slash commands for Claude Code
-skills/             Agent skills (unity-agentic-tools parsing instructions)
-hooks/              Event handlers (detect_unity.js, pre/post validation)
 unity-agentic-tools/         TypeScript CLI + Vitest tests
 rust-core/          Native Rust module (napi-rs)
 doc-indexer/        Documentation indexing module
