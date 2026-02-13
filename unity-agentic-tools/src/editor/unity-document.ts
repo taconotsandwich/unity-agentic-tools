@@ -43,7 +43,10 @@ export class UnityDocument {
      * Internal parser: split content into header + blocks, build index.
      */
     private static _parse(content: string, file_path: string | null): UnityDocument {
-        const parts = content.split(/(?=--- !u!)/);
+        // Normalize CRLF to LF — Unity YAML uses LF natively; git on Windows
+        // may convert to CRLF on checkout, which breaks block-style regex parsing.
+        const normalized = content.replace(/\r\n/g, '\n');
+        const parts = normalized.split(/(?=--- !u!)/);
 
         let header = '';
         const raw_blocks: string[] = [];

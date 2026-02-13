@@ -52,13 +52,16 @@ export class UnityBlock {
     private _format_cache: Map<string, 'inline' | 'block'> = new Map();
 
     constructor(raw: string) {
-        const header = parse_header(raw);
+        // Normalize CRLF to LF — Unity YAML uses LF natively; git on Windows
+        // may convert to CRLF on checkout, which breaks block-style regex parsing.
+        const normalized = raw.replace(/\r\n/g, '\n');
+        const header = parse_header(normalized);
         if (!header) {
             throw new Error(
-                `Invalid Unity YAML block header: "${raw.slice(0, 80)}"`
+                `Invalid Unity YAML block header: "${normalized.slice(0, 80)}"`
             );
         }
-        this._raw = raw;
+        this._raw = normalized;
         this._header = header;
     }
 
