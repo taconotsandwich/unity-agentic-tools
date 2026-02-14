@@ -76,30 +76,27 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+      - name: Download Linux native binary
+        uses: actions/download-artifact@v4
         with:
-          workspaces: rust-core -> target
+          name: unity-file-tools.linux-x64-gnu.node
+          path: rust-core/
 
       - name: Install dependencies
         run: bun install
 
-      - name: Build native module
-        working-directory: ./rust-core
-        run: bun run build
-
       - name: Build TypeScript packages
         run: bun run build
 
-      - name: Run tests
+      - name: Type check
+        run: bun run type-check
+
+      - name: Run unit tests
         run: bun run test
 
-      - name: Run Rust tests
-        working-directory: ./rust-core
-        run: cargo test
+      - name: Run integration tests
+        working-directory: ./unity-agentic-tools
+        run: bash test/cli-integration.test.sh
 
       - name: Check version sync
         run: bun scripts/sync-version.js --check
@@ -199,3 +196,38 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  smoke-test:
+    needs: publish
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Wait for npm propagation
+        shell: bash
+        run: sleep 30
+
+      - name: Install published package
+        shell: bash
+        run: npm install -g unity-agentic-tools@${GITHUB_REF_NAME#v}
+
+      - name: Verify native module loads
+        shell: bash
+        run: |
+          OUTPUT=$(unity-agentic-tools status)
+          echo "$OUTPUT"
+          if echo "$OUTPUT" | grep -q '"native_module": true'; then
+            echo "Native module loaded successfully"
+          else
+            echo "ERROR: Native module failed to load"
+            exit 1
+          fi

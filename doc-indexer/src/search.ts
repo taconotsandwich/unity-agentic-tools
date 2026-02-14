@@ -1,5 +1,5 @@
 import { DocStorage } from './storage';
-import { load_embedding_generator } from './native';
+import { load_embedding_generator, type EmbeddingGenerator } from './native';
 import type { EmbeddingVector } from './types';
 
 export interface SearchOptions {
@@ -24,14 +24,14 @@ export interface SearchResults {
 
 export class DocSearch {
     private storage: DocStorage;
-    private _embedder: any | null | undefined = undefined;
+    private _embedder: EmbeddingGenerator | null | undefined = undefined;
 
     constructor(storage: DocStorage) {
         this.storage = storage;
     }
 
     /** Lazy-load the embedding model on first use (avoids blocking constructor). */
-    private get embedder(): any | null {
+    private get embedder(): EmbeddingGenerator | null {
         if (this._embedder === undefined) {
             this._embedder = load_embedding_generator();
         }

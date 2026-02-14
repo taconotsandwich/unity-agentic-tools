@@ -45,6 +45,9 @@ jobs:
       - name: Build TypeScript packages
         run: bun run build
 
+      - name: Type check
+        run: bun run type-check
+
       - name: Run Rust tests
         working-directory: ./rust-core
         run: cargo test
