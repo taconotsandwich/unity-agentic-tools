@@ -1,6 +1,8 @@
 import { Command } from 'commander';
 import { existsSync } from 'fs';
+import { resolve } from 'path';
 import type { UnityScanner } from './scanner';
+import { getNativeExtractCsharpTypes, getNativeExtractDllTypes, getNativeBuildTypeRegistry } from './scanner';
 import { read_settings } from './settings';
 import { get_build_settings } from './build-settings';
 import { UnityDocument } from './editor';
@@ -343,6 +345,97 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 console.log(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }, null, 2));
                 process.exit(1);
             }
+        });
+
+    cmd.command('script <file>')
+        .description('Extract C# type declarations from a .cs file or .NET DLL')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, _options) => {
+            if (!existsSync(file)) {
+                console.log(JSON.stringify({ error: `File not found: ${file}` }, null, 2));
+                process.exit(1);
+            }
+
+            const isDll = file.toLowerCase().endsWith('.dll');
+            const isCs = file.toLowerCase().endsWith('.cs');
+
+            if (!isDll && !isCs) {
+                console.log(JSON.stringify({ error: `File must be a .cs or .dll file: ${file}` }, null, 2));
+                process.exit(1);
+            }
+
+            if (isDll) {
+                const extractDll = getNativeExtractDllTypes();
+                if (!extractDll) {
+                    console.log(JSON.stringify({ error: 'Native module not available (required for DLL parsing)' }, null, 2));
+                    process.exit(1);
+                }
+                const types = extractDll(file);
+                console.log(JSON.stringify({ file, types }, null, 2));
+            } else {
+                const extractCs = getNativeExtractCsharpTypes();
+                if (!extractCs) {
+                    console.log(JSON.stringify({ error: 'Native module not available' }, null, 2));
+                    process.exit(1);
+                }
+                const types = extractCs(file);
+                console.log(JSON.stringify({ file, types }, null, 2));
+            }
+        });
+
+    cmd.command('scripts')
+        .description('List C# types from the type registry with optional filtering')
+        .option('--project <path>', 'Unity project root path', '.')
+        .option('--name <name>', 'Filter by type name (case-insensitive substring match)')
+        .option('--namespace <ns>', 'Filter by namespace (case-insensitive substring match)')
+        .option('--kind <kind>', 'Filter by kind: class, struct, enum, interface')
+        .option('--source <source>', 'Filter by source: assets, packages, dlls, all', 'all')
+        .option('--max <n>', 'Maximum results to return', '100')
+        .option('-j, --json', 'Output as JSON')
+        .action((options) => {
+            const buildRegistry = getNativeBuildTypeRegistry();
+            if (!buildRegistry) {
+                console.log(JSON.stringify({ error: 'Native module not available' }, null, 2));
+                process.exit(1);
+            }
+
+            const projectPath = resolve(options.project);
+            const includePackages = options.source === 'all' || options.source === 'packages';
+            const includeDlls = options.source === 'all' || options.source === 'dlls';
+
+            let types = buildRegistry(projectPath, includePackages, includeDlls);
+
+            // Apply filters
+            if (options.name) {
+                const nameLower = options.name.toLowerCase();
+                types = types.filter(t => t.name.toLowerCase().includes(nameLower));
+            }
+            if (options.namespace) {
+                const nsLower = options.namespace.toLowerCase();
+                types = types.filter(t => t.namespace?.toLowerCase().includes(nsLower) ?? false);
+            }
+            if (options.kind) {
+                const kindLower = options.kind.toLowerCase();
+                types = types.filter(t => t.kind.toLowerCase() === kindLower);
+            }
+            if (options.source === 'assets') {
+                types = types.filter(t => t.file_path.startsWith('Assets/') || t.file_path.startsWith('Assets\\'));
+            } else if (options.source === 'packages') {
+                types = types.filter(t => t.file_path.includes('PackageCache'));
+            } else if (options.source === 'dlls') {
+                types = types.filter(t => t.file_path.endsWith('.dll'));
+            }
+
+            const maxResults = parseInt(options.max, 10) || 100;
+            const truncated = types.length > maxResults;
+            const displayed = types.slice(0, maxResults);
+
+            console.log(JSON.stringify({
+                project: projectPath,
+                total: types.length,
+                truncated,
+                types: displayed,
+            }, null, 2));
         });
 
     return cmd;

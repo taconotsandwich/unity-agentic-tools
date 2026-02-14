@@ -717,6 +717,68 @@ export function resolveScriptGuid(
         // Cache read failed
       }
     }
+
+    // Strategy 4: Type registry lookup by class name
+    const registryPath = path.join(projectPath, '.unity-agentic', 'type-registry.json');
+    if (existsSync(registryPath)) {
+      try {
+        const registry = JSON.parse(readFileSync(registryPath, 'utf-8')) as Array<{
+          name: string;
+          kind: string;
+          namespace: string | null;
+          file_path: string;
+          guid: string | null;
+        }>;
+
+        // Support qualified names like "TMPro.TextMeshProUGUI"
+        let targetName = script;
+        let targetNamespace: string | null = null;
+        const dotIndex = script.lastIndexOf('.');
+        if (dotIndex > 0) {
+          targetNamespace = script.substring(0, dotIndex);
+          targetName = script.substring(dotIndex + 1);
+        }
+
+        const targetNameLower = targetName.toLowerCase();
+        const matches = registry.filter(t => {
+          if (t.name.toLowerCase() !== targetNameLower) return false;
+          if (targetNamespace && t.namespace?.toLowerCase() !== targetNamespace.toLowerCase()) return false;
+          return true;
+        });
+
+        if (matches.length === 1 && matches[0].guid) {
+          return { guid: matches[0].guid, path: matches[0].file_path };
+        }
+        if (matches.length > 1) {
+          // Multiple matches: prefer the one with a GUID
+          const withGuid = matches.filter(m => m.guid);
+          if (withGuid.length === 1) {
+            return { guid: withGuid[0].guid!, path: withGuid[0].file_path };
+          }
+        }
+      } catch {
+        // Registry read failed
+      }
+    }
+
+    // Strategy 5: Package cache fallback
+    const packageCachePath = path.join(projectPath, '.unity-agentic', 'package-cache.json');
+    if (existsSync(packageCachePath)) {
+      try {
+        const packageCache = JSON.parse(readFileSync(packageCachePath, 'utf-8')) as Record<string, string>;
+        const scriptNameLower = script.toLowerCase().replace(/\.cs$/, '');
+
+        for (const [guid, assetPath] of Object.entries(packageCache)) {
+          if (!assetPath.endsWith('.cs')) continue;
+          const fileName = path.basename(assetPath, '.cs').toLowerCase();
+          if (fileName === scriptNameLower) {
+            return { guid, path: assetPath };
+          }
+        }
+      } catch {
+        // Package cache read failed
+      }
+    }
   }
 
   return null;

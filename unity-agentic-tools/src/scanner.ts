@@ -13,6 +13,10 @@ let nativeModuleError: string | null = null;
 let nativeWalkProjectFiles: ((projectPath: string, extensions: string[], excludeDirs?: string[] | null) => string[]) | null = null;
 let nativeGrepProject: ((options: unknown) => unknown) | null = null;
 let nativeBuildGuidCache: ((projectRoot: string) => unknown) | null = null;
+let nativeExtractCsharpTypes: ((path: string) => Array<{ name: string; kind: string; namespace: string | null; file_path: string; guid: string | null }>) | null = null;
+let nativeBuildTypeRegistry: ((projectRoot: string, includePackages?: boolean | null, includeDlls?: boolean | null) => Array<{ name: string; kind: string; namespace: string | null; file_path: string; guid: string | null }>) | null = null;
+let nativeExtractDllTypes: ((path: string) => Array<{ name: string; kind: string; namespace: string | null; file_path: string; guid: string | null }>) | null = null;
+let nativeBuildPackageGuidCache: ((projectRoot: string) => unknown) | null = null;
 
 try {
   const scriptDir = process.argv[1]
@@ -37,6 +41,10 @@ try {
   nativeWalkProjectFiles = (rustModule.walkProjectFiles as typeof nativeWalkProjectFiles) || null;
   nativeGrepProject = (rustModule.grepProject as typeof nativeGrepProject) || null;
   nativeBuildGuidCache = (rustModule.buildGuidCache as typeof nativeBuildGuidCache) || null;
+  nativeExtractCsharpTypes = (rustModule.extractCsharpTypes as typeof nativeExtractCsharpTypes) || null;
+  nativeBuildTypeRegistry = (rustModule.buildTypeRegistry as typeof nativeBuildTypeRegistry) || null;
+  nativeExtractDllTypes = (rustModule.extractDllTypes as typeof nativeExtractDllTypes) || null;
+  nativeBuildPackageGuidCache = (rustModule.buildPackageGuidCache as typeof nativeBuildPackageGuidCache) || null;
 } catch (err) {
   nativeModuleError =
     `Failed to load native Rust module.\n` +
@@ -160,4 +168,32 @@ export function getNativeGrepProject(): typeof nativeGrepProject {
  */
 export function getNativeBuildGuidCache(): typeof nativeBuildGuidCache {
   return nativeBuildGuidCache;
+}
+
+/**
+ * Get native extract_csharp_types if available, or null
+ */
+export function getNativeExtractCsharpTypes(): typeof nativeExtractCsharpTypes {
+  return nativeExtractCsharpTypes;
+}
+
+/**
+ * Get native build_type_registry if available, or null
+ */
+export function getNativeBuildTypeRegistry(): typeof nativeBuildTypeRegistry {
+  return nativeBuildTypeRegistry;
+}
+
+/**
+ * Get native extract_dll_types if available, or null
+ */
+export function getNativeExtractDllTypes(): typeof nativeExtractDllTypes {
+  return nativeExtractDllTypes;
+}
+
+/**
+ * Get native build_package_guid_cache if available, or null
+ */
+export function getNativeBuildPackageGuidCache(): typeof nativeBuildPackageGuidCache {
+  return nativeBuildPackageGuidCache;
 }
