@@ -101,9 +101,6 @@ jobs:
         working-directory: ./rust-core
         run: cargo test
 
-      - name: Validate extensions
-        run: .github/scripts/validate-extensions.sh
-
       - name: Check version sync
         run: bun scripts/sync-version.js --check
 
@@ -186,10 +183,7 @@ jobs:
             ## Installation
 
             ### Claude Code Plugin
-            ```shell
-            /plugin marketplace add taconotsandwich/unity-agentic-tools
-            /plugin install unity-agentic-tools@unity-agentic-tools-marketplace
-            ```
+            See [unity-agentic-tools-claude-plugin](https://github.com/taconotsandwich/unity-agentic-tools-claude-plugin) for Claude Code integration.
 
             ### npm
             ```bash

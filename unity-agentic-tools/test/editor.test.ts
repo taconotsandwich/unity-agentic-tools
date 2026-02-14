@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve, join } from 'path';
 import { readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
-import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile, createScene } from '../src/editor';
+import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile, createScene, editPrefabOverride, editArray, batchEditComponentProperties, removePrefabOverride, addRemovedComponent, removeRemovedComponent, addRemovedGameObject, removeRemovedGameObject, deletePrefabInstance } from '../src/editor';
+import { UnityDocument } from '../src/editor/unity-document';
 import { create_temp_fixture } from './test-utils';
 import type { TempFixture } from './test-utils';
 
@@ -412,6 +413,22 @@ describe('UnityEditor', () => {
             // File content should be unchanged
             const content = readFileSync(temp_fixture.temp_path, 'utf-8');
             expect(content).toBe(originalContent);
+        });
+
+        it('should accept falsy values like 0 (BUG FIX #1)', () => {
+            const result = batchEditProperties(temp_fixture.temp_path, [
+                { object_name: 'Player', property: 'm_IsActive', new_value: '0' },
+                { object_name: 'Player', property: 'm_Layer', new_value: '0' }
+            ]);
+
+            expect(result.success).toBe(true);
+            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+
+            // Verify Player has both falsy values (0) applied
+            const playerSection = content.match(/--- !u!1 &1847675923[\s\S]*?(?=--- !u!)/);
+            expect(playerSection).not.toBeNull();
+            expect(playerSection![0]).toContain('m_IsActive: 0');
+            expect(playerSection![0]).toContain('m_Layer: 0');
         });
     });
 
@@ -1616,6 +1633,13 @@ describe('createPrefabVariant', () => {
             try { fs.unlinkSync(tempPrefab); } catch { /* ignore */ }
         }
     });
+
+    it('should not modify source prefab or other files', () => {
+        const sourceBefore = readFileSync(sourcePrefab, 'utf-8');
+        createPrefabVariant({ source_prefab: sourcePrefab, output_path: outputPath });
+        const sourceAfter = readFileSync(sourcePrefab, 'utf-8');
+        expect(sourceAfter).toBe(sourceBefore);
+    });
 });
 
 describe('UnityEditor special cases', () => {
@@ -2630,6 +2654,172 @@ describe('editComponentByFileId', () => {
     });
 });
 
+// ========== Block-Style YAML Path Tests ==========
+
+describe('editComponentByFileId - block-style YAML paths', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should edit a 2-level block path (Camera m_NormalizedViewPortRect.width)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '508316494',
+            property: 'm_NormalizedViewPortRect.width',
+            new_value: '0.5'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const cameraBlock = content.match(/--- !u!20 &508316494[\s\S]*?(?=--- !u!|$)/);
+        expect(cameraBlock).not.toBeNull();
+        expect(cameraBlock![0]).toContain('width: 0.5');
+        // Ensure height was NOT changed
+        expect(cameraBlock![0]).toContain('height: 1');
+    });
+
+    it('should edit a 2-level block path (Light m_Shadows.m_Type)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1028675096',
+            property: 'm_Shadows.m_Type',
+            new_value: '1'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const lightBlock = content.match(/--- !u!108 &1028675096[\s\S]*?(?=--- !u!|$)/);
+        expect(lightBlock).not.toBeNull();
+        expect(lightBlock![0]).toContain('m_Type: 1');
+        // Ensure other shadow properties are untouched
+        expect(lightBlock![0]).toContain('m_Resolution: -1');
+    });
+
+    it('should edit a 3-level block path (Light m_Shadows.m_CullingMatrixOverride.e00)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1028675096',
+            property: 'm_Shadows.m_CullingMatrixOverride.e00',
+            new_value: '42'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const lightBlock = content.match(/--- !u!108 &1028675096[\s\S]*?(?=--- !u!|$)/);
+        expect(lightBlock).not.toBeNull();
+        expect(lightBlock![0]).toContain('e00: 42');
+        // Ensure sibling matrix values are untouched
+        expect(lightBlock![0]).toContain('e01: 0');
+        expect(lightBlock![0]).toContain('e11: 1');
+    });
+
+    it('should edit a non-m_ block path (MonoBehaviour groundMask.m_Bits)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675927',
+            property: 'groundMask.m_Bits',
+            new_value: '255'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const monoBlock = content.match(/--- !u!114 &1847675927[\s\S]*?(?=--- !u!|$)/);
+        expect(monoBlock).not.toBeNull();
+        expect(monoBlock![0]).toContain('m_Bits: 255');
+    });
+
+    it('should handle block path with m_ fallback (Camera NormalizedViewPortRect.height)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '508316494',
+            property: 'NormalizedViewPortRect.height',
+            new_value: '0.75'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const cameraBlock = content.match(/--- !u!20 &508316494[\s\S]*?(?=--- !u!|$)/);
+        expect(cameraBlock).not.toBeNull();
+        expect(cameraBlock![0]).toContain('height: 0.75');
+    });
+
+    it('should still handle inline dotted paths (regression check)', () => {
+        // Transform m_LocalPosition.x uses inline syntax {x: 0, y: 0.5, z: 0}
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'm_LocalPosition.x',
+            new_value: '99'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const transformBlock = content.match(/--- !u!4 &1847675924[\s\S]*?(?=--- !u!|$)/);
+        expect(transformBlock).not.toBeNull();
+        expect(transformBlock![0]).toContain('m_LocalPosition: {x: 99, y: 0.5, z: 0}');
+    });
+});
+
+describe('editComponentByFileId - ParticleSystem block-style paths', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'TinyAquarium.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should edit startDelay.scalar on ParticleSystem (no m_ prefix)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '999291844',
+            property: 'startDelay.scalar',
+            new_value: '0.5'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const psBlock = content.match(/--- !u!198 &999291844[\s\S]*?(?=--- !u!|$)/);
+        expect(psBlock).not.toBeNull();
+        expect(psBlock![0]).toContain('scalar: 0.5');
+    });
+
+    it('should edit ringBufferLoopRange.x on ParticleSystem (inline, no m_ prefix)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '999291844',
+            property: 'ringBufferLoopRange.x',
+            new_value: '0.25'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const psBlock = content.match(/--- !u!198 &999291844[\s\S]*?(?=--- !u!|$)/);
+        expect(psBlock).not.toBeNull();
+        expect(psBlock![0]).toContain('ringBufferLoopRange: {x: 0.25, y: 1}');
+    });
+});
+
 // ========== Reparent GameObject Tests ==========
 
 describe('reparentGameObject', () => {
@@ -2891,6 +3081,56 @@ describe('reparentGameObject', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('Invalid fileID');
+    });
+
+    it('should auto-detect numeric string as fileID without --by-id', () => {
+        const parentResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'AutoDetectParent'
+        });
+        expect(parentResult.success).toBe(true);
+
+        const childResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'AutoDetectChild'
+        });
+        expect(childResult.success).toBe(true);
+
+        // Pass numeric fileIDs WITHOUT by_id — should auto-detect
+        const result = reparentGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: String(childResult.game_object_id),
+            new_parent: String(parentResult.game_object_id),
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.new_parent_transform_id).toBe(parentResult.transform_id);
+    });
+
+    it('should report GameObject fileIDs (not Transform IDs) in duplicate name error', () => {
+        const go1 = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'DupeName'
+        });
+        expect(go1.success).toBe(true);
+
+        const go2 = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'DupeName'
+        });
+        expect(go2.success).toBe(true);
+
+        const result = reparentGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'DupeName',
+            new_parent: 'root',
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Multiple GameObjects');
+        // Error should contain GameObject fileIDs, not Transform fileIDs
+        expect(result.error).toContain(String(go1.game_object_id));
+        expect(result.error).toContain(String(go2.game_object_id));
     });
 });
 
@@ -3502,5 +3742,877 @@ describe('createScene m_RootOrder', () => {
         // Directional Light transform should have m_RootOrder: 1
         const lightTransform = content.split(/(?=--- !u!4 )/).find(b => b.includes('&705507995'));
         expect(lightTransform).toContain('m_RootOrder: 1');
+    });
+});
+
+// ========== Prefab Override Editing Tests ==========
+
+describe('editPrefabOverride', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SceneWithPrefab.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should update an existing override value (m_LocalPosition.x)', () => {
+        const result = editPrefabOverride({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            property_path: 'm_LocalPosition.x',
+            new_value: '99',
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.action).toBe('updated');
+        expect(result.prefab_instance_id).toBe('700000');
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const prefabBlock = content.match(/--- !u!1001 &700000[\s\S]*?(?=--- !u!|$)/);
+        expect(prefabBlock).not.toBeNull();
+        expect(prefabBlock![0]).toContain('propertyPath: m_LocalPosition.x');
+        expect(prefabBlock![0]).toMatch(/propertyPath: m_LocalPosition\.x\s+value: 99/);
+    });
+
+    it('should update an existing name override (m_Name)', () => {
+        const result = editPrefabOverride({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            property_path: 'm_Name',
+            new_value: 'RenamedEnemy',
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.action).toBe('updated');
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const prefabBlock = content.match(/--- !u!1001 &700000[\s\S]*?(?=--- !u!|$)/);
+        expect(prefabBlock).not.toBeNull();
+        expect(prefabBlock![0]).toMatch(/propertyPath: m_Name\s+value: RenamedEnemy/);
+    });
+
+    it('should add a new override with inferred target from sibling', () => {
+        const result = editPrefabOverride({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            property_path: 'm_LocalPosition.w',
+            new_value: '1',
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.action).toBe('added');
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const prefabBlock = content.match(/--- !u!1001 &700000[\s\S]*?(?=--- !u!|$)/);
+        expect(prefabBlock).not.toBeNull();
+        expect(prefabBlock![0]).toContain('propertyPath: m_LocalPosition.w');
+        expect(prefabBlock![0]).toMatch(/propertyPath: m_LocalPosition\.w\s+value: 1/);
+        // Target should be inferred from m_LocalPosition.x sibling
+        expect(prefabBlock![0]).toMatch(/target: \{fileID: 400000,.*\}\s+propertyPath: m_LocalPosition\.w/);
+    });
+
+    it('should add a new override with explicit target', () => {
+        const result = editPrefabOverride({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            property_path: 'm_IsActive',
+            new_value: '0',
+            target: '{fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.action).toBe('added');
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const prefabBlock = content.match(/--- !u!1001 &700000[\s\S]*?(?=--- !u!|$)/);
+        expect(prefabBlock).not.toBeNull();
+        expect(prefabBlock![0]).toContain('propertyPath: m_IsActive');
+        expect(prefabBlock![0]).toMatch(/value: 0\s+objectReference: \{fileID: 0\}/);
+    });
+
+    it('should fail when no target can be inferred and none provided', () => {
+        const result = editPrefabOverride({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            property_path: 'someUnknownProp',
+            new_value: '42',
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('--target');
+    });
+
+    it('should fail when PrefabInstance not found', () => {
+        const result = editPrefabOverride({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '9999999',
+            property_path: 'm_Name',
+            new_value: 'test',
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+
+    it('should update objectReference when provided', () => {
+        const result = editPrefabOverride({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            property_path: 'm_LocalPosition.x',
+            new_value: '5',
+            object_reference: '{fileID: 12345}',
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.action).toBe('updated');
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const prefabBlock = content.match(/--- !u!1001 &700000[\s\S]*?(?=--- !u!|$)/);
+        expect(prefabBlock).not.toBeNull();
+        // objectReference should be updated to the provided value
+        expect(prefabBlock![0]).toMatch(/propertyPath: m_LocalPosition\.x\s+value: 5\s+objectReference: \{fileID: 12345\}/);
+    });
+});
+
+// ========== Bug #3: Stripped component detection in editComponentByFileId ==========
+
+describe('editComponentByFileId - stripped/variant detection', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SceneWithPrefab.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should return error when editing a stripped component', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '600000',
+            property: 'm_Name',
+            new_value: 'Test'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('stripped');
+        expect(result.error).toContain('update override');
+    });
+
+    it('should hint about prefab instances when fileID not found in variant file', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '100000',
+            property: 'm_Name',
+            new_value: 'Test'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('prefab instances');
+        expect(result.error).toContain('update override');
+    });
+});
+
+// ========== Bug #8: Tag validation for m_TagString ==========
+
+describe('safeUnityYAMLEdit - tag validation', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SceneWithPrefab.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should accept built-in tags without project_path', () => {
+        const result = safeUnityYAMLEdit(
+            temp_fixture.temp_path,
+            'Main Camera',
+            'm_TagString',
+            'Player'
+        );
+
+        expect(result.success).toBe(true);
+    });
+
+    it('should reject invalid tag when project_path is provided', () => {
+        // Create a mock project with TagManager that has no custom tags
+        const projectDir = join(tmpdir(), 'test-tag-validation');
+        const settingsDir = join(projectDir, 'ProjectSettings');
+        mkdirSync(settingsDir, { recursive: true });
+        writeFileSync(join(settingsDir, 'TagManager.asset'), `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!78 &1
+TagManager:
+  serializedVersion: 2
+  tags: []
+  layers:
+  - Default
+  - TransparentFX
+`);
+
+        try {
+            const result = safeUnityYAMLEdit(
+                temp_fixture.temp_path,
+                'Main Camera',
+                'm_TagString',
+                'NonExistentTag',
+                projectDir
+            );
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('not found in project TagManager');
+            expect(result.error).toContain('Valid tags');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+});
+
+// ========== Bug #7: Create GO in variant registers m_AddedGameObjects ==========
+
+describe('createGameObject - variant support', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SceneWithPrefab.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should register new GO in m_AddedGameObjects when created in variant', () => {
+        const result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'NewVariantChild'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.prefab_instance_id).toBe(700000);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+
+        // m_AddedGameObjects should no longer be empty
+        expect(content).not.toMatch(/m_AddedGameObjects:\s*\[\]/);
+        // Should contain the new GO's fileID
+        expect(content).toContain(`addedObject: {fileID: ${result.game_object_id}}`);
+        // The new Transform should have m_Father set to the stripped Transform
+        const transformBlock = content.match(new RegExp(`--- !u!4 &${result.transform_id}[\\s\\S]*?(?=--- !u!|$)`));
+        expect(transformBlock).not.toBeNull();
+        expect(transformBlock![0]).toContain('m_Father: {fileID: 600001}');
+    });
+
+    it('should not affect normal scene (no PrefabInstance)', () => {
+        const normalFixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+
+        try {
+            const result = createGameObject({
+                file_path: normalFixture.temp_path,
+                name: 'NormalNewObj'
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.prefab_instance_id).toBeUndefined();
+        } finally {
+            normalFixture.cleanup_fn();
+        }
+    });
+});
+
+// ========== Bug #9: PrefabInstance clone error ==========
+
+describe('duplicateGameObject - PrefabInstance error', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SceneWithPrefab.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should return specific error when cloning a PrefabInstance by name', () => {
+        const result = duplicateGameObject({
+            file_path: temp_fixture.temp_path,
+            object_name: 'MyEnemy'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('PrefabInstance');
+        expect(result.error).toContain('700000');
+        expect(result.error).toContain('update prefab');
+    });
+});
+
+// ========== editArray Tests ==========
+
+describe('editArray', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should append element to array', () => {
+        const result = editArray({
+            file_path: temp_fixture.temp_path,
+            file_id: '508316491',
+            array_property: 'm_Component',
+            action: 'append',
+            value: 'component: {fileID: 999999}',
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.new_length).toBeGreaterThanOrEqual(5);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('fileID: 999999');
+    });
+
+    it('should insert element at index', () => {
+        const result = editArray({
+            file_path: temp_fixture.temp_path,
+            file_id: '508316491',
+            array_property: 'm_Component',
+            action: 'insert',
+            index: 0,
+            value: 'component: {fileID: 888888}',
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.new_length).toBeGreaterThanOrEqual(5);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('fileID: 888888');
+    });
+
+    it('should remove element from array', () => {
+        const result = editArray({
+            file_path: temp_fixture.temp_path,
+            file_id: '508316491',
+            array_property: 'm_Component',
+            action: 'remove',
+            index: 0,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.new_length).toBe(3);
+
+        // File should still be valid Unity YAML
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('%YAML 1.1');
+    });
+
+    it('should return error for nonexistent file_id', () => {
+        const result = editArray({
+            file_path: temp_fixture.temp_path,
+            file_id: '999999999',
+            array_property: 'm_Component',
+            action: 'append',
+            value: 'component: {fileID: 111111}',
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBeDefined();
+    });
+
+    it('should return error for invalid action', () => {
+        const result = editArray({
+            file_path: temp_fixture.temp_path,
+            file_id: '508316491',
+            array_property: 'm_Component',
+            action: 'invalid' as 'insert' | 'append' | 'remove',
+            value: 'component: {fileID: 111111}',
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Invalid action');
+    });
+
+    it('should return error when value missing for insert', () => {
+        const result = editArray({
+            file_path: temp_fixture.temp_path,
+            file_id: '508316491',
+            array_property: 'm_Component',
+            action: 'insert',
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('value');
+    });
+});
+
+// ========== batchEditComponentProperties Tests ==========
+
+describe('batchEditComponentProperties', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should edit single component property', () => {
+        const result = batchEditComponentProperties(
+            temp_fixture.temp_path,
+            [{ file_id: '508316494', property: 'm_Enabled', new_value: '0' }]
+        );
+
+        expect(result.success).toBe(true);
+
+        // Parse and find the Camera block to verify
+        const doc = UnityDocument.from_file(temp_fixture.temp_path);
+        const camera_block = doc.find_by_file_id('508316494');
+        expect(camera_block).not.toBeNull();
+        expect(camera_block!.get_property('m_Enabled')).toBe('0');
+    });
+
+    it('should edit multiple components in one call', () => {
+        const result = batchEditComponentProperties(
+            temp_fixture.temp_path,
+            [
+                { file_id: '508316494', property: 'm_Enabled', new_value: '0' },
+                { file_id: '1028675096', property: 'm_Enabled', new_value: '0' },
+            ]
+        );
+
+        expect(result.success).toBe(true);
+
+        const doc = UnityDocument.from_file(temp_fixture.temp_path);
+        const camera_block = doc.find_by_file_id('508316494');
+        const light_block = doc.find_by_file_id('1028675096');
+        expect(camera_block!.get_property('m_Enabled')).toBe('0');
+        expect(light_block!.get_property('m_Enabled')).toBe('0');
+    });
+
+    it('should return error for nonexistent file_id', () => {
+        const result = batchEditComponentProperties(
+            temp_fixture.temp_path,
+            [{ file_id: '999999', property: 'm_Enabled', new_value: '0' }]
+        );
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('999999');
+    });
+
+    it('should return error for nonexistent property', () => {
+        const result = batchEditComponentProperties(
+            temp_fixture.temp_path,
+            [{ file_id: '508316494', property: 'm_NonExistent', new_value: '42' }]
+        );
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('m_NonExistent');
+    });
+});
+
+// ========== removePrefabOverride Tests ==========
+
+describe('removePrefabOverride', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SceneWithPrefab.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should remove override by property path', () => {
+        const result = removePrefabOverride({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            property_path: 'm_LocalPosition.x',
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // The m_LocalPosition.x override should be gone
+        expect(content).not.toMatch(/propertyPath: m_LocalPosition\.x\s/);
+        // Other overrides should remain
+        expect(content).toContain('propertyPath: m_Name');
+    });
+
+    it('should remove override with target filter', () => {
+        const result = removePrefabOverride({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            property_path: 'm_Name',
+            target: '{fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).not.toMatch(/propertyPath: m_Name\s/);
+    });
+
+    it('should return error for nonexistent property path', () => {
+        const result = removePrefabOverride({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            property_path: 'm_NonExistent',
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('m_NonExistent');
+    });
+
+    it('should return error for nonexistent PrefabInstance', () => {
+        const result = removePrefabOverride({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '999999',
+            property_path: 'm_Name',
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('999999');
+    });
+});
+
+// ========== Prefab Sub-array Management Tests ==========
+
+describe('Prefab sub-array management', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SceneWithPrefab.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should add component to m_RemovedComponents', () => {
+        const component_ref = '{fileID: 12345, guid: abc123def456abc123def456abc12345, type: 3}';
+        const result = addRemovedComponent({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            component_ref,
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('abc123def456abc123def456abc12345');
+    });
+
+    it('should remove component from m_RemovedComponents', () => {
+        const component_ref = '{fileID: 12345, guid: abc123def456abc123def456abc12345, type: 3}';
+        // First add
+        const add_result = addRemovedComponent({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            component_ref,
+        });
+        expect(add_result.success).toBe(true);
+
+        // Then remove
+        const remove_result = removeRemovedComponent({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            component_ref,
+        });
+        expect(remove_result.success).toBe(true);
+    });
+
+    it('should return error when removing nonexistent component ref', () => {
+        const result = removeRemovedComponent({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            component_ref: '{fileID: 99999, guid: ffffffffffffffffffffffffffffffff, type: 3}',
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+
+    it('should add and remove game objects', () => {
+        const go_ref = '{fileID: 67890, guid: def456abc123def456abc123def45678, type: 3}';
+
+        // Add
+        const add_result = addRemovedGameObject({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            component_ref: go_ref,
+        });
+        expect(add_result.success).toBe(true);
+
+        const content_after_add = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content_after_add).toContain('def456abc123def456abc123def45678');
+
+        // Remove
+        const remove_result = removeRemovedGameObject({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            component_ref: go_ref,
+        });
+        expect(remove_result.success).toBe(true);
+    });
+
+    it('should return error for nonexistent PrefabInstance', () => {
+        const result = addRemovedComponent({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '999999',
+            component_ref: '{fileID: 12345, guid: abc123def456abc123def456abc12345, type: 3}',
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('999999');
+    });
+});
+
+// ========== deletePrefabInstance Tests ==========
+
+describe('deletePrefabInstance', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SceneWithPrefab.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should delete PrefabInstance by fileID', () => {
+        const result = deletePrefabInstance({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.deleted_count).toBeGreaterThanOrEqual(3);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).not.toContain('&700000');
+        expect(content).not.toContain('&600000');
+        expect(content).not.toContain('&600001');
+        // Main Camera blocks should still be present
+        expect(content).toContain('&500000');
+    });
+
+    it('should delete PrefabInstance by name', () => {
+        const result = deletePrefabInstance({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: 'MyEnemy',
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.deleted_count).toBeGreaterThanOrEqual(3);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).not.toContain('&700000');
+        expect(content).not.toContain('MyEnemy');
+    });
+
+    it('should return error for nonexistent PrefabInstance', () => {
+        const result = deletePrefabInstance({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '999999',
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('999999');
+    });
+
+    it('should preserve non-prefab blocks after deletion', () => {
+        const result = deletePrefabInstance({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+        });
+
+        expect(result.success).toBe(true);
+
+        // Verify Main Camera and its components are still intact
+        const doc = UnityDocument.from_file(temp_fixture.temp_path);
+        const camera_go = doc.find_by_file_id('500000');
+        expect(camera_go).not.toBeNull();
+        expect(camera_go!.class_id).toBe(1);
+
+        const transform = doc.find_by_file_id('500001');
+        expect(transform).not.toBeNull();
+        expect(transform!.class_id).toBe(4);
+
+        const camera = doc.find_by_file_id('500002');
+        expect(camera).not.toBeNull();
+        expect(camera!.class_id).toBe(20);
+    });
+});
+
+// ========== UnityDocument.trace_references Tests ==========
+
+describe('UnityDocument.trace_references', () => {
+    it('should trace outgoing references from GameObject', () => {
+        const doc = UnityDocument.from_file(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+
+        const edges = doc.trace_references('508316491', 'out', 1);
+
+        expect(edges.length).toBeGreaterThan(0);
+
+        // The GO references its components via m_Component: {fileID: ...}
+        const target_ids = edges.map(e => e.target_file_id);
+        expect(target_ids).toContain('508316495'); // Transform
+        expect(target_ids).toContain('508316494'); // Camera
+        expect(target_ids).toContain('508316493'); // AudioListener
+        expect(target_ids).toContain('508316492'); // Behaviour
+    });
+
+    it('should trace incoming references to a GameObject', () => {
+        const doc = UnityDocument.from_file(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+
+        const edges = doc.trace_references('508316491', 'in', 1);
+
+        expect(edges.length).toBeGreaterThan(0);
+
+        // Components reference the GO via m_GameObject: {fileID: 508316491}
+        const source_ids = edges.map(e => e.source_file_id);
+        // At least the Transform and Camera should reference this GO
+        expect(source_ids).toContain('508316495');
+        expect(source_ids).toContain('508316494');
+    });
+
+    it('should respect max_depth', () => {
+        const doc = UnityDocument.from_file(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+
+        const edges_depth1 = doc.trace_references('508316491', 'out', 1);
+        const edges_depth2 = doc.trace_references('508316491', 'out', 2);
+
+        // Depth 2 should have at least as many edges as depth 1 (it follows references further)
+        expect(edges_depth2.length).toBeGreaterThanOrEqual(edges_depth1.length);
+
+        // Depth 1 edges should all have depth === 1
+        for (const edge of edges_depth1) {
+            expect(edge.depth).toBe(1);
+        }
+
+        // Depth 2 should contain some edges at depth 2 (components reference back to GO, or to other refs)
+        const depth2_edges = edges_depth2.filter(e => e.depth === 2);
+        expect(depth2_edges.length).toBeGreaterThan(0);
+    });
+
+    it('should return empty for nonexistent fileID', () => {
+        const doc = UnityDocument.from_file(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+
+        const edges = doc.trace_references('999999', 'out', 1);
+
+        expect(edges).toEqual([]);
+    });
+});
+
+// ========== Bug #1: m_ prefix order in editComponentByFileId ==========
+
+describe('editComponentByFileId - m_ prefix order (Bug #1)', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should edit custom MonoBehaviour property without m_ prefix (moveSpeed)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675927',
+            property: 'moveSpeed',
+            new_value: '15'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.bytes_written).toBeGreaterThan(0);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('moveSpeed: 15');
+    });
+
+    it('should edit m_-prefixed built-in property (m_LocalPosition.x)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'm_LocalPosition.x',
+            new_value: '5'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.bytes_written).toBeGreaterThan(0);
+    });
+
+    it('should edit non-prefixed input for built-in (LocalPosition.x adds m_ fallback)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675924',
+            property: 'LocalPosition.x',
+            new_value: '5'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.bytes_written).toBeGreaterThan(0);
+    });
+
+    it('should edit block-style custom nested property (groundMask.m_Bits)', () => {
+        const result = editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: '1847675927',
+            property: 'groundMask.m_Bits',
+            new_value: '255'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.bytes_written).toBeGreaterThan(0);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('m_Bits: 255');
     });
 });

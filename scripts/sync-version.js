@@ -4,8 +4,7 @@
  *
  * Ensures version consistency across:
  * - unity-agentic-tools/package.json (source of truth)
- * - .claude-plugin/plugin.json
- * - marketplace.json
+ * - rust-core/package.json
  *
  * Usage:
  *   bun scripts/sync-version.js          # Sync versions
@@ -21,8 +20,6 @@ const ROOT = path.resolve(__dirname, '..');
 const FILES = {
   source: path.join(ROOT, 'unity-agentic-tools', 'package.json'),
   rustCore: path.join(ROOT, 'rust-core', 'package.json'),
-  plugin: path.join(ROOT, '.claude-plugin', 'plugin.json'),
-  marketplace: path.join(ROOT, 'marketplace.json'),
 };
 
 function readJSON(filePath) {
@@ -51,18 +48,6 @@ function getVersions() {
     versions.rustCore = rustCore.version;
   }
 
-  const plugin = readJSON(FILES.plugin);
-  if (plugin) {
-    versions.plugin = plugin.version;
-  }
-
-  if (fs.existsSync(FILES.marketplace)) {
-    const marketplace = readJSON(FILES.marketplace);
-    if (marketplace && marketplace.plugins && marketplace.plugins[0]) {
-      versions.marketplace = marketplace.plugins[0].version;
-    }
-  }
-
   return versions;
 }
 
@@ -72,8 +57,6 @@ function checkVersions() {
   console.log('Current versions:');
   console.log(`  unity-agentic-tools/package.json: ${versions.source || 'not found'}`);
   console.log(`  rust-core/package.json: ${versions.rustCore || 'not found'}`);
-  console.log(`  .claude-plugin/plugin.json: ${versions.plugin || 'not found'}`);
-  console.log(`  marketplace.json: ${versions.marketplace || 'not found'}`);
 
   const allVersions = Object.values(versions).filter(Boolean);
   const uniqueVersions = [...new Set(allVersions)];
@@ -116,24 +99,6 @@ function syncVersions(targetVersion) {
     rustCore.version = version;
     writeJSON(FILES.rustCore, rustCore);
     console.log(`  Updated: rust-core/package.json`);
-  }
-
-  // Update plugin.json
-  const plugin = readJSON(FILES.plugin);
-  if (plugin) {
-    plugin.version = version;
-    writeJSON(FILES.plugin, plugin);
-    console.log(`  Updated: .claude-plugin/plugin.json`);
-  }
-
-  // Update marketplace.json (optional — may not exist yet)
-  if (fs.existsSync(FILES.marketplace)) {
-    const marketplace = readJSON(FILES.marketplace);
-    if (marketplace && marketplace.plugins && marketplace.plugins[0]) {
-      marketplace.plugins[0].version = version;
-      writeJSON(FILES.marketplace, marketplace);
-      console.log(`  Updated: marketplace.json`);
-    }
   }
 
   console.log('\nVersion synchronization complete!');

@@ -1,6 +1,8 @@
 # Unity Agentic Tools
 
-A Claude Code plugin and CLI for reading and editing Unity scenes, prefabs, and assets with minimal token usage. Powered by a native Rust backend (napi-rs) for fast parsing of large files.
+A CLI for reading and editing Unity scenes, prefabs, and assets with minimal token usage. Powered by a native Rust backend (napi-rs) for fast parsing of large files.
+
+For Claude Code integration, see the [Claude Code plugin](https://github.com/taconotsandwich/unity-agentic-tools-claude-plugin).
 
 ## Features
 
@@ -19,13 +21,6 @@ A Claude Code plugin and CLI for reading and editing Unity scenes, prefabs, and 
 
 ```bash
 bun add -g unity-agentic-tools
-```
-
-### Claude Code Plugin
-
-```bash
-# From marketplace (run in Claude Code)
-/plugin install unity-agentic-tools
 ```
 
 ### From Source
@@ -62,8 +57,8 @@ unity-agentic-tools delete gameobject <file> <name>
 unity-agentic-tools delete component <file> <file_id>
 
 # Search
-unity-agentic-tools find <file> <pattern>                   # Find by name in file
-unity-agentic-tools search <project> -n <pattern>           # Search across project
+unity-agentic-tools search <file> <pattern>                  # Find by name in file
+unity-agentic-tools search <project> -n <pattern>            # Search across project
 unity-agentic-tools grep <project> <regex>                  # Regex search
 unity-agentic-tools docs <query>                            # Search Unity docs
 ```
@@ -71,10 +66,6 @@ unity-agentic-tools docs <query>                            # Search Unity docs
 ## Project Structure
 
 ```
-.claude-plugin/          Plugin manifest
-commands/                Slash commands for Claude Code
-skills/                  Agent skills (CLI reference)
-hooks/                   Event handlers (auto-setup, Unity file detection)
 unity-agentic-tools/     TypeScript CLI + tests
 rust-core/               Native Rust module (napi-rs)
 doc-indexer/             Documentation indexing module

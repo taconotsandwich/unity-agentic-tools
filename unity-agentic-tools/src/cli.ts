@@ -9,6 +9,7 @@ import { build_update_command } from './cmd-update';
 import { build_delete_command } from './cmd-delete';
 import { duplicateGameObject } from './editor';
 import { search_project, grep_project } from './project-search';
+import type { ProjectGrepFileType } from './types';
 import { read_project_version } from './build-version';
 import { find_unity_project_root } from './utils';
 import * as path from 'path';
@@ -64,66 +65,58 @@ program.command('clone <file> <object_name>')
     console.log(JSON.stringify(result, null, 2));
   });
 
-// Find command (top-level — searches within a single file)
-program.command('find <file> <pattern>')
-  .description('Find GameObjects and PrefabInstances by name pattern')
-  .option('-e, --exact', 'Use exact matching')
-  .option('-j, --json', 'Output as JSON')
-  .action((file, pattern, options) => {
-    if (!pattern || pattern.trim() === '') {
-      console.log(JSON.stringify({ error: 'Pattern must not be empty' }, null, 2));
-      process.exit(1);
-    }
-    const { existsSync } = require('fs');
-    if (!existsSync(file)) {
-      console.log(JSON.stringify({ error: `File not found: ${file}` }, null, 2));
-      process.exit(1);
-    }
-    const fuzzy = options.exact !== true;
-    const result = getScanner().find_by_name(file, pattern, fuzzy);
-    const output = {
-      file,
-      pattern,
-      fuzzy,
-      count: result.length,
-      matches: result,
-    };
-    console.log(JSON.stringify(output, null, 2));
-  });
-
-// Search command (top-level — searches across project files)
-program.command('search <project_path>')
-  .description('Search across all scene/prefab files in a Unity project')
-  .option('-n, --name <pattern>', 'Search by GameObject name (supports wildcards)')
+// Search command (top-level — auto-detects file vs directory)
+// File path → single-file find (like old `find`)
+// Directory → project-wide search (like old `search`)
+program.command('search <path> [pattern]')
+  .description('Search for GameObjects. File path: find by name. Directory: search across project')
+  .option('-n, --name <pattern>', 'Search by GameObject name (project mode, supports wildcards)')
+  .option('-e, --exact', 'Use exact name matching (default is substring/fuzzy)')
   .option('-c, --component <type>', 'Filter by component type')
   .option('-t, --tag <tag>', 'Filter by tag')
   .option('-l, --layer <index>', 'Filter by layer index')
   .option('--type <type>', 'File type filter: scene, prefab, all', 'all')
-  .option('--page-size <n>', 'Max files per page', '50')
-  .option('--cursor <n>', 'Start offset for pagination', '0')
   .option('-m, --max-matches <n>', 'Max total matches (caps results across all files)')
-  .option('--scan-all', 'Scan all files (ignore file-level pagination)')
   .option('-j, --json', 'Output as JSON')
-  .action((project_path, options) => {
-    const rawPageSize = parseInt(options.pageSize, 10);
-    if (isNaN(rawPageSize) || rawPageSize < 1) {
-      console.log(JSON.stringify({ error: '--page-size must be a positive integer' }));
-      return;
+  .action((search_path, pattern, options) => {
+    const { existsSync, statSync } = require('fs');
+    if (!existsSync(search_path)) {
+      console.log(JSON.stringify({ error: `Path not found: ${search_path}` }, null, 2));
+      process.exit(1);
     }
-    const result = search_project({
-      project_path,
-      name: options.name,
-      component: options.component,
-      tag: options.tag,
-      layer: options.layer !== undefined ? parseInt(options.layer, 10) : undefined,
-      file_type: options.type as 'scene' | 'prefab' | 'all',
-      page_size: rawPageSize,
-      cursor: parseInt(options.cursor, 10) || 0,
-      max_matches: options.maxMatches ? parseInt(options.maxMatches, 10) : undefined,
-      scan_all: options.scanAll === true,
-    });
 
-    console.log(JSON.stringify(result, null, 2));
+    const stat = statSync(search_path);
+    if (stat.isFile()) {
+      // File mode — single-file find (like old `find` command)
+      if (!pattern || pattern.trim() === '') {
+        console.log(JSON.stringify({ error: 'Pattern is required when searching a file' }, null, 2));
+        process.exit(1);
+      }
+      const fuzzy = options.exact !== true;
+      const result = getScanner().find_by_name(search_path, pattern, fuzzy);
+      const output = {
+        file: search_path,
+        pattern,
+        fuzzy,
+        count: result.length,
+        matches: result,
+      };
+      console.log(JSON.stringify(output, null, 2));
+    } else {
+      // Directory mode — project-wide search (like old `search` command)
+      const result = search_project({
+        project_path: search_path,
+        name: options.name,
+        exact: options.exact === true,
+        component: options.component,
+        tag: options.tag,
+        layer: options.layer !== undefined ? parseInt(options.layer, 10) : undefined,
+        file_type: options.type as 'scene' | 'prefab' | 'all',
+        max_matches: options.maxMatches ? parseInt(options.maxMatches, 10) : undefined,
+      });
+
+      console.log(JSON.stringify(result, null, 2));
+    }
   });
 
 // Grep command (top-level — regex search across project)
@@ -141,12 +134,12 @@ program.command('grep <project_path> <pattern>')
     const VALID_GREP_TYPES = ['cs', 'yaml', 'unity', 'prefab', 'asset', 'all'];
     if (!VALID_GREP_TYPES.includes(options.type)) {
       console.log(JSON.stringify({ success: false, error: `Invalid file type "${options.type}". Valid types: ${VALID_GREP_TYPES.join(', ')}` }, null, 2));
-      return;
+      process.exit(1);
     }
     const result = grep_project({
       project_path,
       pattern,
-      file_type: options.type as any,
+      file_type: options.type as ProjectGrepFileType,
       max_results: parseInt(options.max, 10) || 100,
       context_lines: parseInt(options.context, 10) || 0,
     });

@@ -372,6 +372,7 @@ impl Scanner {
         let page_size = options.page_size.unwrap_or(200).min(1000);
         let cursor = options.cursor.unwrap_or(0);
         let max_depth = options.max_depth.unwrap_or(10).min(50);
+        let filter_component = options.filter_component;
 
         let path = Path::new(&file);
         if !path.exists() {
@@ -464,7 +465,8 @@ impl Scanner {
                 depth
             };
 
-            // Remove objects deeper than max_depth; clear children at the boundary
+            // Remove objects deeper than max_depth; clear children at the boundary.
+            // Store computed depth on each retained object.
             detailed.retain_mut(|detail| {
                 let transform_id = detail.components.iter()
                     .find(|c| c.class_id == 4 || c.class_id == 224)
@@ -475,11 +477,55 @@ impl Scanner {
                     if depth > max_depth {
                         return false;
                     }
+                    detail.depth = Some(depth);
                     if depth == max_depth {
                         detail.children = None;
                     }
+                } else {
+                    detail.depth = Some(0);
                 }
                 true
+            });
+        } else {
+            // No depth filtering, but still compute depth for each object
+            let mut parent_map: HashMap<String, String> = HashMap::new();
+            for detail in &detailed {
+                if let Some(ref parent_id) = detail.parent_transform_id {
+                    for comp in &detail.components {
+                        if comp.class_id == 4 || comp.class_id == 224 {
+                            parent_map.insert(comp.file_id.clone(), parent_id.clone());
+                            break;
+                        }
+                    }
+                }
+            }
+            for detail in &mut detailed {
+                let transform_id = detail.components.iter()
+                    .find(|c| c.class_id == 4 || c.class_id == 224)
+                    .map(|c| c.file_id.clone());
+                if let Some(tid) = transform_id {
+                    let mut depth = 0u32;
+                    let mut current = tid;
+                    loop {
+                        match parent_map.get(&current) {
+                            Some(parent) if parent != "0" && !parent.is_empty() => {
+                                depth += 1;
+                                current = parent.clone();
+                            }
+                            _ => break,
+                        }
+                    }
+                    detail.depth = Some(depth);
+                } else {
+                    detail.depth = Some(0);
+                }
+            }
+        }
+
+        // Apply component type filter before pagination
+        if let Some(ref filter_type) = filter_component {
+            detailed.retain(|detail| {
+                detail.components.iter().any(|c| c.type_name == *filter_type)
             });
         }
 
@@ -674,6 +720,7 @@ impl Scanner {
             active: obj.active,
             tag,
             layer,
+            depth: None,
             components: components.to_vec(),
             children: if children.is_empty() { None } else { Some(children) },
             parent_transform_id: parent_id,
@@ -685,12 +732,9 @@ impl Scanner {
             "name": detail.name,
             "file_id": detail.file_id,
             "active": detail.active,
+            "tag": detail.tag,
+            "layer": detail.layer,
         });
-
-        if verbose {
-            output["tag"] = serde_json::json!(detail.tag);
-            output["layer"] = serde_json::json!(detail.layer);
-        }
 
         let comp_output: Vec<serde_json::Value> = detail.components
             .iter()

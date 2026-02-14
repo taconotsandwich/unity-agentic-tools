@@ -10,21 +10,13 @@ TypeScript CLI providing token-efficient Unity file manipulation utilities for C
 - `unity-agentic-tools/src/` - TypeScript source code
 - `unity-agentic-tools/dist/` - Compiled JavaScript output (built by Bun)
 - `unity-agentic-tools/test/` - TypeScript tests
-- `.claude-plugin/` - Claude Code plugin manifest
 - `doc-indexer/` - Documentation indexing module
 
 ## Quick Setup
 
-**Claude Code:**
+**Install CLI globally:**
 ```bash
-# Install from marketplace
-/plugin marketplace add https://github.com/taconotsandwich/unity-agentic-tools
-/plugin install unity-agentic-tools
-```
-
-Or develop locally:
-```bash
-ln -s $(pwd) ~/.claude/plugins/unity-agentic-tools
+npm install -g unity-agentic-tools
 ```
 
 ## Build/Test Commands
@@ -72,10 +64,10 @@ All commands use `bun unity-agentic-tools/dist/cli.js <command>`:
 - `read scriptable-object <file>` - Read .asset file
 - `read settings <project> -s <name>` - Read project settings
 - `read build <project>` - Read build settings
-- `create gameobject|scene|component|build-scene|...` - Create Unity objects
-- `update gameobject|transform|component|build-scene|...` - Modify properties
-- `delete gameobject|component|build-scene` - Remove objects
-- `find <file> <pattern>` - Find GameObjects by name
+- `create gameobject|scene|component|build|...` - Create Unity objects
+- `update gameobject|transform|component|build|prefab|...` - Modify properties
+- `delete gameobject|component|build|prefab` - Remove objects
+- `search <file> <pattern>` - Find GameObjects by name in a file
 - `search <project> -n <pattern>` - Search across scenes/prefabs
 - `grep <project> <regex>` - Regex search across project files
 - `clone <file> <name>` - Duplicate a GameObject and its hierarchy
@@ -84,6 +76,5 @@ All commands use `bun unity-agentic-tools/dist/cli.js <command>`:
 
 ## Claude Code Integration
 
-- Plugin manifest: `.claude-plugin/plugin.json`
-- Hook handlers: `claude/hooks.json`
-- Documentation: See docs/claude.md
+The Claude Code plugin (hooks, skills, manifest) lives in a separate repository:
+https://github.com/taconotsandwich/unity-agentic-tools-claude-plugin

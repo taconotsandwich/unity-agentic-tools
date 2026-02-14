@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { deleteGameObject, removeComponent } from './editor';
+import { deleteGameObject, removeComponent, deletePrefabInstance } from './editor';
 import { remove_scene } from './build-editor';
 
 export function build_delete_command(): Command {
@@ -30,7 +30,7 @@ export function build_delete_command(): Command {
             console.log(JSON.stringify(result, null, 2));
         });
 
-    cmd.command('build-scene <project_path> <scene_path>')
+    cmd.command('build <project_path> <scene_path>')
         .description('Remove a scene from build settings')
         .option('-j, --json', 'Output as JSON')
         .action((project_path, scene_path, _options) => {
@@ -40,6 +40,17 @@ export function build_delete_command(): Command {
             } catch (err) {
                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
             }
+        });
+
+    cmd.command('prefab <file> <prefab_instance>')
+        .description('Delete a PrefabInstance and all its stripped/added blocks from a Unity file')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, prefab_instance, _options) => {
+            const result = deletePrefabInstance({
+                file_path: file,
+                prefab_instance,
+            });
+            console.log(JSON.stringify(result, null, 2));
         });
 
     return cmd;

@@ -119,3 +119,76 @@ export function generateGuid(): string {
     }
     return guid;
 }
+
+/**
+ * Validate that a file path is safe for Unity operations.
+ * Rejects file:// URIs, path traversal, and Packages/ writes.
+ * Note: Absolute paths ARE allowed (this is a CLI tool, not a web API).
+ *
+ * @param file_path - The file path to validate
+ * @param operation - Whether this is a 'read' or 'write' operation
+ * @returns Error message if invalid, null if valid
+ */
+export function validate_file_path(file_path: string, operation: 'read' | 'write'): string | null {
+    // Reject file:// URIs
+    if (file_path.startsWith('file://')) {
+        return 'file:// URIs are not supported. Use file paths directly.';
+    }
+
+    // Normalize path (convert backslashes to forward slashes)
+    const normalized = file_path.replace(/\\/g, '/');
+
+    // Reject path traversal in relative paths (security concern)
+    // Allow in absolute paths as they're resolved differently
+    const isAbsolute = file_path.startsWith('/') ||
+        /^[A-Z]:[/\\]/i.test(file_path) ||
+        file_path.startsWith('\\\\') ||
+        file_path.startsWith('//');
+
+    if (!isAbsolute && (normalized.includes('/../') || normalized.startsWith('../'))) {
+        return 'Path traversal (..) is not allowed in relative paths for security reasons.';
+    }
+
+    // Reject Packages/ writes in relative paths (read-only in Unity)
+    if (operation === 'write' && !isAbsolute && normalized.startsWith('Packages/')) {
+        return 'Cannot write to Packages/ directory (read-only in Unity).';
+    }
+
+    return null; // Valid
+}
+
+/**
+ * Validate Vector3 structure for Unity YAML.
+ *
+ * @param value - The value to validate as Vector3
+ * @returns Error message if invalid, null if valid
+ */
+export function validate_vector3(value: any): string | null {
+    if (typeof value !== 'object' || value === null) {
+        return 'Vector3 must be an object with x, y, z properties';
+    }
+
+    const { x, y, z } = value;
+    if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number') {
+        return 'Vector3 x, y, z must all be numbers';
+    }
+
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        return 'Vector3 x, y, z must be finite numbers';
+    }
+
+    return null;
+}
+
+/**
+ * Validate GUID format (32-character hex string).
+ *
+ * @param guid - The GUID to validate
+ * @returns Error message if invalid, null if valid
+ */
+export function validate_guid(guid: string): string | null {
+    if (!/^[0-9a-f]{32}$/i.test(guid)) {
+        return 'GUID must be a 32-character hexadecimal string';
+    }
+    return null;
+}

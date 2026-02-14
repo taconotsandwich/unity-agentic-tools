@@ -17,7 +17,7 @@ impl UnityYamlParser {
         // Use \n (not \s*\n) after fileID to reject stripped blocks like "--- !u!1 &123 stripped"
         // which lack m_Name/m_IsActive and cause the lazy .*? to bleed into the next block
         let pattern_str = format!(
-            r"(?s)--- !u!{} &(\d+)\nGameObject:\s*\n.*?m_Name:\s*([^\n]+).*?m_IsActive:\s*(\d)",
+            r"(?s)--- !u!{} &(\d+)\nGameObject:\s*\n.*?m_Name:\s*([^\n]*).*?m_IsActive:\s*(\d)",
             config.gameobject_class_id
         );
         let pattern = Regex::new(&pattern_str).expect("Invalid regex pattern");
@@ -201,6 +201,23 @@ MonoBehaviour:
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0].0, 1);   // class_id
         assert_eq!(blocks[1].0, 114); // class_id
+    }
+
+    #[test]
+    fn test_extract_gameobjects_empty_name() {
+        let content = r#"
+--- !u!1 &9876543210
+GameObject:
+  m_ObjectHideFlags: 0
+  m_Name:
+  m_IsActive: 1
+  m_Layer: 0
+"#;
+        let objects = UnityYamlParser::extract_gameobjects(content);
+        assert_eq!(objects.len(), 1, "Should parse GameObjects with empty m_Name");
+        assert_eq!(objects[0].name, "");
+        assert_eq!(objects[0].file_id, "9876543210");
+        assert!(objects[0].active);
     }
 
     /// Confirm that raw CRLF content FAILS without normalization (documents the bug).
