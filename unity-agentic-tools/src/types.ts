@@ -36,9 +36,13 @@ export interface GameObjectDetail {
   active: boolean;
   tag: string;
   layer: number;
+  depth?: number;
   components: Component[];
   children?: string[];
   parent_transform_id?: string | null;
+  is_error?: boolean;
+  error?: string;
+  isPrefabInstance?: boolean;
 }
 
 export interface PrefabInstanceInfo {
@@ -93,6 +97,7 @@ export interface PaginationOptions {
   page_size?: number;
   cursor?: number;
   max_depth?: number;
+  filter_component?: string;
 }
 
 export interface PaginatedInspection {
@@ -105,6 +110,24 @@ export interface PaginatedInspection {
   gameobjects: GameObjectDetail[];
   prefabInstances?: PrefabInstanceInfo[];
   error?: string;
+  warning?: string;
+}
+
+// Editor result types
+export interface EditResult {
+  success: boolean;
+  file_path: string;
+  bytes_written?: number;
+  error?: string;
+}
+
+export interface PropertyEditOptions {
+  file_path: string;
+  object_name: string;
+  property: string;
+  new_value: string;
+  preserve_comments?: boolean;
+  project_path?: string;
 }
 
 // Creation types
@@ -163,6 +186,7 @@ export interface CreateGameObjectResult {
   file_path: string;
   game_object_id?: number;
   transform_id?: number;
+  prefab_instance_id?: number;
   error?: string;
 }
 
@@ -198,6 +222,7 @@ export interface NativeScannerInstance {
     pageSize?: number;
     cursor?: number;
     maxDepth?: number;
+    filterComponent?: string;
   }): PaginatedInspection;
   readAsset(file: string): AssetObject[];
 }
@@ -356,6 +381,26 @@ export interface EditComponentResult {
   error?: string;
 }
 
+// ========== Prefab Override Types ==========
+
+export interface EditPrefabOverrideOptions {
+  file_path: string;
+  prefab_instance: string;      // fileID of the PrefabInstance block (e.g., "700000")
+  property_path: string;        // e.g., "m_LocalPosition.x" or "m_Name"
+  new_value: string;
+  object_reference?: string;    // e.g., "{fileID: 12345}" -- defaults to "{fileID: 0}"
+  target?: string;              // Target reference for new entries (e.g., "{fileID: 400000, guid: abc, type: 3}")
+}
+
+export interface EditPrefabOverrideResult {
+  success: boolean;
+  file_path: string;
+  prefab_instance_id?: string;
+  property_path?: string;
+  action?: 'updated' | 'added';
+  error?: string;
+}
+
 // ========== Settings Types ==========
 
 export interface ReadSettingsOptions {
@@ -469,14 +514,12 @@ export interface CreateSceneResult {
 export interface ProjectSearchOptions {
   project_path: string;
   name?: string;
+  exact?: boolean;
   component?: string;
   tag?: string;
   layer?: number;
   file_type?: 'scene' | 'prefab' | 'all';
-  page_size?: number;
-  cursor?: number;
   max_matches?: number;
-  scan_all?: boolean;
 }
 
 export interface ProjectSearchMatch {
@@ -493,8 +536,7 @@ export interface ProjectSearchResult {
   project_path: string;
   total_files_scanned: number;
   total_matches: number;
-  cursor: number;
-  next_cursor?: number;
+  cursor?: number;
   truncated: boolean;
   matches: ProjectSearchMatch[];
   error?: string;
@@ -502,10 +544,12 @@ export interface ProjectSearchResult {
 
 // ========== Project Grep Types ==========
 
+export type ProjectGrepFileType = 'cs' | 'yaml' | 'unity' | 'prefab' | 'asset' | 'all';
+
 export interface ProjectGrepOptions {
   project_path: string;
   pattern: string;
-  file_type?: 'cs' | 'yaml' | 'unity' | 'prefab' | 'asset' | 'all';
+  file_type?: ProjectGrepFileType;
   max_results?: number;
   context_lines?: number;
 }
@@ -527,4 +571,90 @@ export interface ProjectGrepResult {
   truncated: boolean;
   matches: GrepMatch[];
   error?: string;
+}
+
+// ========== Array Edit Types ==========
+
+export interface ArrayEditOptions {
+  file_path: string;
+  file_id: string;
+  array_property: string;
+  action: 'insert' | 'append' | 'remove';
+  value?: string;
+  index?: number;
+}
+
+export interface ArrayEditResult {
+  success: boolean;
+  file_path: string;
+  file_id?: string;
+  array_property?: string;
+  action?: string;
+  new_length?: number;
+  error?: string;
+}
+
+// ========== Component Batch Edit Types ==========
+
+export interface ComponentPropertyEdit {
+  file_id: string;
+  property: string;
+  new_value: string;
+}
+
+// ========== Remove Prefab Override Types ==========
+
+export interface RemovePrefabOverrideOptions {
+  file_path: string;
+  prefab_instance: string;
+  property_path: string;
+  target?: string;
+}
+
+export interface RemovePrefabOverrideResult {
+  success: boolean;
+  file_path: string;
+  prefab_instance_id?: string;
+  property_path?: string;
+  error?: string;
+}
+
+// ========== Prefab Sub-array Management Types ==========
+
+export interface PrefabSubArrayOptions {
+  file_path: string;
+  prefab_instance: string;
+  component_ref: string;  // e.g., "{fileID: 12345, guid: abc, type: 3}"
+}
+
+export interface PrefabSubArrayResult {
+  success: boolean;
+  file_path: string;
+  prefab_instance_id?: string;
+  error?: string;
+}
+
+// ========== Delete PrefabInstance Types ==========
+
+export interface DeletePrefabInstanceOptions {
+  file_path: string;
+  prefab_instance: string;  // fileID or name
+}
+
+export interface DeletePrefabInstanceResult {
+  success: boolean;
+  file_path: string;
+  deleted_count?: number;
+  error?: string;
+}
+
+// ========== Reference Graph Types ==========
+
+export interface ReferenceEdge {
+  source_file_id: string;
+  target_file_id: string;
+  source_class_id: number;
+  target_class_id: number;
+  property?: string;
+  depth: number;
 }

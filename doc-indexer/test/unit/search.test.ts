@@ -25,6 +25,7 @@ describe('DocSearch', () => {
         expect(search).toBeDefined();
     });
 
+    // First search in the suite triggers lazy embedder load, which can take >5s on macOS CI
     it('should return keyword results without native module', async () => {
         await storage.storeChunk({
             id: 'k1',
@@ -36,7 +37,7 @@ describe('DocSearch', () => {
         const results = await search.search({ query: 'MonoBehaviour lifecycle' });
         expect(results.results.length).toBeGreaterThanOrEqual(0);
         expect(results.elapsed_ms).toBeGreaterThanOrEqual(0);
-    });
+    }, 15000);
 
     it('should respect top_k limit', async () => {
         for (let i = 0; i < 10; i++) {

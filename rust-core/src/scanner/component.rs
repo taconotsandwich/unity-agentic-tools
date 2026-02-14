@@ -165,22 +165,60 @@ pub(crate) fn extract_properties(content: &str, file_id: &str, class_id: u32, gu
     let end_offset = after_header.find("--- !u!").unwrap_or(after_header.len());
     let block = &after_header[..end_offset];
 
-    let prop_re = Regex::new(r"(?m)^\s*m_([A-Za-z0-9_]+):\s*(.+)$").unwrap();
+    let prop_re = Regex::new(r"(?m)^\s*(m_)?([A-Za-z0-9_]+):\s*(.+)$").unwrap();
     let mut props = serde_json::Map::new();
 
-    for line in block.lines() {
-        if let Some(caps) = prop_re.captures(line) {
-            if let (Some(name), Some(value)) = (caps.get(1), caps.get(2)) {
+    let lines: Vec<&str> = block.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        if let Some(caps) = prop_re.captures(lines[i]) {
+            if let (Some(name), Some(value)) = (caps.get(2), caps.get(3)) {
                 let clean_name = name.as_str().to_string();
                 // Skip Unity metadata properties that waste tokens
                 if METADATA_PROPERTIES.contains(&clean_name.as_str()) {
+                    i += 1;
                     continue;
                 }
-                let clean_value = value.as_str().trim().to_string();
+                let mut clean_value = value.as_str().trim().to_string();
+
+                // Handle multi-line flow mappings: if braces/brackets are unbalanced,
+                // read continuation lines until balanced
+                let open_braces = clean_value.matches('{').count();
+                let close_braces = clean_value.matches('}').count();
+                let open_brackets = clean_value.matches('[').count();
+                let close_brackets = clean_value.matches(']').count();
+
+                if open_braces > close_braces || open_brackets > close_brackets {
+                    let mut j = i + 1;
+                    while j < lines.len() {
+                        let continuation = lines[j].trim();
+                        // Stop if we hit a new block header or top-level property
+                        if continuation.starts_with("--- !u!") {
+                            break;
+                        }
+                        clean_value.push(' ');
+                        clean_value.push_str(continuation);
+
+                        let ob = clean_value.matches('{').count();
+                        let cb = clean_value.matches('}').count();
+                        let obk = clean_value.matches('[').count();
+                        let cbk = clean_value.matches(']').count();
+                        j += 1;
+                        if ob <= cb && obk <= cbk {
+                            break;
+                        }
+                    }
+                    i = j;
+                } else {
+                    i += 1;
+                }
+
                 let resolved_value = resolve_guid_in_value(&clean_value, guid_cache);
                 props.insert(clean_name, serde_json::json!(resolved_value));
+                continue;
             }
         }
+        i += 1;
     }
 
     serde_json::Value::Object(props)
@@ -333,5 +371,36 @@ mod tests {
         let obj = props.as_object().unwrap();
         assert_eq!(obj.get("LocalPosition").unwrap().as_str().unwrap(), "{x: 0, y: 0, z: 0}");
         assert_eq!(obj.get("LocalRotation").unwrap().as_str().unwrap(), "{x: 0, y: 0, z: 0, w: 1}");
+    }
+
+    #[test]
+    fn test_extract_properties_includes_non_m_prefixed() {
+        let content = "--- !u!114 &800\nMonoBehaviour:\n  m_Enabled: 1\n  m_Script: {fileID: 11500000, guid: aabb, type: 3}\n  Text: Hello World\n  customField: 42\n  speed: 5.5\n";
+        let props = extract_properties(content, "800", 114, &HashMap::new());
+        let obj = props.as_object().unwrap();
+        // m_-prefixed properties should still work (without m_ prefix in key)
+        assert!(obj.contains_key("Enabled"));
+        // Non-m_ properties should now appear
+        assert!(obj.contains_key("Text"));
+        assert_eq!(obj.get("Text").unwrap().as_str().unwrap(), "Hello World");
+        assert!(obj.contains_key("customField"));
+        assert_eq!(obj.get("customField").unwrap().as_str().unwrap(), "42");
+        assert!(obj.contains_key("speed"));
+        assert_eq!(obj.get("speed").unwrap().as_str().unwrap(), "5.5");
+    }
+
+    #[test]
+    fn test_extract_properties_metadata_filter_still_works() {
+        let content = "--- !u!114 &900\nMonoBehaviour:\n  m_ObjectHideFlags: 0\n  m_CorrespondingSourceObject: {fileID: 0}\n  m_PrefabInstance: {fileID: 0}\n  m_PrefabAsset: {fileID: 0}\n  Text: Hello\n  m_Enabled: 1\n";
+        let props = extract_properties(content, "900", 114, &HashMap::new());
+        let obj = props.as_object().unwrap();
+        // Metadata still filtered
+        assert!(!obj.contains_key("ObjectHideFlags"));
+        assert!(!obj.contains_key("CorrespondingSourceObject"));
+        assert!(!obj.contains_key("PrefabInstance"));
+        assert!(!obj.contains_key("PrefabAsset"));
+        // Non-metadata properties kept
+        assert!(obj.contains_key("Text"));
+        assert!(obj.contains_key("Enabled"));
     }
 }

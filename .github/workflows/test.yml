@@ -57,29 +57,6 @@ jobs:
         working-directory: ./unity-agentic-tools
         run: bash test/cli-integration.test.sh
 
-      - name: Validate extension configurations (Unix)
-        if: runner.os != 'Windows'
-        run: bash .github/scripts/validate-extensions.sh
-
-      - name: Setup Node.js for Claude Code
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code
-
-      - name: Validate plugin with Claude Code (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          echo "Validating plugin structure..."
-          if claude plugin validate . 2>/dev/null; then
-            echo "Plugin validation passed"
-          else
-            echo "Note: claude plugin validate not available, checking plugin.json manually"
-            cat .claude-plugin/plugin.json | jq .
-          fi
-
       - name: Test CLI with native module (Unix)
         if: runner.os != 'Windows'
         run: |

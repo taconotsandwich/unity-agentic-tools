@@ -9,7 +9,23 @@ import type {
     ProjectGrepOptions,
     ProjectGrepResult,
     GrepMatch,
+    FindResult,
+    GameObject,
+    GameObjectWithComponents,
+    Component,
 } from './types';
+
+/** Union of all possible search result item types. */
+type SearchResultItem = FindResult | GameObject | GameObjectWithComponents;
+
+/** Shape of a single match from the native Rust grepProject NAPI call (camelCase). */
+interface NativeGrepMatch {
+    file: string;
+    lineNumber: number;
+    line: string;
+    contextBefore?: string[];
+    contextAfter?: string[];
+}
 
 /** File extensions considered binary — skip for grep. */
 const BINARY_EXTENSIONS = new Set([
@@ -113,14 +129,12 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
     const {
         project_path,
         name,
+        exact = false,
         component,
         tag,
         layer,
         file_type = 'all',
-        page_size = 50,
-        cursor = 0,
         max_matches,
-        scan_all = false,
     } = options;
 
     if (max_matches !== undefined && max_matches < 1) {
@@ -182,15 +196,10 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
 
     const files = walk_project_files(project_path, extensions);
 
-    // Apply file-level pagination (bypass when scan_all is true)
-    const paginatedFiles = scan_all ? files : files.slice(cursor, cursor + page_size);
-    const truncated = scan_all ? false : cursor + page_size < files.length;
-    const next_cursor = truncated ? cursor + page_size : undefined;
-
     const scanner = new UnityScanner();
     const matches: ProjectSearchMatch[] = [];
 
-    for (const file of paginatedFiles) {
+    for (const file of files) {
         try {
             let gameObjects;
 
@@ -198,8 +207,8 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
             const needFullData = !!(component || tag || layer !== undefined);
 
             if (name && !needFullData) {
-                // Use fuzzy name search (lightweight)
-                gameObjects = scanner.find_by_name(file, name, true);
+                // Use name search (exact when --exact, fuzzy/substring otherwise)
+                gameObjects = scanner.find_by_name(file, name, !exact);
             } else if (needFullData) {
                 // Need full GO data for tag/layer/component filtering
                 gameObjects = scanner.scan_scene_with_components(file);
@@ -207,10 +216,13 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
                 if (name) {
                     const nameLower = name.toLowerCase();
                     const hasWildcard = name.includes('*') || name.includes('?');
-                    gameObjects = gameObjects.filter((go: any) => {
+                    gameObjects = gameObjects.filter((go: GameObjectWithComponents) => {
                         if (!go.name) return false;
                         if (hasWildcard) {
                             return glob_match(name, go.name);
+                        }
+                        if (exact) {
+                            return go.name === name;
                         }
                         return go.name.toLowerCase().includes(nameLower);
                     });
@@ -220,11 +232,11 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
             }
 
             // Apply filters
-            for (const go of gameObjects) {
+            for (const go of gameObjects as SearchResultItem[]) {
                 // When using name search, results are FindResult union type.
                 // Tag/layer/component filters only apply to GameObjects (not PrefabInstances).
-                const goAny = go as any;
-                const isPrefab = goAny.resultType === 'PrefabInstance';
+                const isFindResult = 'resultType' in go;
+                const isPrefab = isFindResult && (go as FindResult).resultType === 'PrefabInstance';
 
                 if (isPrefab && (component || tag || layer !== undefined)) {
                     continue;
@@ -232,9 +244,9 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
 
                 // Component filter (supports glob patterns: * and ?)
                 if (component) {
-                    if (goAny.components) {
-                        const hasComponent = goAny.components.some(
-                            (c: any) => glob_match(component, c.type)
+                    if ('components' in go && go.components) {
+                        const hasComponent = (go.components as Component[]).some(
+                            (c) => glob_match(component, c.type)
                         );
                         if (!hasComponent) continue;
                     } else {
@@ -242,25 +254,33 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
                     }
                 }
 
-                // Tag filter
-                if (tag && goAny.tag !== tag) continue;
+                // Tag filter — skip if tag is missing or doesn't match
+                if (tag) {
+                    if (!('tag' in go) || go.tag !== tag) continue;
+                }
 
-                // Layer filter
-                if (layer !== undefined && goAny.layer !== layer) continue;
+                // Layer filter — skip if layer is missing or doesn't match
+                if (layer !== undefined) {
+                    if (!('layer' in go) || go.layer !== layer) continue;
+                }
 
                 const relPath = path.relative(project_path, file);
+
+                const fileId = isFindResult
+                    ? (go as FindResult).fileId
+                    : (go as GameObject).file_id;
 
                 const match: ProjectSearchMatch = {
                     file: relPath,
                     game_object: go.name,
-                    file_id: goAny.fileId || goAny.file_id,
-                    tag: goAny.tag,
-                    layer: goAny.layer,
+                    file_id: fileId,
+                    tag: 'tag' in go ? go.tag as string : undefined,
+                    layer: 'layer' in go ? go.layer as number : undefined,
                 };
 
                 // Include component types if available
-                if (goAny.components) {
-                    match.components = goAny.components.map((c: any) => c.type);
+                if ('components' in go && go.components) {
+                    match.components = (go.components as Component[]).map((c) => c.type);
                 }
 
                 matches.push(match);
@@ -278,11 +298,10 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
     return {
         success: true,
         project_path,
-        total_files_scanned: paginatedFiles.length,
+        total_files_scanned: files.length,
         total_matches: matches.length,
-        cursor,
-        next_cursor,
-        truncated: truncated || (max_matches !== undefined && matches.length >= max_matches),
+        cursor: 0,
+        truncated: max_matches !== undefined && matches.length >= max_matches,
         matches,
     };
 }
@@ -314,7 +333,7 @@ export function grep_project(options: ProjectGrepOptions): ProjectGrepResult {
                 total_matches: nativeResult.totalMatches,
                 truncated: nativeResult.truncated,
                 error: nativeResult.error,
-                matches: nativeResult.matches.map((m: any) => ({
+                matches: nativeResult.matches.map((m: NativeGrepMatch) => ({
                     file: m.file,
                     line_number: m.lineNumber,
                     line: m.line,

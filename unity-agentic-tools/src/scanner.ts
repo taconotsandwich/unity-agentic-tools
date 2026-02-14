@@ -117,6 +117,7 @@ export class UnityScanner {
       pageSize: options.page_size,
       cursor: options.cursor,
       maxDepth: options.max_depth,
+      filterComponent: options.filter_component,
     });
   }
 
