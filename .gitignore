@@ -63,9 +63,9 @@ ts/
 
 # MCP
 
-# Native binaries
+# Native binaries (built by CI at publish time)
 *.node
-unity-yaml/native/
+unity-agentic-tools/native/
 
 # Rust
 target/

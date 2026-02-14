@@ -18,6 +18,18 @@ import type {
 /** Union of all possible search result item types. */
 type SearchResultItem = FindResult | GameObject | GameObjectWithComponents;
 
+/** Shape of the native Rust grepProject NAPI result (camelCase). */
+interface NativeGrepResult {
+    success: boolean;
+    projectPath: string;
+    pattern: string;
+    totalFilesScanned: number;
+    totalMatches: number;
+    truncated: boolean;
+    error?: string;
+    matches: NativeGrepMatch[];
+}
+
 /** Shape of a single match from the native Rust grepProject NAPI call (camelCase). */
 interface NativeGrepMatch {
     file: string;
@@ -323,7 +335,7 @@ export function grep_project(options: ProjectGrepOptions): ProjectGrepResult {
                 fileType: options.file_type,
                 maxResults: options.max_results,
                 contextLines: options.context_lines,
-            });
+            }) as NativeGrepResult;
             // Map camelCase napi result to snake_case TS types
             return {
                 success: nativeResult.success,
