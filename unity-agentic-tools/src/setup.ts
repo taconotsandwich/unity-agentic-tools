@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, statSync } from 'fs';
 import { join, relative, resolve } from 'path';
-import { getNativeBuildGuidCache } from './scanner';
+import { getNativeBuildGuidCache, isNativeModuleAvailable } from './scanner';
 
-const pkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf-8'));
-const VERSION = pkg.version;
+// Version is inlined at build time by bun's bundler (no runtime path resolution)
+const VERSION: string = (require('../package.json') as { version: string }).version;
 
 const CONFIG_DIR = '.unity-agentic';
 const CONFIG_FILE = 'config.json';
@@ -154,10 +154,5 @@ function scanMetaFiles(dir: string, projectRoot: string, cache: GuidCache): void
  * Check if Rust native module is available
  */
 function isRustAvailable(): boolean {
-  try {
-    require('../../rust-core');
-    return true;
-  } catch {
-    return false;
-  }
+  return isNativeModuleAvailable();
 }

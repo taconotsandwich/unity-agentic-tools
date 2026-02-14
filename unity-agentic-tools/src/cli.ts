@@ -16,8 +16,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 const { exec } = require('child_process');
 
-const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8'));
-const VERSION = pkg.version;
+// Version is inlined at build time by bun's bundler (no runtime path resolution)
+const VERSION: string = (require('../package.json') as { version: string }).version;
 
 if (!(process as any).versions.bun) {
   console.error('CRITICAL ERROR: This tool MUST be run with BUN.');
@@ -168,10 +168,12 @@ program.command('docs <query>')
   .option('-j, --json', 'Output as JSON')
   .action((query, options) => {
     const { existsSync } = require('fs');
+    // Resolve paths at runtime (bun hardcodes __dirname at build time)
+    const cliDir = path.dirname(path.resolve(process.argv[1]));
     // Bundled (npm install): dist/doc-indexer-cli.js alongside dist/cli.js
     // Dev (workspace): ../../doc-indexer/dist/cli.js from dist/
-    const bundledPath = path.join(__dirname, 'doc-indexer-cli.js');
-    const workspacePath = path.join(__dirname, '..', '..', 'doc-indexer', 'dist', 'cli.js');
+    const bundledPath = path.join(cliDir, 'doc-indexer-cli.js');
+    const workspacePath = path.join(cliDir, '..', '..', 'doc-indexer', 'dist', 'cli.js');
     const docIndexerPath = existsSync(bundledPath) ? bundledPath : workspacePath;
     const projectRoot = find_unity_project_root();
     const globalArgs: string[] = [];

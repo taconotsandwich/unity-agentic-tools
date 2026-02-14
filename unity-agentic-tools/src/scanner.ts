@@ -1,30 +1,42 @@
 import { createRequire } from 'module';
+import { existsSync } from 'fs';
+import { resolve, dirname, join } from 'path';
 import { AssetObject, FindResult, GameObject, GameObjectDetail, GameObjectWithComponents, SceneInspection, InspectOptions, ScanOptions, NativeScanner, NativeScannerInstance, PaginationOptions, PaginatedInspection } from './types';
 
 // Load the native Rust module
-// Try bundled native/ directory first (npm install), fall back to workspace link (dev)
+// bun's bundler hardcodes import.meta.url and __dirname at build time, so we
+// use process.argv[1] (always a runtime value) to find the actual script location.
 let RustScanner: NativeScanner | null = null;
 let nativeModuleError: string | null = null;
 
 // Native walker functions (standalone, not Scanner methods)
 let nativeWalkProjectFiles: ((projectPath: string, extensions: string[], excludeDirs?: string[] | null) => string[]) | null = null;
-let nativeGrepProject: ((options: any) => any) | null = null;
-let nativeBuildGuidCache: ((projectRoot: string) => any) | null = null;
+let nativeGrepProject: ((options: unknown) => unknown) | null = null;
+let nativeBuildGuidCache: ((projectRoot: string) => unknown) | null = null;
 
 try {
-  const nativeRequire = createRequire(import.meta.url || __filename);
-  let rustModule: any;
-  try {
-    // Published package: native/ directory bundled alongside dist/
-    rustModule = nativeRequire('../native/index.js');
-  } catch {
-    // Dev workspace: resolve via workspace link
-    rustModule = nativeRequire('unity-file-tools');
+  const scriptDir = process.argv[1]
+    ? dirname(resolve(process.argv[1]))
+    : __dirname;
+
+  let rustModule: Record<string, unknown>;
+
+  // Strategy 1: Published package — native/ directory bundled alongside dist/
+  const nativeLoaderPath = join(scriptDir, '..', 'native', 'index.js');
+  if (existsSync(nativeLoaderPath)) {
+    const nativeRequire = createRequire(nativeLoaderPath);
+    rustModule = nativeRequire(nativeLoaderPath) as Record<string, unknown>;
+  } else {
+    // Strategy 2: Dev workspace — resolve 'unity-file-tools' via workspace link
+    // Anchor createRequire to script dir for correct node_modules traversal
+    const wsRequire = createRequire(join(scriptDir, '_'));
+    rustModule = wsRequire('unity-file-tools') as Record<string, unknown>;
   }
-  RustScanner = rustModule.Scanner;
-  nativeWalkProjectFiles = rustModule.walkProjectFiles || null;
-  nativeGrepProject = rustModule.grepProject || null;
-  nativeBuildGuidCache = rustModule.buildGuidCache || null;
+
+  RustScanner = rustModule.Scanner as NativeScanner;
+  nativeWalkProjectFiles = (rustModule.walkProjectFiles as typeof nativeWalkProjectFiles) || null;
+  nativeGrepProject = (rustModule.grepProject as typeof nativeGrepProject) || null;
+  nativeBuildGuidCache = (rustModule.buildGuidCache as typeof nativeBuildGuidCache) || null;
 } catch (err) {
   nativeModuleError =
     `Failed to load native Rust module.\n` +
