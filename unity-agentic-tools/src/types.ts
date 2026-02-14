@@ -658,3 +658,18 @@ export interface ReferenceEdge {
   property?: string;
   depth: number;
 }
+
+// ========== C# Type Registry Types ==========
+
+export interface CSharpTypeRef {
+  /** Type name (e.g., "PlayerController") */
+  name: string;
+  /** Kind: "class", "struct", "enum", or "interface" */
+  kind: string;
+  /** Namespace (e.g., "UnityEngine.UI") */
+  namespace: string | null;
+  /** Source file or DLL path relative to project root */
+  filePath: string;
+  /** GUID from adjacent .meta file (null for DLL types) */
+  guid: string | null;
+}

@@ -136,6 +136,42 @@ export interface SearchResult {
   metadata: ChunkMetadata
 }
 /**
+ * Extract type names from a single .NET DLL.
+ *
+ * Returns public types with their name and namespace.
+ * GUID is always None for DLL types (they have no .meta files).
+ */
+export declare function extractDllTypes(path: string): Array<CSharpTypeRef>
+/** A C# type reference extracted from source or DLL. */
+export interface CSharpTypeRef {
+  /** Type name (e.g., "PlayerController") */
+  name: string
+  /** Kind: "class", "struct", "enum", or "interface" */
+  kind: string
+  /** Namespace (e.g., "UnityEngine.UI") */
+  namespace?: string
+  /** Source file or DLL path (relative to project root) */
+  filePath: string
+  /** GUID from adjacent .meta file (None for DLL types) */
+  guid?: string
+}
+/**
+ * Extract C# type declarations from a single .cs file.
+ *
+ * Returns all public/internal class, struct, enum, and interface declarations
+ * with their namespace context and the GUID from the adjacent .meta file.
+ */
+export declare function extractCsharpTypes(path: string): Array<CSharpTypeRef>
+/**
+ * Build a type registry by scanning all .cs files in a Unity project.
+ *
+ * Scans Assets/ and optionally Library/PackageCache/ for .cs files,
+ * extracts type declarations, and returns them with GUID + namespace info.
+ * When include_packages is true, also scans Library/PackageCache/.
+ * When include_dlls is true, also extracts types from DLLs in Library/ScriptAssemblies/.
+ */
+export declare function buildTypeRegistry(projectRoot: string, includePackages?: boolean | undefined | null, includeDlls?: boolean | undefined | null): Array<CSharpTypeRef>
+/**
  * Walk a Unity project and collect files matching the given extensions.
  *
  * Walks `Assets/` (and `ProjectSettings/` when `.asset` is among extensions).
@@ -174,6 +210,14 @@ export declare function grepProject(options: NapiGrepOptions): NapiGrepResult
  * Returns a JSON object mapping `{ guid: relative_asset_path }`.
  */
 export declare function buildGuidCache(projectRoot: string): any
+/**
+ * Build a GUID cache for Library/PackageCache/ contents.
+ *
+ * Scans `Library/PackageCache/` for `.meta` files and returns
+ * `{ guid: relative_path }` just like `build_guid_cache` does for Assets/.
+ * Returns a separate cache so project assets and package assets stay distinct.
+ */
+export declare function buildPackageGuidCache(projectRoot: string): any
 /** Get the version of the native module */
 export declare function getVersion(): string
 /** Check if the native module is available */

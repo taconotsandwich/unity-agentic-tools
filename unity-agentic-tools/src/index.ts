@@ -1,4 +1,11 @@
-export { UnityScanner, isNativeModuleAvailable, getNativeModuleError } from './scanner';
+export {
+    UnityScanner,
+    isNativeModuleAvailable,
+    getNativeModuleError,
+    getNativeExtractCsharpTypes,
+    getNativeExtractDllTypes,
+    getNativeBuildTypeRegistry,
+} from './scanner';
 export { setup } from './setup';
 export { cleanup } from './cleanup';
 export { read_settings, edit_settings, edit_tag, edit_layer, edit_sorting_layer } from './settings';
