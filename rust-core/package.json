@@ -1,6 +1,6 @@
 {
   "name": "unity-file-tools",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "High-performance Unity YAML parser - Rust native module",
   "main": "index.js",
   "types": "index.d.ts",
