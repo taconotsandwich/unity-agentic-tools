@@ -310,12 +310,14 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { ChunkType, extractDllTypes, extractCsharpTypes, buildTypeRegistry, Scanner, Indexer, EmbeddingGenerator, walkProjectFiles, grepProject, buildGuidCache, buildPackageGuidCache, getVersion, isNativeAvailable } = nativeBinding
+const { ChunkType, extractDllTypes, extractDllFields, extractCsharpTypes, buildTypeRegistry, extractSerializedFields, Scanner, Indexer, EmbeddingGenerator, walkProjectFiles, grepProject, buildGuidCache, buildPackageGuidCache, getVersion, isNativeAvailable } = nativeBinding
 
 module.exports.ChunkType = ChunkType
 module.exports.extractDllTypes = extractDllTypes
+module.exports.extractDllFields = extractDllFields
 module.exports.extractCsharpTypes = extractCsharpTypes
 module.exports.buildTypeRegistry = buildTypeRegistry
+module.exports.extractSerializedFields = extractSerializedFields
 module.exports.Scanner = Scanner
 module.exports.Indexer = Indexer
 module.exports.EmbeddingGenerator = EmbeddingGenerator

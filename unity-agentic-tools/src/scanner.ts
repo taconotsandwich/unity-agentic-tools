@@ -17,6 +17,8 @@ let nativeExtractCsharpTypes: ((path: string) => Array<{ name: string; kind: str
 let nativeBuildTypeRegistry: ((projectRoot: string, includePackages?: boolean | null, includeDlls?: boolean | null) => Array<{ name: string; kind: string; namespace: string | null; file_path: string; guid: string | null }>) | null = null;
 let nativeExtractDllTypes: ((path: string) => Array<{ name: string; kind: string; namespace: string | null; file_path: string; guid: string | null }>) | null = null;
 let nativeBuildPackageGuidCache: ((projectRoot: string) => unknown) | null = null;
+let nativeExtractSerializedFields: ((path: string) => Array<{ name: string; kind: string; namespace: string | null; baseClass: string | null; fields: Array<{ name: string; typeName: string; hasSerializeField: boolean; hasSerializeReference: boolean; isPublic: boolean; ownerType: string }> }>) | null = null;
+let nativeExtractDllFields: ((path: string) => Array<{ name: string; kind: string; namespace: string | null; baseClass: string | null; fields: Array<{ name: string; typeName: string; hasSerializeField: boolean; hasSerializeReference: boolean; isPublic: boolean; ownerType: string }> }>) | null = null;
 
 try {
   const scriptDir = process.argv[1]
@@ -45,6 +47,8 @@ try {
   nativeBuildTypeRegistry = (rustModule.buildTypeRegistry as typeof nativeBuildTypeRegistry) || null;
   nativeExtractDllTypes = (rustModule.extractDllTypes as typeof nativeExtractDllTypes) || null;
   nativeBuildPackageGuidCache = (rustModule.buildPackageGuidCache as typeof nativeBuildPackageGuidCache) || null;
+  nativeExtractSerializedFields = (rustModule.extractSerializedFields as typeof nativeExtractSerializedFields) || null;
+  nativeExtractDllFields = (rustModule.extractDllFields as typeof nativeExtractDllFields) || null;
 } catch (err) {
   nativeModuleError =
     `Failed to load native Rust module.\n` +
@@ -98,6 +102,14 @@ export class UnityScanner {
    */
   scan_scene_with_components(file: string, options?: ScanOptions): GameObjectWithComponents[] {
     return this.scanner.scanSceneWithComponents(file, options);
+  }
+
+  /**
+   * Scan scene for GO metadata (name, tag, layer) without component/hierarchy extraction.
+   * Faster than scan_scene_with_components for tag/layer-only filtering.
+   */
+  scan_scene_metadata(file: string): GameObjectWithComponents[] {
+    return this.scanner.scanSceneMetadata(file);
   }
 
   /**
@@ -196,4 +208,18 @@ export function getNativeExtractDllTypes(): typeof nativeExtractDllTypes {
  */
 export function getNativeBuildPackageGuidCache(): typeof nativeBuildPackageGuidCache {
   return nativeBuildPackageGuidCache;
+}
+
+/**
+ * Get native extract_serialized_fields if available, or null
+ */
+export function getNativeExtractSerializedFields(): typeof nativeExtractSerializedFields {
+  return nativeExtractSerializedFields;
+}
+
+/**
+ * Get native extract_dll_fields if available, or null
+ */
+export function getNativeExtractDllFields(): typeof nativeExtractDllFields {
+  return nativeExtractDllFields;
 }
