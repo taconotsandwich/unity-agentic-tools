@@ -9,6 +9,40 @@ use walkdir::WalkDir;
 
 use crate::common;
 
+/// A serializable field extracted from a C# type.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct CSharpFieldRef {
+    /// Field name (e.g., "health", "moveSpeed")
+    pub name: String,
+    /// C# type name (e.g., "int", "Vector3", "List<string>", "GameObject")
+    pub type_name: String,
+    /// Whether [SerializeField] attribute is present
+    pub has_serialize_field: bool,
+    /// Whether [SerializeReference] attribute is present
+    pub has_serialize_reference: bool,
+    /// Whether the field is public
+    pub is_public: bool,
+    /// Which type this field belongs to (e.g., "PlayerController")
+    pub owner_type: String,
+}
+
+/// Extended type info with fields and base class, extracted on demand.
+#[napi(object)]
+#[derive(Clone, Debug)]
+pub struct CSharpTypeInfo {
+    /// Type name (e.g., "PlayerController")
+    pub name: String,
+    /// Kind: "class", "struct", "enum", or "interface"
+    pub kind: String,
+    /// Namespace (e.g., "UnityEngine.UI")
+    pub namespace: Option<String>,
+    /// Base class (e.g., "MonoBehaviour", "ScriptableObject")
+    pub base_class: Option<String>,
+    /// Serializable fields
+    pub fields: Vec<CSharpFieldRef>,
+}
+
 /// A C# type reference extracted from source or DLL.
 #[napi(object)]
 #[derive(Clone, Debug)]
@@ -180,6 +214,90 @@ static TYPE_DECL_RE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+// Type declaration that also captures base class (first item after ':')
+static TYPE_DECL_WITH_BASE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?m)(?:^|\s)(?:public|internal|private|protected|abstract|sealed|static|partial|\s)*(class|struct|enum|interface)\s+(\w+)(?:<[^>]*>)?\s*(?::\s*([\w.]+))?",
+    )
+    .unwrap()
+});
+
+// Field attributes
+static SERIALIZE_FIELD_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[(?:\w+\s*,\s*)*SerializeField(?:\s*,\s*\w+)*\]").unwrap());
+static SERIALIZE_REFERENCE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[(?:\w+\s*,\s*)*SerializeReference(?:\s*,\s*\w+)*\]").unwrap());
+static NON_SERIALIZED_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\[(?:\w+\s*,\s*)*(?:System\.)?NonSerialized(?:\s*,\s*\w+)*\]").unwrap()
+});
+// Field declaration: captures (1) everything before the type, (2) type, (3) name
+// Handles generics like List<int>, Dictionary<string, int>, arrays like int[], and nullable T?
+// Leading attributes like [SerializeField] are stripped before matching (see strip_attributes).
+static FIELD_DECL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?m)^\s*((?:(?:public|private|protected|internal|static|readonly|const|volatile|new)\s+)*)(\w[\w.]*(?:<[^>]+>)?(?:\[\s*\])?(?:\?)?)\s+(\w+)\s*[;=]",
+    )
+    .unwrap()
+});
+
+/// Strip leading `[...]` attribute annotations from a line.
+///
+/// Tracks bracket depth to handle nested brackets like `[Something(new[] { 1, 2, 3 })]`.
+/// Also handles string literals inside attributes (e.g., `[Tooltip("some [text]")]`).
+fn strip_attributes(line: &str) -> String {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    // Skip leading whitespace
+    while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') {
+        i += 1;
+    }
+
+    // Consume consecutive [...] blocks
+    while i < len && bytes[i] == b'[' {
+        let mut depth = 0;
+        let mut in_string = false;
+        loop {
+            if i >= len {
+                // Unterminated attribute — return original
+                return line.to_string();
+            }
+            let ch = bytes[i];
+            if in_string {
+                if ch == b'\\' {
+                    i += 2; // skip escaped char
+                    continue;
+                }
+                if ch == b'"' {
+                    in_string = false;
+                }
+            } else {
+                if ch == b'"' {
+                    in_string = true;
+                } else if ch == b'[' {
+                    depth += 1;
+                } else if ch == b']' {
+                    depth -= 1;
+                    if depth == 0 {
+                        i += 1; // skip the closing ]
+                        break;
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        // Skip whitespace between consecutive attributes
+        while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') {
+            i += 1;
+        }
+    }
+
+    // Return the remainder (the actual code after attributes)
+    line[i..].to_string()
+}
+
 /// Read the GUID from an adjacent .meta file.
 fn read_meta_guid(cs_file: &Path) -> Option<String> {
     let meta_path = PathBuf::from(format!("{}.meta", cs_file.display()));
@@ -202,6 +320,10 @@ fn read_meta_guid(cs_file: &Path) -> Option<String> {
 /// to get type names and namespaces from declaration lines.
 fn parse_csharp_types(content: &str, file_path: &str, guid: Option<&str>) -> Vec<CSharpTypeRef> {
     let mut types = Vec::new();
+
+    // Pre-process: strip string literals to avoid brace-counting corruption from multi-line strings
+    let cleaned = strip_string_literals(content);
+    let content = &cleaned;
 
     // Determine if file uses file-scoped namespace (C# 10+)
     let file_scoped_ns = FILE_SCOPED_NS_RE.captures(content).map(|c| c[1].to_string());
@@ -283,6 +405,518 @@ fn parse_csharp_types(content: &str, file_path: &str, guid: Option<&str>) -> Vec
     }
 
     types
+}
+
+/// Strip string literals from C# source to avoid false matches in multi-line strings.
+///
+/// Replaces string content (between quotes) with spaces, preserving newlines for
+/// consistent line counting. Handles:
+/// - Regular strings (`"..."`) — backslash escaping
+/// - Verbatim strings (`@"..."`) — `""` is escaped quote, spans multiple lines
+/// - Interpolated strings (`$"..."`, `$@"..."`, `@$"..."`)
+/// - Char literals (`'x'`, `'\n'`)
+fn strip_string_literals(content: &str) -> String {
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut result = String::with_capacity(len);
+    let mut i = 0;
+
+    while i < len {
+        let ch = bytes[i];
+
+        // Skip // line comments (they can contain quote characters)
+        if ch == b'/' && i + 1 < len && bytes[i + 1] == b'/' {
+            // Copy rest of line as-is (preserving newlines)
+            while i < len && bytes[i] != b'\n' {
+                result.push(bytes[i] as char);
+                i += 1;
+            }
+            continue;
+        }
+
+        // Detect prefixed string literals: @"...", $"...", $@"...", @$"..."
+        if ch == b'@' || ch == b'$' {
+            let mut is_verbatim = false;
+            let mut j = i;
+            while j < len && (bytes[j] == b'@' || bytes[j] == b'$') {
+                if bytes[j] == b'@' { is_verbatim = true; }
+                j += 1;
+            }
+            if j < len && bytes[j] == b'"' {
+                // Copy prefix characters (@, $, @$, $@) and opening quote
+                for k in i..=j {
+                    result.push(bytes[k] as char);
+                }
+                i = j + 1; // past opening "
+                // Replace content until closing quote
+                if is_verbatim {
+                    while i < len {
+                        if bytes[i] == b'"' {
+                            if i + 1 < len && bytes[i + 1] == b'"' {
+                                result.push(' '); // replace escaped ""
+                                result.push(' ');
+                                i += 2;
+                            } else {
+                                result.push('"'); // closing quote
+                                i += 1;
+                                break;
+                            }
+                        } else if bytes[i] == b'\n' {
+                            result.push('\n'); // preserve newlines
+                            i += 1;
+                        } else {
+                            result.push(' '); // replace content
+                            i += 1;
+                        }
+                    }
+                } else {
+                    while i < len {
+                        if bytes[i] == b'\\' {
+                            result.push(' ');
+                            result.push(' ');
+                            i += 2; // skip escaped char
+                        } else if bytes[i] == b'"' {
+                            result.push('"');
+                            i += 1;
+                            break;
+                        } else if bytes[i] == b'\n' {
+                            result.push('\n');
+                            i += 1;
+                        } else {
+                            result.push(' ');
+                            i += 1;
+                        }
+                    }
+                }
+                continue;
+            }
+            // Not a string literal prefix — fall through
+        }
+
+        // Regular string literal
+        if ch == b'"' {
+            result.push('"');
+            i += 1;
+            while i < len {
+                if bytes[i] == b'\\' {
+                    result.push(' ');
+                    result.push(' ');
+                    i += 2;
+                } else if bytes[i] == b'"' {
+                    result.push('"');
+                    i += 1;
+                    break;
+                } else if bytes[i] == b'\n' {
+                    result.push('\n');
+                    i += 1;
+                } else {
+                    result.push(' ');
+                    i += 1;
+                }
+            }
+            continue;
+        }
+
+        // Char literal
+        if ch == b'\'' {
+            result.push('\'');
+            i += 1;
+            while i < len && bytes[i] != b'\'' {
+                if bytes[i] == b'\\' {
+                    result.push(' ');
+                    if i + 1 < len { result.push(' '); }
+                    i += 2;
+                } else {
+                    result.push(' ');
+                    i += 1;
+                }
+            }
+            if i < len {
+                result.push('\'');
+                i += 1;
+            }
+            continue;
+        }
+
+        result.push(ch as char);
+        i += 1;
+    }
+
+    result
+}
+
+/// Strip block comments (/* ... */) from C# source to avoid false matches.
+fn strip_block_comments(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            // Skip until closing */
+            i += 2;
+            while i + 1 < len && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                // Preserve newlines so line counting stays consistent
+                if bytes[i] == b'\n' {
+                    result.push('\n');
+                }
+                i += 1;
+            }
+            if i + 1 < len {
+                i += 2; // skip */
+            }
+        } else {
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+
+    result
+}
+
+/// Extract serialized field info from a single C# source file.
+///
+/// Returns extended type info with fields, base class, and serialization attributes.
+/// This is called on-demand during component creation, not during registry builds.
+#[napi]
+pub fn extract_serialized_fields(path: String) -> Vec<CSharpTypeInfo> {
+    let file = Path::new(&path);
+    let content = match common::read_unity_file(file) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+
+    extract_fields_from_source(&content)
+}
+
+/// Internal: parse C# source for type declarations with fields.
+fn extract_fields_from_source(content: &str) -> Vec<CSharpTypeInfo> {
+    let cleaned = strip_string_literals(&strip_block_comments(content));
+    let lines: Vec<&str> = cleaned.lines().collect();
+
+    // File-scoped namespace (C# 10+)
+    let file_scoped_ns = FILE_SCOPED_NS_RE.captures(&cleaned).map(|c| c[1].to_string());
+
+    // State tracking
+    let mut namespace_stack: Vec<(String, i32)> = Vec::new(); // (namespace, brace_depth when entered)
+    let mut type_stack: Vec<TypeStackEntry> = Vec::new();
+    let mut brace_depth: i32 = 0;
+    let mut types: Vec<CSharpTypeInfo> = Vec::new();
+
+    // Pending attribute flags (accumulated across lines)
+    let mut pending_serialize_field = false;
+    let mut pending_serialize_reference = false;
+    let mut pending_non_serialized = false;
+
+    // Track whether we're inside a string literal on the current line
+    // (simple heuristic — skip lines that look like they're inside multi-line strings)
+
+    for line in &lines {
+        let trimmed = line.trim();
+
+        // Skip empty lines, single-line comments, preprocessor
+        if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Check for attributes (can span multiple lines before a field/type)
+        if SERIALIZE_FIELD_RE.is_match(trimmed) {
+            pending_serialize_field = true;
+        }
+        if SERIALIZE_REFERENCE_RE.is_match(trimmed) {
+            pending_serialize_reference = true;
+        }
+        if NON_SERIALIZED_RE.is_match(trimmed) {
+            pending_non_serialized = true;
+        }
+        // HideInInspector doesn't affect serialization — field is still serialized
+
+        // Check for namespace declaration (only if not file-scoped)
+        if file_scoped_ns.is_none() {
+            if let Some(caps) = BRACED_NS_RE.captures(trimmed) {
+                namespace_stack.push((caps[1].to_string(), brace_depth));
+            }
+        }
+
+        // Check for type declaration
+        if let Some(caps) = TYPE_DECL_WITH_BASE_RE.captures(trimmed) {
+            let kind = caps[1].to_string();
+            let name = caps[2].to_string();
+            let base_class = caps.get(3).map(|m| m.as_str().to_string());
+
+            if !is_keyword(&name) {
+                let namespace = if let Some(ref ns) = file_scoped_ns {
+                    Some(ns.clone())
+                } else {
+                    namespace_stack.last().map(|(ns, _)| ns.clone())
+                };
+
+                type_stack.push(TypeStackEntry {
+                    name: name.clone(),
+                    kind: kind.clone(),
+                    namespace,
+                    base_class,
+                    entry_depth: brace_depth,
+                    entered_body: false,
+                    fields: Vec::new(),
+                });
+
+                // Reset pending attributes (consumed by type declaration)
+                pending_serialize_field = false;
+                pending_serialize_reference = false;
+                pending_non_serialized = false;
+            }
+        }
+        // Check for field declaration (only inside a type body)
+        else if !type_stack.is_empty() {
+            // Strip leading [...] attributes so FIELD_DECL_RE can match
+            let stripped = strip_attributes(trimmed);
+            if let Some(caps) = FIELD_DECL_RE.captures(&stripped) {
+                let modifiers_str = caps[1].to_string();
+                let type_name = caps[2].to_string();
+                let field_name = caps[3].to_string();
+
+                // Skip if field name is a keyword false positive
+                // (don't check type_name — int/float/string etc. are valid field types)
+                if !is_keyword(&field_name) {
+                    let is_static = modifiers_str.contains("static");
+                    let is_const = modifiers_str.contains("const");
+                    let is_readonly = modifiers_str.contains("readonly");
+                    let is_public = modifiers_str.contains("public");
+
+                    // Apply Unity serialization rules:
+                    // Skip static, const, readonly
+                    if !is_static && !is_const && !is_readonly {
+                        // Serialized if: (public && !NonSerialized) || [SerializeField]
+                        let serialized = (is_public && !pending_non_serialized)
+                            || pending_serialize_field;
+
+                        if serialized {
+                            let owner_name = type_stack.last().unwrap().name.clone();
+                            let field = CSharpFieldRef {
+                                name: field_name,
+                                type_name,
+                                has_serialize_field: pending_serialize_field,
+                                has_serialize_reference: pending_serialize_reference,
+                                is_public,
+                                owner_type: owner_name,
+                            };
+                            type_stack.last_mut().unwrap().fields.push(field);
+                        }
+                    }
+
+                    // Reset pending attributes (consumed by field)
+                    pending_serialize_field = false;
+                    pending_serialize_reference = false;
+                    pending_non_serialized = false;
+                }
+            }
+        }
+
+        // Count braces for depth tracking
+        // Simple approach: count { and } on the line (skip strings/chars for correctness)
+        let brace_delta = count_braces_simple(trimmed);
+        brace_depth += brace_delta;
+
+        // Mark types whose body has been entered (brace_depth went above entry_depth).
+        // This prevents premature popping of Allman-style declarations where the
+        // opening { is on a separate line from the type declaration.
+        for entry in type_stack.iter_mut() {
+            if !entry.entered_body && brace_depth > entry.entry_depth {
+                entry.entered_body = true;
+            }
+        }
+
+        // Pop types that have closed (only after their body was entered)
+        while let Some(entry) = type_stack.last() {
+            if entry.entered_body && brace_depth <= entry.entry_depth {
+                let entry = type_stack.pop().unwrap();
+                types.push(CSharpTypeInfo {
+                    name: entry.name,
+                    kind: entry.kind,
+                    namespace: entry.namespace,
+                    base_class: entry.base_class,
+                    fields: entry.fields,
+                });
+            } else {
+                break;
+            }
+        }
+
+        // Pop namespaces that have closed
+        while let Some(&(_, ns_depth)) = namespace_stack.last() {
+            if brace_depth <= ns_depth {
+                namespace_stack.pop();
+            } else {
+                break;
+            }
+        }
+
+    }
+
+    // Handle any types still on the stack (e.g., EOF without closing brace)
+    while let Some(entry) = type_stack.pop() {
+        types.push(CSharpTypeInfo {
+            name: entry.name,
+            kind: entry.kind,
+            namespace: entry.namespace,
+            base_class: entry.base_class,
+            fields: entry.fields,
+        });
+    }
+
+    // Post-process: resolve same-file enum types to "int"
+    // Unity serializes enums as int (default 0), so replace field type_name
+    // with "int" when the type is a known enum from this same source file.
+    let enum_names: std::collections::HashSet<String> = types
+        .iter()
+        .filter(|t| t.kind == "enum")
+        .map(|t| t.name.clone())
+        .collect();
+
+    if !enum_names.is_empty() {
+        for t in &mut types {
+            for field in &mut t.fields {
+                if enum_names.contains(&field.type_name) {
+                    field.type_name = "int".to_string();
+                }
+            }
+        }
+    }
+
+    types
+}
+
+/// Temporary state for a type being parsed.
+struct TypeStackEntry {
+    name: String,
+    kind: String,
+    namespace: Option<String>,
+    base_class: Option<String>,
+    entry_depth: i32,
+    entered_body: bool,
+    fields: Vec<CSharpFieldRef>,
+}
+
+/// Count net brace changes on a line, skipping string literals, char literals, and comments.
+///
+/// Handles C# string variants:
+/// - Regular strings (`"..."`) — backslash escaping
+/// - Verbatim strings (`@"..."`) — `""` is escaped quote, no backslash escaping
+/// - Interpolated strings (`$"..."`) — skip brace counting inside
+/// - Interpolated verbatim (`$@"..."` / `@$"..."`) — combine both rules
+fn count_braces_simple(line: &str) -> i32 {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut count: i32 = 0;
+    let mut i = 0;
+
+    while i < len {
+        let ch = bytes[i];
+
+        // Check for // line comment
+        if ch == b'/' && i + 1 < len && bytes[i + 1] == b'/' {
+            break; // rest of line is comment
+        }
+
+        // Check for string literal starts
+        if ch == b'@' || ch == b'$' {
+            // Detect prefix combination: $@, @$, $, @
+            let mut is_verbatim = false;
+            let mut is_interpolated = false;
+            let mut j = i;
+            while j < len && (bytes[j] == b'@' || bytes[j] == b'$') {
+                if bytes[j] == b'@' { is_verbatim = true; }
+                if bytes[j] == b'$' { is_interpolated = true; }
+                j += 1;
+            }
+            if j < len && bytes[j] == b'"' {
+                // This is a prefixed string literal — skip it
+                i = skip_string_literal(bytes, j, is_verbatim, is_interpolated);
+                continue;
+            }
+            // Not followed by quote — fall through to normal processing
+        }
+
+        if ch == b'"' {
+            // Regular string literal
+            i = skip_string_literal(bytes, i, false, false);
+            continue;
+        }
+
+        if ch == b'\'' {
+            // Char literal: skip 'x' or '\x' or '\xx'
+            i = skip_char_literal(bytes, i);
+            continue;
+        }
+
+        if ch == b'{' {
+            count += 1;
+        } else if ch == b'}' {
+            count -= 1;
+        }
+
+        i += 1;
+    }
+
+    count
+}
+
+/// Skip past a string literal starting at position `start` (which points to the opening `"`).
+/// Returns the index of the byte immediately after the closing `"`.
+fn skip_string_literal(bytes: &[u8], start: usize, verbatim: bool, _interpolated: bool) -> usize {
+    let len = bytes.len();
+    let mut i = start + 1; // skip opening "
+
+    if verbatim {
+        // Verbatim string: "" is escaped quote, no backslash escaping
+        while i < len {
+            if bytes[i] == b'"' {
+                if i + 1 < len && bytes[i + 1] == b'"' {
+                    i += 2; // skip escaped ""
+                } else {
+                    return i + 1; // closing "
+                }
+            } else {
+                i += 1;
+            }
+        }
+    } else {
+        // Regular string: backslash escaping
+        while i < len {
+            if bytes[i] == b'\\' {
+                i += 2; // skip escaped char
+            } else if bytes[i] == b'"' {
+                return i + 1; // closing "
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    // Unterminated string — return past end
+    len
+}
+
+/// Skip past a char literal starting at position `start` (which points to the opening `'`).
+/// Returns the index of the byte immediately after the closing `'`.
+fn skip_char_literal(bytes: &[u8], start: usize) -> usize {
+    let len = bytes.len();
+    let mut i = start + 1; // skip opening '
+
+    if i < len && bytes[i] == b'\\' {
+        // Escaped char: '\n', '\x41', '\u0041', etc. — skip up to 6 chars then find closing '
+        i += 1;
+        while i < len && bytes[i] != b'\'' {
+            i += 1;
+        }
+        if i < len { i + 1 } else { len }
+    } else {
+        // Simple char: 'x'
+        if i < len { i += 1; } // skip the char
+        if i < len && bytes[i] == b'\'' { i + 1 } else { len }
+    }
 }
 
 /// Returns true if the name is a C# keyword that could be falsely matched.
@@ -562,5 +1196,663 @@ namespace Game {
         // Should find GameManager
         let gm = types.iter().find(|t| t.name == "GameManager");
         assert!(gm.is_some(), "Should find GameManager class");
+    }
+
+    // ===== Field extraction tests =====
+
+    #[test]
+    fn test_extract_simple_public_fields() {
+        let source = r#"
+public class PlayerController : MonoBehaviour {
+    public int health = 100;
+    public float moveSpeed;
+    public string playerName;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 1);
+        let t = &types[0];
+        assert_eq!(t.name, "PlayerController");
+        assert_eq!(t.base_class.as_deref(), Some("MonoBehaviour"));
+        assert_eq!(t.fields.len(), 3);
+
+        assert_eq!(t.fields[0].name, "health");
+        assert_eq!(t.fields[0].type_name, "int");
+        assert!(t.fields[0].is_public);
+
+        assert_eq!(t.fields[1].name, "moveSpeed");
+        assert_eq!(t.fields[1].type_name, "float");
+
+        assert_eq!(t.fields[2].name, "playerName");
+        assert_eq!(t.fields[2].type_name, "string");
+    }
+
+    #[test]
+    fn test_extract_serialize_field_private() {
+        let source = r#"
+public class MyScript : MonoBehaviour {
+    [SerializeField]
+    private int _secret;
+    private int _notSerialized;
+    [SerializeField] private float _rate;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 1);
+        let fields = &types[0].fields;
+
+        // _secret: has [SerializeField], should be serialized
+        let secret = fields.iter().find(|f| f.name == "_secret");
+        assert!(secret.is_some(), "Should find _secret");
+        assert!(secret.unwrap().has_serialize_field);
+
+        // _notSerialized: private without [SerializeField], should NOT be serialized
+        let not_serialized = fields.iter().find(|f| f.name == "_notSerialized");
+        assert!(not_serialized.is_none(), "_notSerialized should not appear");
+
+        // _rate: has [SerializeField], should be serialized
+        let rate = fields.iter().find(|f| f.name == "_rate");
+        assert!(rate.is_some(), "Should find _rate");
+    }
+
+    #[test]
+    fn test_skip_static_const_readonly() {
+        let source = r#"
+public class SkipTest : MonoBehaviour {
+    public static int StaticField;
+    public const int ConstField = 42;
+    public readonly int ReadonlyField;
+    public int NormalField;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        let fields = &types[0].fields;
+        assert_eq!(fields.len(), 1, "Only NormalField should survive");
+        assert_eq!(fields[0].name, "NormalField");
+    }
+
+    #[test]
+    fn test_extract_base_class() {
+        let source = r#"
+public class MyMono : MonoBehaviour { }
+public class MySO : ScriptableObject { }
+public class MyNetBeh : NetworkBehaviour { }
+public class Standalone { }
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 4);
+
+        let mono = types.iter().find(|t| t.name == "MyMono").unwrap();
+        assert_eq!(mono.base_class.as_deref(), Some("MonoBehaviour"));
+
+        let so = types.iter().find(|t| t.name == "MySO").unwrap();
+        assert_eq!(so.base_class.as_deref(), Some("ScriptableObject"));
+
+        let net = types.iter().find(|t| t.name == "MyNetBeh").unwrap();
+        assert_eq!(net.base_class.as_deref(), Some("NetworkBehaviour"));
+
+        let standalone = types.iter().find(|t| t.name == "Standalone").unwrap();
+        assert!(standalone.base_class.is_none());
+    }
+
+    #[test]
+    fn test_unity_types() {
+        let source = r#"
+public class FieldTypes : MonoBehaviour {
+    public Vector3 position;
+    public GameObject target;
+    public List<int> scores;
+    public float[] weights;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        let fields = &types[0].fields;
+        assert_eq!(fields.len(), 4);
+
+        assert_eq!(fields[0].type_name, "Vector3");
+        assert_eq!(fields[1].type_name, "GameObject");
+        assert_eq!(fields[2].type_name, "List<int>");
+        assert_eq!(fields[3].type_name, "float[]");
+    }
+
+    #[test]
+    fn test_non_serialized_attribute() {
+        let source = r#"
+public class AttrTest : MonoBehaviour {
+    public int visible;
+    [NonSerialized]
+    public int hidden;
+    [System.NonSerialized]
+    public int alsoHidden;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        let fields = &types[0].fields;
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].name, "visible");
+    }
+
+    #[test]
+    fn test_multiple_types_fields_correct_owner() {
+        let source = r#"
+public class Alpha : MonoBehaviour {
+    public int a;
+}
+public class Beta : MonoBehaviour {
+    public float b;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 2);
+
+        let alpha = types.iter().find(|t| t.name == "Alpha").unwrap();
+        assert_eq!(alpha.fields.len(), 1);
+        assert_eq!(alpha.fields[0].name, "a");
+        assert_eq!(alpha.fields[0].owner_type, "Alpha");
+
+        let beta = types.iter().find(|t| t.name == "Beta").unwrap();
+        assert_eq!(beta.fields.len(), 1);
+        assert_eq!(beta.fields[0].name, "b");
+        assert_eq!(beta.fields[0].owner_type, "Beta");
+    }
+
+    #[test]
+    fn test_block_comment_stripping() {
+        let source = r#"
+/* public class Commented : MonoBehaviour {
+    public int fake;
+} */
+public class Real : MonoBehaviour {
+    public int real;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0].name, "Real");
+        assert_eq!(types[0].fields.len(), 1);
+        assert_eq!(types[0].fields[0].name, "real");
+    }
+
+    #[test]
+    fn test_braces_in_strings_handled() {
+        let source = r#"
+public class BraceTest : MonoBehaviour {
+    public string text = "hello { world }";
+    public int count;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0].fields.len(), 2);
+    }
+
+    #[test]
+    fn test_serialize_reference_attribute() {
+        let source = r#"
+public class RefTest : MonoBehaviour {
+    [SerializeReference]
+    public IAbility ability;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        let fields = &types[0].fields;
+        assert_eq!(fields.len(), 1);
+        assert!(fields[0].has_serialize_reference);
+    }
+
+    #[test]
+    fn test_file_scoped_namespace_fields() {
+        let source = r#"
+namespace Game.Player;
+
+public class PlayerController : MonoBehaviour {
+    public int health;
+    public float speed;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0].namespace.as_deref(), Some("Game.Player"));
+        assert_eq!(types[0].fields.len(), 2);
+    }
+
+    // ===== Brace counting: string literal tests =====
+
+    #[test]
+    fn test_count_braces_verbatim_string() {
+        // @"..." verbatim strings — braces inside should not count
+        assert_eq!(count_braces_simple(r#"string s = @"some { braces }";"#), 0);
+    }
+
+    #[test]
+    fn test_count_braces_interpolated_string() {
+        // $"..." interpolated strings — braces inside should not count
+        assert_eq!(count_braces_simple(r#"string s = $"Value: {x}";"#), 0);
+    }
+
+    #[test]
+    fn test_count_braces_interpolated_verbatim() {
+        // $@"..." interpolated verbatim strings
+        assert_eq!(count_braces_simple(r#"string s = $@"Path: {dir}\file";"#), 0);
+        // @$"..." alternate order
+        assert_eq!(count_braces_simple(r#"string s = @$"Path: {dir}\file";"#), 0);
+    }
+
+    #[test]
+    fn test_count_braces_normal_still_works() {
+        assert_eq!(count_braces_simple("class Foo {"), 1);
+        assert_eq!(count_braces_simple("}"), -1);
+        assert_eq!(count_braces_simple("if (x) { y(); }"), 0);
+    }
+
+    #[test]
+    fn test_count_braces_verbatim_with_escaped_quote() {
+        // @"He said ""hello""" — the "" is an escaped quote in verbatim strings
+        assert_eq!(count_braces_simple(r#"string s = @"He said ""hello { }""";"#), 0);
+    }
+
+    // ===== strip_attributes tests =====
+
+    #[test]
+    fn test_strip_attributes_nested_brackets() {
+        // Nested brackets like [Something(new[] { 1, 2, 3 })]
+        let result = strip_attributes("[Something(new[] { 1, 2, 3 })] public int value;");
+        assert_eq!(result, "public int value;");
+    }
+
+    #[test]
+    fn test_strip_attributes_multiple() {
+        // Consecutive attributes
+        let result = strip_attributes("[SerializeField] [Range(0, 10)] private float speed;");
+        assert_eq!(result, "private float speed;");
+    }
+
+    #[test]
+    fn test_strip_attributes_no_attributes() {
+        let result = strip_attributes("public int health;");
+        assert_eq!(result, "public int health;");
+    }
+
+    #[test]
+    fn test_strip_attributes_with_leading_whitespace() {
+        let result = strip_attributes("    [Header(\"Stats\")] public int hp;");
+        assert_eq!(result, "public int hp;");
+    }
+
+    #[test]
+    fn test_strip_attributes_string_with_brackets() {
+        // String literal inside attribute containing brackets
+        let result = strip_attributes(r#"[Tooltip("Array [0]")] public int x;"#);
+        assert_eq!(result, "public int x;");
+    }
+
+    // ===== Field extraction with complex attributes =====
+
+    #[test]
+    fn test_fields_with_nested_bracket_attribute() {
+        let source = r#"
+public class ComplexAttrs : MonoBehaviour {
+    [Something(new[] { 1, 2, 3 })]
+    public int data;
+    public float speed;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0].fields.len(), 2);
+        assert_eq!(types[0].fields[0].name, "data");
+        assert_eq!(types[0].fields[1].name, "speed");
+    }
+
+    #[test]
+    fn test_verbatim_string_in_class_body() {
+        // Verbatim string with braces in an initializer should not corrupt brace counting
+        let source = r#"
+public class StringTest : MonoBehaviour {
+    public string template = @"Hello { world }";
+    public int count;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0].fields.len(), 2);
+        assert_eq!(types[0].fields[0].name, "template");
+        assert_eq!(types[0].fields[1].name, "count");
+    }
+
+    // ===== Same-file enum resolution =====
+
+    #[test]
+    fn test_enum_fields_resolved_to_int() {
+        let source = r#"
+public enum Faction { Ally, Enemy, Neutral }
+
+public class Unit : MonoBehaviour {
+    public Faction team;
+    public int health;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        let unit = types.iter().find(|t| t.name == "Unit").unwrap();
+        assert_eq!(unit.fields.len(), 2);
+
+        let team = unit.fields.iter().find(|f| f.name == "team").unwrap();
+        assert_eq!(team.type_name, "int", "Same-file enum should be resolved to int");
+
+        let health = unit.fields.iter().find(|f| f.name == "health").unwrap();
+        assert_eq!(health.type_name, "int");
+    }
+
+    #[test]
+    fn test_enum_in_different_type_not_resolved() {
+        // An enum NOT defined in the same source should stay as-is
+        let source = r#"
+public class Unit : MonoBehaviour {
+    public ExternalEnum faction;
+    public int health;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        let unit = types.iter().find(|t| t.name == "Unit").unwrap();
+        let faction = unit.fields.iter().find(|f| f.name == "faction").unwrap();
+        assert_eq!(faction.type_name, "ExternalEnum", "External enum type should stay as-is");
+    }
+
+    // ===== Multi-line string literal tests =====
+
+    #[test]
+    fn test_multiline_verbatim_string_does_not_corrupt_braces() {
+        // A multi-line verbatim string with braces should not corrupt brace counting
+        let source = r#"
+public class SqlHelper : MonoBehaviour {
+    public string query = @"
+        SELECT *
+        FROM users
+        WHERE name = '{name}'
+        AND active = {1}
+    ";
+    public int timeout;
+    public float retryDelay;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0].name, "SqlHelper");
+        assert_eq!(types[0].fields.len(), 3, "All 3 fields should be extracted despite multi-line string with braces");
+        assert_eq!(types[0].fields[0].name, "query");
+        assert_eq!(types[0].fields[1].name, "timeout");
+        assert_eq!(types[0].fields[2].name, "retryDelay");
+    }
+
+    #[test]
+    fn test_multiline_interpolated_verbatim_string() {
+        let source = r#"
+public class TemplateScript : MonoBehaviour {
+    public string template = $@"
+        <div class=""container"">
+            {content}
+        </div>
+    ";
+    public int maxLength;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0].fields.len(), 2);
+        assert_eq!(types[0].fields[0].name, "template");
+        assert_eq!(types[0].fields[1].name, "maxLength");
+    }
+
+    #[test]
+    fn test_multiple_multiline_strings_in_class() {
+        let source = r#"
+public class ConfigScript : MonoBehaviour {
+    public int health = 100;
+    private string _xml = @"
+        <root>
+            <item name=""test"">
+                {value}
+            </item>
+        </root>
+    ";
+    public float speed = 5.0f;
+    private string _json = @"
+        {
+            ""key"": ""value"",
+            ""nested"": { ""a"": 1 }
+        }
+    ";
+    public string label;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 1);
+        // health, speed, label are public (serialized); _xml and _json are private (not serialized)
+        assert_eq!(types[0].fields.len(), 3, "Should extract health, speed, label despite multi-line strings");
+        let names: Vec<&str> = types[0].fields.iter().map(|f| f.name.as_str()).collect();
+        assert!(names.contains(&"health"));
+        assert!(names.contains(&"speed"));
+        assert!(names.contains(&"label"));
+    }
+
+    #[test]
+    fn test_strip_string_literals_preserves_newlines() {
+        let input = "line1\nstring s = @\"multi\nline\nstring\";\nline4";
+        let result = strip_string_literals(input);
+        // Should have same number of newlines
+        assert_eq!(result.chars().filter(|&c| c == '\n').count(), 4);
+        // The string content should be replaced but structure preserved
+        assert!(result.contains("line1"));
+        assert!(result.contains("line4"));
+    }
+
+    #[test]
+    fn test_strip_string_literals_regular_string() {
+        let input = r#"string s = "hello { world }";"#;
+        let result = strip_string_literals(input);
+        // Should not contain the brace-containing content
+        assert!(!result.contains("hello { world }"));
+        // But should preserve the overall structure
+        assert!(result.contains("string s = \""));
+    }
+
+    // ===== Allman-style brace tests =====
+    // Standard C# convention: opening brace on its own line
+
+    #[test]
+    fn test_allman_style_fields_extracted() {
+        // Standard Allman-style C# (99% of Unity projects)
+        let source = r#"
+public class PlayerController : MonoBehaviour
+{
+    public int health = 100;
+    public float moveSpeed;
+    public string playerName;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 1);
+        let t = &types[0];
+        assert_eq!(t.name, "PlayerController");
+        assert_eq!(t.base_class.as_deref(), Some("MonoBehaviour"));
+        assert_eq!(t.fields.len(), 3, "All 3 fields must be extracted with Allman braces");
+        assert_eq!(t.fields[0].name, "health");
+        assert_eq!(t.fields[1].name, "moveSpeed");
+        assert_eq!(t.fields[2].name, "playerName");
+    }
+
+    #[test]
+    fn test_allman_style_nested_types() {
+        let source = r#"
+public class Outer : MonoBehaviour
+{
+    public int outerField;
+
+    public class Inner
+    {
+        public float innerField;
+    }
+
+    public string afterInner;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 2, "Should find both Outer and Inner");
+
+        let outer = types.iter().find(|t| t.name == "Outer").expect("Should find Outer");
+        assert_eq!(outer.fields.len(), 2);
+        assert_eq!(outer.fields[0].name, "outerField");
+        assert_eq!(outer.fields[1].name, "afterInner");
+
+        let inner = types.iter().find(|t| t.name == "Inner").expect("Should find Inner");
+        assert_eq!(inner.fields.len(), 1);
+        assert_eq!(inner.fields[0].name, "innerField");
+    }
+
+    #[test]
+    fn test_allman_style_with_namespace() {
+        let source = r#"
+namespace Game.Player;
+
+public class PlayerController : MonoBehaviour
+{
+    public int health;
+    public Vector3 position;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0].namespace.as_deref(), Some("Game.Player"));
+        assert_eq!(types[0].fields.len(), 2);
+    }
+
+    #[test]
+    fn test_allman_style_serialize_field() {
+        let source = r#"
+public class MyScript : MonoBehaviour
+{
+    [SerializeField]
+    private int _secret;
+    private int _notSerialized;
+    public float speed;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 1);
+        let fields = &types[0].fields;
+        assert_eq!(fields.len(), 2);
+        assert!(fields.iter().any(|f| f.name == "_secret"), "Should find [SerializeField] private _secret");
+        assert!(fields.iter().any(|f| f.name == "speed"), "Should find public speed");
+        assert!(!fields.iter().any(|f| f.name == "_notSerialized"), "Should NOT find private _notSerialized");
+    }
+
+    #[test]
+    fn test_allman_style_enum_resolved_to_int() {
+        let source = r#"
+public enum Faction
+{
+    Red,
+    Blue,
+    Green,
+}
+
+public class Unit : MonoBehaviour
+{
+    public Faction team;
+    public int health;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        let unit = types.iter().find(|t| t.name == "Unit").expect("Should find Unit");
+        assert_eq!(unit.fields.len(), 2);
+        // Same-file enum should be resolved to "int"
+        assert_eq!(unit.fields[0].name, "team");
+        assert_eq!(unit.fields[0].type_name, "int", "Enum field should be resolved to int");
+        assert_eq!(unit.fields[1].name, "health");
+        assert_eq!(unit.fields[1].type_name, "int");
+    }
+
+    #[test]
+    fn test_mixed_brace_styles() {
+        // K&R for one class, Allman for another in the same file
+        let source = r#"
+public class KnR : MonoBehaviour {
+    public int knrField;
+}
+
+public class Allman : MonoBehaviour
+{
+    public int allmanField;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 2);
+
+        let knr = types.iter().find(|t| t.name == "KnR").expect("Should find KnR");
+        assert_eq!(knr.fields.len(), 1);
+        assert_eq!(knr.fields[0].name, "knrField");
+
+        let allman = types.iter().find(|t| t.name == "Allman").expect("Should find Allman");
+        assert_eq!(allman.fields.len(), 1);
+        assert_eq!(allman.fields[0].name, "allmanField");
+    }
+
+    #[test]
+    fn test_allman_style_multiple_classes() {
+        // Multiple classes in one file, all Allman style
+        let source = r#"
+public class Health : MonoBehaviour
+{
+    public int maxHP;
+    public int currentHP;
+}
+
+public class Movement : MonoBehaviour
+{
+    public float speed;
+    public float jumpForce;
+}
+
+public class Inventory : MonoBehaviour
+{
+    public int capacity;
+}
+"#;
+        let types = extract_fields_from_source(source);
+        assert_eq!(types.len(), 3);
+
+        let health = types.iter().find(|t| t.name == "Health").expect("Health");
+        assert_eq!(health.fields.len(), 2);
+
+        let movement = types.iter().find(|t| t.name == "Movement").expect("Movement");
+        assert_eq!(movement.fields.len(), 2);
+
+        let inventory = types.iter().find(|t| t.name == "Inventory").expect("Inventory");
+        assert_eq!(inventory.fields.len(), 1);
+    }
+
+    // ===== parse_csharp_types with multi-line strings =====
+
+    #[test]
+    fn test_parse_types_with_multiline_string_in_body() {
+        let source = r#"
+namespace Game {
+    public class Config {
+        private string template = @"
+            namespace Fake {
+                class NotAClass { }
+            }
+        ";
+    }
+
+    public class RealClass { }
+}
+"#;
+        let types = parse_csharp_types(source, "test.cs", None);
+        // Should find Config and RealClass, but NOT NotAClass (it's inside a string)
+        let names: Vec<&str> = types.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"Config"), "Should find Config");
+        assert!(names.contains(&"RealClass"), "Should find RealClass");
+        assert!(!names.contains(&"NotAClass"), "Should NOT find NotAClass (inside string literal)");
     }
 }

@@ -97,7 +97,8 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 const prefab_instances = result.prefabInstances?.length || 0;
                 console.log(JSON.stringify({
                     file: result.file,
-                    total_gameobjects: result.total,
+                    total_gameobjects: result.totalInScene,
+                    total_at_depth: result.total,
                     prefab_instances,
                     component_counts,
                     page_shown: gos.length,

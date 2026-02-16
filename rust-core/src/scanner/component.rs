@@ -1,8 +1,24 @@
 use regex::Regex;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use crate::common::Component;
 use super::config::ComponentConfig;
+use super::parser::BlockIndex;
+
+// Cached regexes — compiled once, reused across all calls
+static COMP_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"component:\s*\{fileID:\s*(\d+)\}").unwrap()
+});
+static TYPE_NAME_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^([A-Za-z][A-Za-z0-9_]*):").unwrap()
+});
+static PROP_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)^\s*(m_)?([A-Za-z0-9_]+):\s*(.+)$").unwrap()
+});
+static GUID_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"guid:\s*([a-f0-9]{32})").unwrap()
+});
 
 /// Extract a block from content by header
 fn extract_block<'a>(content: &'a str, header: &str) -> Option<&'a str> {
@@ -41,8 +57,7 @@ pub fn extract_components_with_config(
     };
 
     // Get component refs
-    let comp_ref_re = Regex::new(r"component:\s*\{fileID:\s*(\d+)\}").unwrap();
-    let comp_refs: Vec<String> = comp_ref_re
+    let comp_refs: Vec<String> = COMP_REF_RE
         .captures_iter(go_block)
         .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
         .collect();
@@ -124,6 +139,81 @@ fn extract_single_component_with_config(
     Some(component)
 }
 
+/// Extract all components for a GameObject using pre-indexed block lookup (O(1) per block).
+pub fn extract_components_indexed(
+    index: &BlockIndex,
+    gameobject_file_id: &str,
+    guid_cache: &HashMap<String, String>,
+    config: &ComponentConfig,
+) -> Vec<Component> {
+    let go_block = match index.get_by_class_and_id(config.gameobject_class_id, gameobject_file_id) {
+        Some(block) => block,
+        None => return Vec::new(),
+    };
+
+    let comp_refs: Vec<&str> = COMP_REF_RE
+        .captures_iter(go_block)
+        .filter_map(|c| c.get(1).map(|m| m.as_str()))
+        .collect();
+
+    comp_refs
+        .iter()
+        .filter_map(|ref_id| extract_single_component_indexed(index, ref_id, guid_cache, config))
+        .collect()
+}
+
+fn extract_single_component_indexed(
+    index: &BlockIndex,
+    file_id: &str,
+    guid_cache: &HashMap<String, String>,
+    config: &ComponentConfig,
+) -> Option<Component> {
+    let (class_id, block) = index.get(file_id)?;
+
+    // Extract type name from first line (e.g., "Transform:" or "MonoBehaviour:")
+    let type_name = TYPE_NAME_RE.captures(block)?
+        .get(1)?.as_str().to_string();
+
+    let mut component = Component {
+        type_name,
+        class_id,
+        file_id: file_id.to_string(),
+        script_path: None,
+        script_guid: None,
+        script_name: None,
+        properties: None,
+    };
+
+    // For script containers, extract script GUID from block (not full content)
+    if config.is_script_container(class_id) {
+        let script_pattern = format!(
+            r"{}:\s*\{{fileID:\s*\d+,\s*guid:\s*([a-f0-9]{{32}})",
+            regex::escape(&config.script_field)
+        );
+        if let Ok(script_re) = Regex::new(&script_pattern) {
+            if let Some(script_caps) = script_re.captures(block) {
+                if let Some(guid_match) = script_caps.get(1) {
+                    let guid = guid_match.as_str().to_string();
+                    component.script_guid = Some(guid.clone());
+                    if let Some(path) = guid_cache.get(&guid) {
+                        component.script_path = Some(path.clone());
+                        if let Some(stem) = std::path::Path::new(path)
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                        {
+                            component.script_name = Some(stem.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    component.properties = Some(extract_properties_from_block(block, guid_cache));
+
+    Some(component)
+}
+
 /// Unity metadata properties that are rarely useful for agents and waste tokens.
 /// These are internal Unity fields present on nearly every component.
 const METADATA_PROPERTIES: &[&str] = &[
@@ -140,8 +230,7 @@ fn resolve_guid_in_value(value: &str, guid_cache: &HashMap<String, String>) -> S
     if !value.contains("guid:") {
         return value.to_string();
     }
-    let guid_re = Regex::new(r"guid:\s*([a-f0-9]{32})").unwrap();
-    if let Some(caps) = guid_re.captures(value) {
+    if let Some(caps) = GUID_RE.captures(value) {
         if let Some(guid_match) = caps.get(1) {
             let guid = guid_match.as_str();
             if let Some(path) = guid_cache.get(guid) {
@@ -152,37 +241,22 @@ fn resolve_guid_in_value(value: &str, guid_cache: &HashMap<String, String>) -> S
     value.to_string()
 }
 
-pub(crate) fn extract_properties(content: &str, file_id: &str, class_id: u32, guid_cache: &HashMap<String, String>) -> serde_json::Value {
-    // Find the start of this block
-    let header = format!("--- !u!{} &{}", class_id, file_id);
-    let start_pos = match content.find(&header) {
-        Some(pos) => pos,
-        None => return serde_json::json!({}),
-    };
-
-    // Find the end of this block (start of next block or end of content)
-    let after_header = &content[start_pos + header.len()..];
-    let end_offset = after_header.find("--- !u!").unwrap_or(after_header.len());
-    let block = &after_header[..end_offset];
-
-    let prop_re = Regex::new(r"(?m)^\s*(m_)?([A-Za-z0-9_]+):\s*(.+)$").unwrap();
+/// Extract properties from a pre-extracted block body (no content scanning needed).
+pub(crate) fn extract_properties_from_block(block: &str, guid_cache: &HashMap<String, String>) -> serde_json::Value {
     let mut props = serde_json::Map::new();
 
     let lines: Vec<&str> = block.lines().collect();
     let mut i = 0;
     while i < lines.len() {
-        if let Some(caps) = prop_re.captures(lines[i]) {
+        if let Some(caps) = PROP_RE.captures(lines[i]) {
             if let (Some(name), Some(value)) = (caps.get(2), caps.get(3)) {
                 let clean_name = name.as_str().to_string();
-                // Skip Unity metadata properties that waste tokens
                 if METADATA_PROPERTIES.contains(&clean_name.as_str()) {
                     i += 1;
                     continue;
                 }
                 let mut clean_value = value.as_str().trim().to_string();
 
-                // Handle multi-line flow mappings: if braces/brackets are unbalanced,
-                // read continuation lines until balanced
                 let open_braces = clean_value.matches('{').count();
                 let close_braces = clean_value.matches('}').count();
                 let open_brackets = clean_value.matches('[').count();
@@ -192,7 +266,6 @@ pub(crate) fn extract_properties(content: &str, file_id: &str, class_id: u32, gu
                     let mut j = i + 1;
                     while j < lines.len() {
                         let continuation = lines[j].trim();
-                        // Stop if we hit a new block header or top-level property
                         if continuation.starts_with("--- !u!") {
                             break;
                         }
@@ -222,6 +295,15 @@ pub(crate) fn extract_properties(content: &str, file_id: &str, class_id: u32, gu
     }
 
     serde_json::Value::Object(props)
+}
+
+pub(crate) fn extract_properties(content: &str, file_id: &str, class_id: u32, guid_cache: &HashMap<String, String>) -> serde_json::Value {
+    let header = format!("--- !u!{} &{}", class_id, file_id);
+    let block = match extract_block(content, &header) {
+        Some(b) => b,
+        None => return serde_json::json!({}),
+    };
+    extract_properties_from_block(block, guid_cache)
 }
 
 #[cfg(test)]
@@ -402,5 +484,36 @@ mod tests {
         // Non-metadata properties kept
         assert!(obj.contains_key("Text"));
         assert!(obj.contains_key("Enabled"));
+    }
+
+    #[test]
+    fn test_extract_components_indexed_matches_original() {
+        let content = "\
+--- !u!1 &100\nGameObject:\n  m_Component:\n  - component: {fileID: 200}\n  - component: {fileID: 300}\n\
+--- !u!4 &200\nTransform:\n  m_LocalPosition: {x: 0, y: 0, z: 0}\n\
+--- !u!114 &300\nMonoBehaviour:\n  m_Script: {fileID: 11500000, guid: aabbccdd11223344aabbccdd11223344, type: 3}\n  m_Enabled: 1\n";
+        let mut cache = HashMap::new();
+        cache.insert(
+            "aabbccdd11223344aabbccdd11223344".to_string(),
+            "Assets/Scripts/PlayerController.cs".to_string(),
+        );
+        let config = ComponentConfig::default();
+
+        // Original path
+        let original = extract_components_with_config(content, "100", &cache, &config);
+
+        // Indexed path
+        let index = BlockIndex::new(content);
+        let indexed = extract_components_indexed(&index, "100", &cache, &config);
+
+        assert_eq!(original.len(), indexed.len());
+        for (o, i) in original.iter().zip(indexed.iter()) {
+            assert_eq!(o.type_name, i.type_name);
+            assert_eq!(o.class_id, i.class_id);
+            assert_eq!(o.file_id, i.file_id);
+            assert_eq!(o.script_name, i.script_name);
+            assert_eq!(o.script_guid, i.script_guid);
+            assert_eq!(o.script_path, i.script_path);
+        }
     }
 }

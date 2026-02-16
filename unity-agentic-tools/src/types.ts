@@ -103,6 +103,7 @@ export interface PaginationOptions {
 export interface PaginatedInspection {
   file: string;
   total: number;
+  totalInScene: number;
   cursor: number;
   next_cursor?: number;
   truncated: boolean;
@@ -164,6 +165,7 @@ export interface AddComponentResult {
   component_id?: number;
   script_guid?: string;  // Set when adding a script
   script_path?: string;  // Set when adding a script
+  warning?: string;
   error?: string;
 }
 
@@ -207,6 +209,7 @@ export interface NativeScannerInstance {
   setProjectRoot(path: string): void;
   scanSceneMinimal(file: string): GameObject[];
   scanSceneWithComponents(file: string, options?: ScanOptions): GameObjectWithComponents[];
+  scanSceneMetadata(file: string): GameObjectWithComponents[];
   findByName(file: string, pattern: string, fuzzy: boolean): FindResult[];
   inspect(options: {
     file: string;
@@ -295,6 +298,7 @@ export interface DuplicateGameObjectResult {
   transform_id?: number;
   total_duplicated?: number;
   cloned_objects?: Array<{ name: string; file_id: number }>;
+  warnings?: string[];
   error?: string;
 }
 
@@ -310,6 +314,7 @@ export interface CreateScriptableObjectResult {
   output_path: string;
   script_guid?: string;
   asset_guid?: string;
+  warning?: string;
   error?: string;
 }
 
@@ -672,4 +677,34 @@ export interface CSharpTypeRef {
   filePath: string;
   /** GUID from adjacent .meta file (null for DLL types) */
   guid: string | null;
+}
+
+/** A serializable field extracted from a C# type. */
+export interface CSharpFieldRef {
+  /** Field name (e.g., "health", "moveSpeed") */
+  name: string;
+  /** C# type name (e.g., "int", "Vector3", "List<string>", "GameObject") */
+  typeName: string;
+  /** Whether [SerializeField] attribute is present */
+  hasSerializeField: boolean;
+  /** Whether [SerializeReference] attribute is present */
+  hasSerializeReference: boolean;
+  /** Whether the field is public */
+  isPublic: boolean;
+  /** Which type this field belongs to */
+  ownerType: string;
+}
+
+/** Extended type info with fields and base class, extracted on demand. */
+export interface CSharpTypeInfo {
+  /** Type name (e.g., "PlayerController") */
+  name: string;
+  /** Kind: "class", "struct", "enum", or "interface" */
+  kind: string;
+  /** Namespace (e.g., "UnityEngine.UI") */
+  namespace: string | null;
+  /** Base class (e.g., "MonoBehaviour", "ScriptableObject") */
+  baseClass: string | null;
+  /** Serializable fields */
+  fields: CSharpFieldRef[];
 }

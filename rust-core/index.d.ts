@@ -90,6 +90,7 @@ export interface PaginationOptions {
 export interface PaginatedInspection {
   file: string
   total: number
+  totalInScene: number
   cursor: number
   nextCursor?: number | undefined
   truncated: boolean
@@ -142,6 +143,41 @@ export interface SearchResult {
  * GUID is always None for DLL types (they have no .meta files).
  */
 export declare function extractDllTypes(path: string): Array<CSharpTypeRef>
+/**
+ * Extract type info with fields from a single .NET DLL.
+ *
+ * Returns extended type info including serializable fields, base class,
+ * and struct/enum distinction via the Extends column.
+ */
+export declare function extractDllFields(path: string): Array<CSharpTypeInfo>
+/** A serializable field extracted from a C# type. */
+export interface CSharpFieldRef {
+  /** Field name (e.g., "health", "moveSpeed") */
+  name: string
+  /** C# type name (e.g., "int", "Vector3", "List<string>", "GameObject") */
+  typeName: string
+  /** Whether [SerializeField] attribute is present */
+  hasSerializeField: boolean
+  /** Whether [SerializeReference] attribute is present */
+  hasSerializeReference: boolean
+  /** Whether the field is public */
+  isPublic: boolean
+  /** Which type this field belongs to (e.g., "PlayerController") */
+  ownerType: string
+}
+/** Extended type info with fields and base class, extracted on demand. */
+export interface CSharpTypeInfo {
+  /** Type name (e.g., "PlayerController") */
+  name: string
+  /** Kind: "class", "struct", "enum", or "interface" */
+  kind: string
+  /** Namespace (e.g., "UnityEngine.UI") */
+  namespace?: string
+  /** Base class (e.g., "MonoBehaviour", "ScriptableObject") */
+  baseClass?: string
+  /** Serializable fields */
+  fields: Array<CSharpFieldRef>
+}
 /** A C# type reference extracted from source or DLL. */
 export interface CSharpTypeRef {
   /** Type name (e.g., "PlayerController") */
@@ -171,6 +207,13 @@ export declare function extractCsharpTypes(path: string): Array<CSharpTypeRef>
  * When include_dlls is true, also extracts types from DLLs in Library/ScriptAssemblies/.
  */
 export declare function buildTypeRegistry(projectRoot: string, includePackages?: boolean | undefined | null, includeDlls?: boolean | undefined | null): Array<CSharpTypeRef>
+/**
+ * Extract serialized field info from a single C# source file.
+ *
+ * Returns extended type info with fields, base class, and serialization attributes.
+ * This is called on-demand during component creation, not during registry builds.
+ */
+export declare function extractSerializedFields(path: string): Array<CSharpTypeInfo>
 /**
  * Walk a Unity project and collect files matching the given extensions.
  *
@@ -235,6 +278,11 @@ export declare class Scanner {
   scanSceneMinimal(file: string): Array<GameObject>
   /** Scan scene with component information */
   scanSceneWithComponents(file: string, options?: ScanOptions | undefined | null): Array<any>
+  /**
+   * Scan scene for GO metadata (name, tag, layer) without component/hierarchy extraction.
+   * This is the "medium path" — faster than scan_scene_with_components for tag/layer filtering.
+   */
+  scanSceneMetadata(file: string): Array<any>
   /** Find GameObjects and PrefabInstances by name pattern */
   findByName(file: string, pattern: string, fuzzy: boolean): Array<FindResult>
   /** Inspect a specific GameObject */

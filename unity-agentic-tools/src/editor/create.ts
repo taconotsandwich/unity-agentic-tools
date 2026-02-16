@@ -8,11 +8,15 @@ import type {
     CreateMetaFileOptions, CreateMetaFileResult,
     CreateSceneOptions, CreateSceneResult,
     CopyComponentOptions, CopyComponentResult,
+    CSharpFieldRef,
 } from '../types';
 import { get_class_id, UNITY_CLASS_IDS } from '../class-ids';
-import { generateGuid, validate_name, validate_file_path } from '../utils';
-import { extractGuidFromMeta, resolveScriptGuid } from './shared';
+import { generateGuid, validate_name, validate_file_path, find_unity_project_root } from '../utils';
+import { extractGuidFromMeta, resolve_script_with_fields } from './shared';
+import { generate_field_yaml } from './yaml-fields';
 import { UnityDocument } from './unity-document';
+import type { UnityVersion } from '../build-version';
+import { read_project_version } from '../build-version';
 
 // ========== Private Helpers ==========
 
@@ -217,12 +221,17 @@ function addComponentToGameObject(doc: UnityDocument, gameObjectId: string, comp
 
 /**
  * Create MonoBehaviour YAML for a custom script.
+ * When fields are provided, appends serialized field defaults after m_EditorClassIdentifier.
+ * Version-gated types (Hash128, RenderingLayerMask) are skipped if the project is too old.
  */
 function createMonoBehaviourYAML(
   componentId: number,
   gameObjectId: number,
-  scriptGuid: string
+  scriptGuid: string,
+  fields?: CSharpFieldRef[],
+  version?: UnityVersion
 ): string {
+  const field_yaml = fields && fields.length > 0 ? generate_field_yaml(fields, version) : '\n';
   return `--- !u!114 &${componentId}
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -234,8 +243,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ${scriptGuid}, type: 3}
   m_Name:
-  m_EditorClassIdentifier:
-`;
+  m_EditorClassIdentifier:${field_yaml}`;
 }
 
 // ========== Exported Functions ==========
@@ -970,7 +978,9 @@ PrefabImporter:
  * Create a new ScriptableObject .asset file.
  */
 export function createScriptableObject(options: CreateScriptableObjectOptions): CreateScriptableObjectResult {
-  const { output_path, script, project_path } = options;
+  const { output_path, script } = options;
+  // Auto-detect project root from output path if not explicitly provided
+  const project_path = options.project_path || find_unity_project_root(path.dirname(output_path)) || undefined;
 
   if (!output_path.endsWith('.asset')) {
     return { success: false, output_path, error: 'Output path must have .asset extension' };
@@ -990,12 +1000,41 @@ export function createScriptableObject(options: CreateScriptableObjectOptions): 
     return { success: false, output_path, error: `"${script}" is a built-in Unity class (class ${builtInClassId}), not a custom script. ScriptableObjects require a custom script that derives from ScriptableObject. Provide a script GUID, .cs file path, or script name with --project.` };
   }
 
-  const resolved = resolveScriptGuid(script, project_path);
+  const resolved = resolve_script_with_fields(script, project_path);
   if (!resolved) {
-    return { success: false, output_path, error: `Script not found: "${script}". Provide a GUID, script path, or script name with --project.` };
+    const hints: string[] = [];
+    if (project_path) {
+      const cacheExists = existsSync(path.join(project_path, '.unity-agentic', 'guid-cache.json'));
+      const registryExists = existsSync(path.join(project_path, '.unity-agentic', 'type-registry.json'));
+      if (!cacheExists && !registryExists) {
+        hints.push(`No GUID cache or type registry found at ${path.join(project_path, '.unity-agentic/')}. Run "unity-agentic-tools setup" first.`);
+      } else if (!registryExists) {
+        hints.push('Type registry not found. Re-run "unity-agentic-tools setup" to rebuild.');
+      }
+    } else {
+      hints.push('No Unity project detected. Provide --project or run from inside a Unity project directory.');
+    }
+    return { success: false, output_path, error: `Script not found: "${script}". Provide a GUID, script path, or script name.${hints.length > 0 ? ' ' + hints.join(' ') : ''}` };
+  }
+
+  // Validate: reject non-ScriptableObject types when base class is known
+  if (resolved.kind === 'enum' || resolved.kind === 'interface') {
+    return { success: false, output_path, error: `"${script}" is ${resolved.kind === 'enum' ? 'an enum' : 'an interface'}, not a ScriptableObject.` };
+  }
+  if (resolved.base_class && resolved.base_class !== 'ScriptableObject') {
+    return { success: false, output_path, error: `"${script}" extends ${resolved.base_class}, not ScriptableObject. Cannot create as a ScriptableObject asset.` };
+  }
+
+  // Read project version for version-gated field defaults
+  let version: UnityVersion | undefined;
+  if (project_path) {
+    try { version = read_project_version(project_path); } catch { /* no version info */ }
   }
 
   const baseName = path.basename(output_path, '.asset');
+  const field_yaml = resolved.fields && resolved.fields.length > 0
+    ? generate_field_yaml(resolved.fields, version)
+    : '\n';
 
   const assetYaml = `%YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
@@ -1010,8 +1049,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ${resolved.guid}, type: 3}
   m_Name: ${baseName}
-  m_EditorClassIdentifier:
-`;
+  m_EditorClassIdentifier:${field_yaml}`;
 
   try {
     writeFileSync(output_path, assetYaml, 'utf-8');
@@ -1041,12 +1079,16 @@ NativeFormatImporter:
     return { success: false, output_path, error: `Failed to write .meta file: ${err instanceof Error ? err.message : String(err)}` };
   }
 
-  return {
+  const result: CreateScriptableObjectResult = {
     success: true,
     output_path,
     script_guid: resolved.guid,
-    asset_guid: assetGuid
+    asset_guid: assetGuid,
   };
+  if (resolved.extraction_error) {
+    result.warning = resolved.extraction_error;
+  }
+  return result;
 }
 
 /**
@@ -1111,7 +1153,9 @@ MonoImporter:
  * and custom scripts by name, path, or GUID.
  */
 export function addComponent(options: AddComponentOptions): AddComponentResult {
-  const { file_path, game_object_name, component_type, project_path } = options;
+  const { file_path, game_object_name, component_type } = options;
+  // Auto-detect project root from scene file if not explicitly provided
+  const project_path = options.project_path || find_unity_project_root(path.dirname(file_path)) || undefined;
 
   // Validate file path security
   const pathError = validate_file_path(file_path, 'write');
@@ -1172,23 +1216,60 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
   let componentYAML: string;
   let scriptGuid: string | undefined;
   let scriptPath: string | undefined;
+  let extractionError: string | undefined;
   if (classId !== null) {
     // Get the canonical component name from the class ID mapping
     const componentName = UNITY_CLASS_IDS[classId] || component_type;
     componentYAML = createGenericComponentYAML(componentName, classId, componentId, gameObjectId);
   } else {
-    // Treat as custom script
-    const resolved = resolveScriptGuid(component_type, project_path);
+    // Treat as custom script -- resolve with field extraction
+    const resolved = resolve_script_with_fields(component_type, project_path);
     if (!resolved) {
+      const hints: string[] = [];
+      if (project_path) {
+        const cacheExists = existsSync(path.join(project_path, '.unity-agentic', 'guid-cache.json'));
+        const registryExists = existsSync(path.join(project_path, '.unity-agentic', 'type-registry.json'));
+        if (!cacheExists && !registryExists) {
+          hints.push(`No GUID cache or type registry found at ${path.join(project_path, '.unity-agentic/')}. Run "unity-agentic-tools setup" first.`);
+        } else if (!registryExists) {
+          hints.push('Type registry not found. Re-run "unity-agentic-tools setup" to rebuild.');
+        }
+      } else {
+        hints.push('No Unity project detected. Provide --project or run from inside a Unity project directory.');
+      }
       return {
         success: false,
         file_path,
-        error: `Component or script not found: "${component_type}". Use a Unity component name (e.g., "MeshRenderer", "Animator") or provide a script name, path (Assets/Scripts/Foo.cs), or GUID.`
+        error: `Component or script not found: "${component_type}". Use a Unity component name (e.g., "MeshRenderer", "Animator") or provide a script name, path (Assets/Scripts/Foo.cs), or GUID.${hints.length > 0 ? ' ' + hints.join(' ') : ''}`
       };
     }
-    componentYAML = createMonoBehaviourYAML(componentId, gameObjectId, resolved.guid);
+
+    // Validate: reject non-component types when base class is known
+    if (resolved.kind === 'enum' || resolved.kind === 'interface') {
+      return {
+        success: false,
+        file_path,
+        error: `"${component_type}" is ${resolved.kind === 'enum' ? 'an enum' : 'an interface'}, not a MonoBehaviour. Cannot add as a component.`
+      };
+    }
+    if (resolved.base_class && !['MonoBehaviour', 'NetworkBehaviour', 'StateMachineBehaviour'].includes(resolved.base_class)) {
+      return {
+        success: false,
+        file_path,
+        error: `"${component_type}" extends ${resolved.base_class}, not MonoBehaviour. Cannot add as a component.`
+      };
+    }
+
+    // Read project version for version-gated field defaults
+    let version: UnityVersion | undefined;
+    if (project_path) {
+      try { version = read_project_version(project_path); } catch { /* no version info */ }
+    }
+
+    componentYAML = createMonoBehaviourYAML(componentId, gameObjectId, resolved.guid, resolved.fields, version);
     scriptGuid = resolved.guid;
     scriptPath = resolved.path || undefined;
+    extractionError = resolved.extraction_error;
   }
 
   // Add component reference to GameObject
@@ -1207,6 +1288,11 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
     };
   }
 
+  // Collect warnings: duplicate component + extraction errors
+  const warnings: string[] = [];
+  if (duplicateWarning) warnings.push(duplicateWarning);
+  if (extractionError) warnings.push(extractionError);
+
   const result: AddComponentResult = {
     success: true,
     file_path,
@@ -1214,8 +1300,8 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
     script_guid: scriptGuid,
     script_path: scriptPath,
   };
-  if (duplicateWarning) {
-    (result as AddComponentResult & { warning?: string }).warning = duplicateWarning;
+  if (warnings.length > 0) {
+    result.warning = warnings.join(' ');
   }
   return result;
 }
