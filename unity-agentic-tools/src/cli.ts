@@ -163,8 +163,6 @@ program.command('version <project_path>')
 // Docs command (top-level — searches Unity documentation)
 program.command('docs <query>')
   .description('Search Unity documentation (auto-indexes on first use)')
-  .option('-s, --summarize', 'Summarize results')
-  .option('-c, --compress', 'Compress results')
   .option('-j, --json', 'Output as JSON')
   .action((query, options) => {
     const { existsSync } = require('fs');
@@ -184,14 +182,12 @@ program.command('docs <query>')
     }
 
     const args = [docIndexerPath, ...globalArgs, 'search', JSON.stringify(query)];
-    if (options.summarize) args.push('-s');
-    if (options.compress) args.push('-c');
     if (options.json) args.push('-j');
 
-    exec(`bun ${args.join(' ')}`, (error: any, stdout: string, stderr: string) => {
+    exec(`bun ${args.join(' ')}`, (error: unknown, stdout: string, stderr: string) => {
       if (stderr) process.stderr.write(stderr);
       if (error) {
-        console.error('Error:', error.message);
+        console.error('Error:', (error as Error).message);
         process.exit(1);
       }
 

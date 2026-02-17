@@ -202,24 +202,280 @@ function chunkProse(content: string, filePath: string): Chunk[] {
   return chunks;
 }
 
-/** Strip HTML tags, scripts, styles, and decode common entities */
+/**
+ * @deprecated Use `htmlToMarkdown` instead for structured conversion.
+ * Strip HTML tags, scripts, styles, and decode common entities.
+ */
 export function stripHtml(html: string): string {
   let text = html;
-  // Remove script and style blocks entirely (replace with space to avoid merging adjacent text)
   text = text.replace(/<script[\s\S]*?<\/script>/gi, ' ');
   text = text.replace(/<style[\s\S]*?<\/style>/gi, ' ');
-  // Strip remaining HTML tags
   text = text.replace(/<[^>]+>/g, ' ');
-  // Decode common HTML entities
   text = text.replace(/&nbsp;/g, ' ');
   text = text.replace(/&amp;/g, '&');
   text = text.replace(/&lt;/g, '<');
   text = text.replace(/&gt;/g, '>');
   text = text.replace(/&quot;/g, '"');
   text = text.replace(/&#39;/g, "'");
-  // Collapse whitespace
   text = text.replace(/\s+/g, ' ').trim();
   return text;
+}
+
+/**
+ * Remove a block starting with the given opening tag regex by finding
+ * the depth-balanced closing </tagName>. Returns the string with
+ * that block removed. Removes ALL occurrences.
+ */
+function removeBalancedBlock(html: string, openPattern: RegExp, tagName: string): string {
+    let result = html;
+    let match: RegExpExecArray | null;
+    // Reset and search iteratively (each removal shifts indices)
+    while ((match = openPattern.exec(result)) !== null) {
+        const startIdx = match.index;
+        let depth = 1;
+        let i = startIdx + match[0].length;
+        const openTag = new RegExp(`<${tagName}[\\s>]`, 'gi');
+        const closeTag = `</${tagName}>`;
+
+        while (depth > 0 && i < result.length) {
+            const nextClose = result.indexOf(closeTag, i);
+            if (nextClose === -1) break;
+
+            // Count any additional opens between i and nextClose
+            openTag.lastIndex = i;
+            let openMatch: RegExpExecArray | null;
+            while ((openMatch = openTag.exec(result)) !== null && openMatch.index < nextClose) {
+                depth++;
+            }
+            depth--; // for the close tag we found
+            i = nextClose + closeTag.length;
+        }
+
+        result = result.substring(0, startIdx) + result.substring(i);
+        openPattern.lastIndex = 0; // reset for next iteration
+    }
+    return result;
+}
+
+/** Decode common HTML entities */
+function decodeEntities(text: string): string {
+    return text
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+}
+
+/**
+ * Convert HTML to clean markdown, preserving document structure
+ * (headings, tables, links, code blocks) while stripping navigation chrome.
+ */
+export function htmlToMarkdown(html: string): string {
+    let text = html;
+
+    // --- Step 1: Remove noise sections ---
+    text = text.replace(/<script[\s\S]*?<\/script>/gi, '');
+    text = text.replace(/<style[\s\S]*?<\/style>/gi, '');
+    text = text.replace(/<form[\s\S]*?<\/form>/gi, '');
+
+    // Remove known Unity chrome divs by class/id
+    const noisePatterns: Array<[RegExp, string]> = [
+        [/<div[^>]*class="[^"]*header-wrapper[^"]*"[^>]*>/gi, 'div'],
+        [/<div[^>]*id="sidebar"[^>]*>/gi, 'div'],
+        [/<div[^>]*class="[^"]*footer-wrapper[^"]*"[^>]*>/gi, 'div'],
+        [/<div[^>]*class="[^"]*suggest-wrap[^"]*"[^>]*>/gi, 'div'],
+        [/<div[^>]*class="[^"]*suggest-form[^"]*"[^>]*>/gi, 'div'],
+        [/<div[^>]*class="[^"]*suggest"[^>]*>/gi, 'div'],
+        [/<div[^>]*class="[^"]*scrollToFeedback[^"]*"[^>]*>/gi, 'div'],
+        [/<div[^>]*class="[^"]*nextprev[^"]*"[^>]*>/gi, 'div'],
+        [/<div[^>]*class="[^"]*toolbar[^"]*"[^>]*>/gi, 'div'],
+        [/<nav[^>]*>/gi, 'nav'],
+    ];
+    for (const [pattern, tag] of noisePatterns) {
+        text = removeBalancedBlock(text, pattern, tag);
+    }
+
+    // --- Step 2: Extract main content ---
+    const contentWrapMatch = text.match(/<div[^>]*id="content-wrap"[^>]*>([\s\S]*)/i);
+    if (contentWrapMatch) {
+        // Extract content-wrap inner HTML (find balanced close)
+        const afterOpen = contentWrapMatch.index! + contentWrapMatch[0].indexOf('>') + 1;
+        let depth = 1;
+        let i = afterOpen;
+        while (depth > 0 && i < text.length) {
+            const nextOpen = text.indexOf('<div', i);
+            const nextClose = text.indexOf('</div>', i);
+            if (nextClose === -1) break;
+            if (nextOpen !== -1 && nextOpen < nextClose) {
+                depth++;
+                i = nextOpen + 4;
+            } else {
+                depth--;
+                if (depth === 0) {
+                    text = text.substring(afterOpen, nextClose);
+                } else {
+                    i = nextClose + 6;
+                }
+            }
+        }
+    } else {
+        const bodyMatch = text.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        if (bodyMatch) {
+            text = bodyMatch[1];
+        }
+    }
+
+    // --- Step 3: Strip non-content elements ---
+    // Switch-to-Manual / Switch-to-Scripting links (class may use single or double quotes)
+    text = text.replace(/<a[^>]*class=['"][^'"]*switch-link[^'"]*['"][^>]*>[\s\S]*?<\/a>/gi, '');
+
+    // Tooltips: remove tooltiptext span first, keep visible text
+    text = text.replace(/<span[^>]*class="[^"]*tooltiptext[^"]*"[^>]*>[\s\S]*?<\/span>/gi, '');
+
+    // Search highlight spans: remove entirely
+    text = text.replace(/<span[^>]*class="[^"]*search-words[^"]*"[^>]*>[\s\S]*?<\/span>/gi, '');
+
+    // Breadcrumbs: convert to blockquote-style context line
+    text = text.replace(/<div[^>]*class="[^"]*breadcrumbs[^"]*"[^>]*>([\s\S]*?)<\/div>/gi, (_match, inner: string) => {
+        const crumbs = inner.replace(/<a[^>]*>([\s\S]*?)<\/a>/gi, '$1')
+            .replace(/<[^>]+>/g, '')
+            .split(/\s*[>\/]\s*/)
+            .map((c: string) => c.trim())
+            .filter(Boolean);
+        return crumbs.length > 0 ? `\n> ${crumbs.join(' > ')}\n\n` : '';
+    });
+
+    // --- Step 4: Convert to markdown ---
+
+    // 4.1 Code blocks: <pre> with <code> or class="codeExampleCS"
+    text = text.replace(/<pre[^>]*>\s*<code[^>]*>([\s\S]*?)<\/code>\s*<\/pre>/gi, (_m, code: string) => {
+        const decoded = decodeEntities(code.replace(/<[^>]+>/g, '').trim());
+        return `\n\`\`\`csharp\n${decoded}\n\`\`\`\n`;
+    });
+    text = text.replace(/<pre[^>]*class="[^"]*codeExample[^"]*"[^>]*>([\s\S]*?)<\/pre>/gi, (_m, code: string) => {
+        const decoded = decodeEntities(code.replace(/<[^>]+>/g, '').trim());
+        return `\n\`\`\`csharp\n${decoded}\n\`\`\`\n`;
+    });
+    // Generic <pre> blocks
+    text = text.replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, (_m, code: string) => {
+        const decoded = decodeEntities(code.replace(/<[^>]+>/g, '').trim());
+        return `\n\`\`\`\n${decoded}\n\`\`\`\n`;
+    });
+
+    // 4.2 Headings
+    text = text.replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, (_m, t: string) => `\n# ${t.replace(/<[^>]+>/g, '').trim()}\n\n`);
+    text = text.replace(/<h2[^>]*>([\s\S]*?)<\/h2>/gi, (_m, t: string) => `\n## ${t.replace(/<[^>]+>/g, '').trim()}\n\n`);
+    text = text.replace(/<h3[^>]*>([\s\S]*?)<\/h3>/gi, (_m, t: string) => `\n### ${t.replace(/<[^>]+>/g, '').trim()}\n\n`);
+    text = text.replace(/<h4[^>]*>([\s\S]*?)<\/h4>/gi, (_m, t: string) => `\n#### ${t.replace(/<[^>]+>/g, '').trim()}\n\n`);
+
+    // 4.3 Tables
+    text = text.replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, (_m, tableHtml: string) => {
+        const rows: string[] = [];
+        let hasHeader = false;
+
+        // Extract header cells
+        const theadMatch = tableHtml.match(/<thead[^>]*>([\s\S]*?)<\/thead>/i);
+        const headerRowMatch = theadMatch
+            ? theadMatch[1].match(/<tr[^>]*>([\s\S]*?)<\/tr>/i)
+            : tableHtml.match(/<tr[^>]*>([\s\S]*?)<\/tr>/i);
+
+        if (headerRowMatch) {
+            const thCells = Array.from(headerRowMatch[1].matchAll(/<th[^>]*>([\s\S]*?)<\/th>/gi));
+            if (thCells.length > 0) {
+                hasHeader = true;
+                const headerRow = thCells.map(c => convertInlineHtml(c[1]).trim()).join(' | ');
+                rows.push(`| ${headerRow} |`);
+                rows.push(`|${thCells.map(() => '---').join('|')}|`);
+            }
+        }
+
+        // Extract body rows
+        const tbodyMatch = tableHtml.match(/<tbody[^>]*>([\s\S]*?)<\/tbody>/i);
+        const bodyHtml = tbodyMatch ? tbodyMatch[1] : tableHtml;
+        const trMatches = Array.from(bodyHtml.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi));
+
+        for (const tr of trMatches) {
+            const tdCells = Array.from(tr[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi));
+            if (tdCells.length === 0) continue;
+
+            // Skip the header row if we already extracted it
+            if (!hasHeader && rows.length === 0) {
+                const thCheck = Array.from(tr[1].matchAll(/<th[^>]*>([\s\S]*?)<\/th>/gi));
+                if (thCheck.length > 0) continue;
+            }
+
+            const cellValues = tdCells.map(c => convertInlineHtml(c[1]).trim());
+            rows.push(`| ${cellValues.join(' | ')} |`);
+
+            // If first data row and no header yet, add a synthetic separator
+            if (!hasHeader && rows.length === 1) {
+                rows.unshift(`|${tdCells.map(() => '---').join('|')}|`);
+                hasHeader = true;
+            }
+        }
+
+        return rows.length > 0 ? `\n${rows.join('\n')}\n` : '';
+    });
+
+    // 4.4 Links
+    text = text.replace(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href: string, linkText: string) => {
+        const clean = linkText.replace(/<[^>]+>/g, '').trim();
+        if (!clean) return '';
+        return `[${clean}](${href})`;
+    });
+
+    // 4.5 Bold/italic
+    text = text.replace(/<(?:strong|b)>([\s\S]*?)<\/(?:strong|b)>/gi, '**$1**');
+    text = text.replace(/<(?:em|i)>([\s\S]*?)<\/(?:em|i)>/gi, '*$1*');
+
+    // 4.6 Inline code
+    text = text.replace(/<code>([\s\S]*?)<\/code>/gi, '`$1`');
+
+    // 4.7 Lists
+    text = text.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_m, content: string) => {
+        const clean = content.replace(/<[^>]+>/g, '').trim();
+        return `\n- ${clean}`;
+    });
+    // Remove list wrapper tags
+    text = text.replace(/<\/?(?:ul|ol)[^>]*>/gi, '\n');
+
+    // 4.8 Line breaks and paragraphs
+    text = text.replace(/<br\s*\/?>/gi, '\n');
+    text = text.replace(/<\/p>/gi, '\n\n');
+    text = text.replace(/<p[^>]*>/gi, '');
+
+    // 4.9 Horizontal rules / section dividers
+    text = text.replace(/<hr[^>]*>/gi, '\n---\n');
+
+    // 4.10 Strip remaining HTML tags
+    text = text.replace(/<[^>]+>/g, '');
+
+    // 4.11 Decode entities
+    text = decodeEntities(text);
+
+    // 4.12 Cleanup whitespace
+    text = text.replace(/[ \t]+$/gm, '');        // trailing spaces per line
+    text = text.replace(/\n{3,}/g, '\n\n');       // max 2 newlines
+    text = text.trim();
+
+    return text;
+}
+
+/** Convert inline HTML (links, bold, italic, code) to markdown — used inside table cells */
+function convertInlineHtml(html: string): string {
+    let text = html;
+    text = text.replace(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href: string, linkText: string) => {
+        const clean = linkText.replace(/<[^>]+>/g, '').trim();
+        return clean ? `[${clean}](${href})` : '';
+    });
+    text = text.replace(/<(?:strong|b)>([\s\S]*?)<\/(?:strong|b)>/gi, '**$1**');
+    text = text.replace(/<(?:em|i)>([\s\S]*?)<\/(?:em|i)>/gi, '*$1*');
+    text = text.replace(/<code>([\s\S]*?)<\/code>/gi, '`$1`');
+    text = text.replace(/<[^>]+>/g, '');
+    text = decodeEntities(text);
+    return text;
 }
 
 /** Recursively walk a directory and return all file paths */
@@ -299,7 +555,7 @@ export function indexMarkdownFile(filePath: string, storage?: DocStorage): Index
 export function indexHtmlFile(filePath: string, storage?: DocStorage): IndexResult {
   const startTime = Date.now();
   const html = readFileSync(filePath, 'utf-8');
-  const text = stripHtml(html);
+  const text = htmlToMarkdown(html);
 
   const chunks = chunkProse(text, filePath);
 
@@ -337,7 +593,7 @@ export async function indexDocsDirectory(
     const content = readFileSync(fullPath, 'utf-8');
 
     if (ext === '.html') {
-      const text = stripHtml(content);
+      const text = htmlToMarkdown(content);
       allChunks.push(...chunkProse(text, fullPath));
     } else {
       allChunks.push(...extractCodeBlocks(content));
@@ -518,7 +774,7 @@ export async function indexSource(source: DocSource, storage: DocStorage): Promi
         const fileChunks: Chunk[] = [];
 
         if (ext === '.html') {
-            const text = stripHtml(content);
+            const text = htmlToMarkdown(content);
             fileChunks.push(...chunkProse(text, file.fullPath));
         } else {
             fileChunks.push(...extractCodeBlocks(content, file.fullPath));

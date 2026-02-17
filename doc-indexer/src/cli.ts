@@ -16,6 +16,24 @@ program
     .option('--project-root <path>', 'Unity project root (auto-detected if omitted)')
     .option('--storage-path <path>', 'Index storage file path (auto-resolved if omitted)');
 
+/** Extract a human-readable title from a doc file path */
+function extract_doc_title(filePath: string | undefined): string {
+    if (!filePath) return 'Unknown';
+    const filename = filePath.split('/').pop()?.replace(/\.[^.]+$/, '') ?? 'Unknown';
+    // Convert filenames like "class-Rigidbody" or "Rigidbody-velocity" to readable form
+    return filename.replace(/^class-/, '').replace(/-/g, '.');
+}
+
+/** Extract relative source path (ScriptReference/X.html or Manual/X.html) */
+function extract_relative_source(filePath: string | undefined): string | undefined {
+    if (!filePath) return undefined;
+    // Match common Unity doc path segments
+    const match = filePath.match(/((?:ScriptReference|Manual|Documentation)\/[^/]*\.html?)$/i);
+    if (match) return match[1];
+    // Fallback: just the filename
+    return filePath.split('/').pop();
+}
+
 /** Resolve storage path from CLI options. */
 function get_storage_path(opts: { projectRoot?: string; storagePath?: string }): string {
     if (opts.storagePath) return opts.storagePath;
@@ -46,8 +64,6 @@ async function auto_index(storage: DocStorage, projectRoot: string | null): Prom
 program
     .command('search <query>')
     .description('Search documentation (auto-discovers and indexes on first use)')
-    .option('-s, --summarize', 'Summarize results (truncate content)')
-    .option('-c, --compress', 'Compress results (minimal output)')
     .option('-j, --json', 'Output as JSON')
     .action(async (query, options) => {
         const globalOpts = program.opts();
@@ -79,33 +95,25 @@ program
         });
 
         if (options.json) {
-            const output = options.summarize
-                ? { ...results, results: results.results.map(r => ({ ...r, content: r.content.slice(0, 200) })) }
-                : options.compress
-                    ? { ...results, results: results.results.map(({ content, ...r }) => r) }
-                    : results;
-            console.log(JSON.stringify(output, null, 2));
+            console.log(JSON.stringify(results, null, 2));
             return;
         }
 
-        if (options.compress) {
-            for (const result of results.results) {
-                const title = result.metadata?.section || result.metadata?.unity_class || result.metadata?.file_path;
-                console.log(`${title} (${result.score.toFixed(4)})`);
+        // Markdown output
+        const count = results.results.length;
+        console.log(`# Unity Docs: "${query}" (${count} result${count !== 1 ? 's' : ''})\n`);
+
+        for (const result of results.results) {
+            const meta = result.metadata as Record<string, string | undefined>;
+            const title = meta?.section || meta?.unity_class || extract_doc_title(meta?.file_path);
+            const source = extract_relative_source(meta?.file_path);
+
+            console.log(`## ${title}\n`);
+            console.log(result.content);
+            if (source) {
+                console.log(`\n*Source: ${source}*`);
             }
-            return;
-        }
-
-        console.log(`Found ${results.results.length} results in ${results.elapsed_ms}ms`);
-        console.log(`Semantic: ${results.semantic_count}, Keyword: ${results.keyword_count}`);
-
-        for (let i = 0; i < results.results.length; i++) {
-            const result = results.results[i];
-            const title = result.metadata?.section || result.metadata?.unity_class || result.metadata?.file_path;
-            const content = options.summarize ? result.content.slice(0, 200) + '...' : result.content;
-            console.log(`\n[${i + 1}] ${title}`);
-            console.log(content);
-            console.log(`Score: ${result.score.toFixed(4)}`);
+            console.log('\n---\n');
         }
     });
 
