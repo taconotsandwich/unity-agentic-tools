@@ -175,6 +175,7 @@ pub struct PaginationOptions {
 pub struct PaginatedInspection {
     pub file: String,
     pub total: u32,
+    pub total_in_scene: u32,
     pub cursor: u32,
     #[napi(ts_type = "number | undefined")]
     pub next_cursor: Option<u32>,

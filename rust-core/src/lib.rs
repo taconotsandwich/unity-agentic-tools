@@ -1,6 +1,7 @@
 #![deny(clippy::all)]
 
 pub mod common;
+pub mod csharp;
 pub mod scanner;
 pub mod indexer;
 pub mod embeddings;

@@ -1491,6 +1491,39 @@ describe('addComponent', () => {
         expect(result.success).toBe(false);
         expect(result.error).toContain('Component or script not found');
     });
+
+    it('should include setup hint when script lookup fails with project path', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'SomeUnknownScript',
+            project_path: '/tmp/fake-unity-project'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Component or script not found');
+        expect(result.error).toContain('unity-agentic-tools setup');
+    });
+
+    it('should include warning when duplicate component is added', () => {
+        // First add a BoxCollider
+        addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'BoxCollider'
+        });
+
+        // Add a second BoxCollider — should succeed with warning
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'BoxCollider'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.warning).toBeDefined();
+        expect(result.warning).toContain('already has a BoxCollider');
+    });
 });
 
 describe('createPrefabVariant', () => {
