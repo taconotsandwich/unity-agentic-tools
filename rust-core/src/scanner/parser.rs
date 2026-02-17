@@ -1,6 +1,38 @@
 use regex::Regex;
+use std::collections::HashMap;
 use crate::common::GameObject;
 use super::config::ComponentConfig;
+
+/// Pre-indexed block lookup for O(1) access by file_id.
+/// Built from a single pass over the file content, replacing O(n) linear scans.
+pub struct BlockIndex {
+    /// Map from file_id to (class_id, block_body)
+    blocks: HashMap<String, (u32, String)>,
+}
+
+impl BlockIndex {
+    /// Build a block index from Unity YAML content in a single O(n) pass.
+    pub fn new(content: &str) -> Self {
+        let raw_blocks = UnityYamlParser::parse_all_blocks(content);
+        let mut blocks = HashMap::with_capacity(raw_blocks.len());
+        for (class_id, file_id, body) in raw_blocks {
+            blocks.insert(file_id, (class_id, body));
+        }
+        BlockIndex { blocks }
+    }
+
+    /// Look up a block by file_id. Returns (class_id, block_body) if found.
+    pub fn get(&self, file_id: &str) -> Option<(u32, &str)> {
+        self.blocks.get(file_id).map(|(cid, body)| (*cid, body.as_str()))
+    }
+
+    /// Look up a block by class_id and file_id. Returns block_body if class_id matches.
+    pub fn get_by_class_and_id(&self, class_id: u32, file_id: &str) -> Option<&str> {
+        self.blocks.get(file_id)
+            .filter(|(cid, _)| *cid == class_id)
+            .map(|(_, body)| body.as_str())
+    }
+}
 
 /// Unity YAML parser for extracting blocks and data
 pub struct UnityYamlParser;
@@ -226,5 +258,38 @@ GameObject:
         let crlf_content = "--- !u!1 &1234567890\r\nGameObject:\r\n  m_ObjectHideFlags: 0\r\n  m_Name: CRLFObject\r\n  m_IsActive: 1\r\n";
         let objects = UnityYamlParser::extract_gameobjects(crlf_content);
         assert_eq!(objects.len(), 0, "Raw CRLF should fail to parse — regex uses literal \\n");
+    }
+
+    #[test]
+    fn test_block_index_basic_lookup() {
+        let content = "--- !u!1 &100\nGameObject:\n  m_Name: Obj1\n  m_IsActive: 1\n--- !u!4 &200\nTransform:\n  m_LocalPosition: {x: 0, y: 0, z: 0}\n--- !u!114 &300\nMonoBehaviour:\n  m_Enabled: 1\n";
+        let index = BlockIndex::new(content);
+
+        // Lookup by file_id
+        let (class_id, block) = index.get("100").expect("should find GO block");
+        assert_eq!(class_id, 1);
+        assert!(block.contains("m_Name: Obj1"));
+
+        let (class_id, block) = index.get("200").expect("should find Transform block");
+        assert_eq!(class_id, 4);
+        assert!(block.contains("m_LocalPosition"));
+
+        // Lookup by class_id + file_id
+        assert!(index.get_by_class_and_id(1, "100").is_some());
+        assert!(index.get_by_class_and_id(4, "100").is_none()); // wrong class_id
+
+        // Missing file_id
+        assert!(index.get("999").is_none());
+    }
+
+    #[test]
+    fn test_block_index_all_blocks_indexed() {
+        let content = "--- !u!1 &10\nGameObject:\n  m_Name: A\n  m_IsActive: 1\n--- !u!1 &20\nGameObject:\n  m_Name: B\n  m_IsActive: 1\n--- !u!4 &30\nTransform:\n  m_Father: {fileID: 0}\n--- !u!4 &40\nTransform:\n  m_Father: {fileID: 30}\n";
+        let index = BlockIndex::new(content);
+
+        assert!(index.get("10").is_some());
+        assert!(index.get("20").is_some());
+        assert!(index.get("30").is_some());
+        assert!(index.get("40").is_some());
     }
 }

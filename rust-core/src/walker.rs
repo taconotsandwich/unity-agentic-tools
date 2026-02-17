@@ -364,6 +364,64 @@ pub fn build_guid_cache(project_root: String) -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
+// ========== Package GUID Cache ==========
+
+/// Build a GUID cache for Library/PackageCache/ contents.
+///
+/// Scans `Library/PackageCache/` for `.meta` files and returns
+/// `{ guid: relative_path }` just like `build_guid_cache` does for Assets/.
+/// Returns a separate cache so project assets and package assets stay distinct.
+#[napi]
+pub fn build_package_guid_cache(project_root: String) -> serde_json::Value {
+    let root = PathBuf::from(&project_root);
+    let package_cache = root.join("Library").join("PackageCache");
+
+    if !package_cache.is_dir() {
+        return serde_json::Value::Object(serde_json::Map::new());
+    }
+
+    let meta_files: Vec<PathBuf> = WalkDir::new(&package_cache)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_type().is_file()
+                && e.path()
+                    .extension()
+                    .map(|ext| ext == "meta")
+                    .unwrap_or(false)
+        })
+        .map(|e| e.into_path())
+        .collect();
+
+    let guid_regex = regex::Regex::new(r"(?m)^guid:\s*([a-f0-9]{32})").unwrap();
+
+    let pairs: Vec<(String, String)> = meta_files
+        .par_iter()
+        .filter_map(|meta_path| {
+            let content = common::read_unity_file(meta_path).ok()?;
+            let caps = guid_regex.captures(&content)?;
+            let guid = caps.get(1)?.as_str().to_string();
+
+            let asset_str = meta_path.to_string_lossy();
+            let asset_no_meta = &asset_str[..asset_str.len() - 5];
+            let rel = Path::new(asset_no_meta)
+                .strip_prefix(&root)
+                .ok()?
+                .to_string_lossy()
+                .to_string();
+
+            Some((guid, rel))
+        })
+        .collect();
+
+    let mut map = serde_json::Map::new();
+    for (guid, path) in pairs {
+        map.insert(guid, serde_json::Value::String(path));
+    }
+
+    serde_json::Value::Object(map)
+}
+
 // ========== Tests ==========
 
 #[cfg(test)]

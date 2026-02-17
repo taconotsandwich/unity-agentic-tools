@@ -49,15 +49,14 @@ describe('doc-indexer CLI integration', () => {
         expect(result.stdout).toContain('clear');
     });
 
-    it('search -s (summarize) should be accepted', () => {
+    it('search -s (summarize) should be rejected (removed option)', () => {
         const result = runCli('search "Rigidbody" -s');
-        expect(result.stderr).not.toContain('unknown option');
-        expect(result.stdout + result.stderr).toMatch(/Found|results|error/i);
+        expect(result.stderr).toContain('unknown option');
     });
 
-    it('search -c (compress) should be accepted', () => {
+    it('search -c (compress) should be rejected (removed option)', () => {
         const result = runCli('search "Rigidbody" -c');
-        expect(result.stderr).not.toContain('unknown option');
+        expect(result.stderr).toContain('unknown option');
     });
 
     it('search -j (json) should output valid JSON', () => {

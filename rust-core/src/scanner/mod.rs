@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::common::{self, Component, FindResult, GameObject, GameObjectDetail, InspectOptions, PrefabInstanceInfo, SceneInspection, ScanOptions, PaginationOptions, PaginatedInspection};
-use parser::UnityYamlParser;
+use parser::{UnityYamlParser, BlockIndex};
 use config::ComponentConfig;
 
 /// High-performance Unity scene/prefab scanner
@@ -89,15 +89,16 @@ impl Scanner {
         let gameobjects = UnityYamlParser::extract_gameobjects(&content);
 
         self.ensure_guid_resolver(&file);
+        let index = BlockIndex::new(&content);
 
         let mut results: Vec<serde_json::Value> = gameobjects
             .into_iter()
             .map(|obj| {
-                let components = self.get_components_for_gameobject(&content, &obj.file_id, &file);
+                let components = component::extract_components_indexed(&index, &obj.file_id, &self.guid_cache, &self.config);
                 let mut output = self.build_gameobject_output(&obj, &components, verbose, false);
 
                 // Always include tag and layer for search filtering support
-                let (tag, layer, _, _) = gameobject::extract_metadata(&content, &obj.file_id);
+                let (tag, layer, _, _) = gameobject::extract_metadata_indexed(&index, &obj.file_id, &self.config);
                 output["tag"] = serde_json::json!(tag);
                 output["layer"] = serde_json::json!(layer);
 
@@ -124,6 +125,45 @@ impl Scanner {
         }
 
         results
+    }
+
+    /// Scan scene for GO metadata (name, tag, layer) without component/hierarchy extraction.
+    /// This is the "medium path" — faster than scan_scene_with_components for tag/layer filtering.
+    #[napi]
+    pub fn scan_scene_metadata(&self, file: String) -> Vec<serde_json::Value> {
+        let path = Path::new(&file);
+        if !path.exists() {
+            return Vec::new();
+        }
+
+        let content = match common::read_unity_file(path) {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+
+        let gameobjects = UnityYamlParser::extract_gameobjects(&content);
+        let index = BlockIndex::new(&content);
+
+        gameobjects
+            .into_iter()
+            .map(|obj| {
+                let go_block = index.get_by_class_and_id(1, &obj.file_id);
+
+                let (tag, layer) = if let Some(block) = go_block {
+                    (gameobject::extract_tag(block), gameobject::extract_layer(block))
+                } else {
+                    ("Untagged".to_string(), 0)
+                };
+
+                serde_json::json!({
+                    "name": obj.name,
+                    "file_id": obj.file_id,
+                    "active": obj.active,
+                    "tag": tag,
+                    "layer": layer,
+                })
+            })
+            .collect()
     }
 
     /// Find GameObjects and PrefabInstances by name pattern
@@ -288,10 +328,11 @@ impl Scanner {
             }
         };
 
-        let components = self.get_components_for_gameobject(&content, &target_file_id, &options.file);
+        let index = BlockIndex::new(&content);
+        let components = component::extract_components_indexed(&index, &target_file_id, &self.guid_cache, &self.config);
         let verbose = options.verbose.unwrap_or(false);
 
-        let detail = self.extract_gameobject_details(&content, target_obj, &components);
+        let detail = self.extract_gameobject_details_indexed(&index, target_obj, &components);
 
         Some(self.build_detail_output(&detail, verbose, include_properties))
     }
@@ -322,22 +363,21 @@ impl Scanner {
         };
 
         self.ensure_guid_resolver(&file);
+        let index = BlockIndex::new(&content);
 
         let gameobjects = UnityYamlParser::extract_gameobjects(&content);
         let detailed: Vec<GameObjectDetail> = gameobjects
             .iter()
             .map(|obj| {
-                let components = self.get_components_for_gameobject(&content, &obj.file_id, &file);
-                let mut detail = self.extract_gameobject_details(&content, obj, &components);
+                let components = component::extract_components_indexed(&index, &obj.file_id, &self.guid_cache, &self.config);
+                let mut detail = self.extract_gameobject_details_indexed(&index, obj, &components);
 
-                // Strip properties from components when not requested (token savings)
                 if !include_properties {
                     for comp in &mut detail.components {
                         comp.properties = None;
                     }
                 }
 
-                // Strip verbose fields when not requested
                 if !verbose {
                     for comp in &mut detail.components {
                         comp.script_guid = None;
@@ -379,6 +419,7 @@ impl Scanner {
             return PaginatedInspection {
                 file: file.clone(),
                 total: 0,
+                total_in_scene: 0,
                 cursor,
                 next_cursor: None,
                 truncated: false,
@@ -395,6 +436,7 @@ impl Scanner {
                 return PaginatedInspection {
                     file: file.clone(),
                     total: 0,
+                    total_in_scene: 0,
                     cursor,
                     next_cursor: None,
                     truncated: false,
@@ -407,13 +449,153 @@ impl Scanner {
         };
 
         self.ensure_guid_resolver(&file);
+        let index = BlockIndex::new(&content);
 
         let gameobjects = UnityYamlParser::extract_gameobjects(&content);
-        let mut detailed: Vec<GameObjectDetail> = gameobjects
+        let total_in_scene = gameobjects.len() as u32;
+
+        // Phase 1: Extract lightweight hierarchy info for depth calculation.
+        // This avoids full component extraction for ALL GOs — just find transform parent.
+        struct GoHierarchyInfo {
+            go_idx: usize,
+            transform_file_id: Option<String>,
+            parent_transform_id: Option<String>,
+        }
+        let comp_re = regex::Regex::new(r"component:\s*\{fileID:\s*(\d+)\}").unwrap();
+        let hierarchy_infos: Vec<GoHierarchyInfo> = gameobjects
             .iter()
-            .map(|obj| {
-                let components = self.get_components_for_gameobject(&content, &obj.file_id, &file);
-                let mut detail = self.extract_gameobject_details(&content, obj, &components);
+            .enumerate()
+            .map(|(idx, obj)| {
+                let (_, _, parent_id, _) = gameobject::extract_metadata_indexed(&index, &obj.file_id, &self.config);
+                // Find this GO's transform component file_id from the GO block
+                let transform_fid = index.get_by_class_and_id(self.config.gameobject_class_id, &obj.file_id)
+                    .and_then(|go_block| {
+                        for cap in comp_re.captures_iter(go_block) {
+                            if let Some(ref_id) = cap.get(1).map(|m| m.as_str()) {
+                                if let Some((cid, _)) = index.get(ref_id) {
+                                    if self.config.hierarchy_providers.contains(&cid) {
+                                        return Some(ref_id.to_string());
+                                    }
+                                }
+                            }
+                        }
+                        None
+                    });
+                GoHierarchyInfo {
+                    go_idx: idx,
+                    transform_file_id: transform_fid,
+                    parent_transform_id: parent_id,
+                }
+            })
+            .collect();
+
+        // Phase 2: Build depth map and filter
+        let mut parent_map: HashMap<String, String> = HashMap::new();
+        for info in &hierarchy_infos {
+            if let (Some(ref tid), Some(ref pid)) = (&info.transform_file_id, &info.parent_transform_id) {
+                parent_map.insert(tid.clone(), pid.clone());
+            }
+        }
+
+        let compute_depth = |tid: &str| -> u32 {
+            let mut depth = 0u32;
+            let mut current = tid.to_string();
+            loop {
+                match parent_map.get(&current) {
+                    Some(parent) if parent != "0" && !parent.is_empty() => {
+                        depth += 1;
+                        if depth > max_depth {
+                            break;
+                        }
+                        current = parent.clone();
+                    }
+                    _ => break,
+                }
+            }
+            depth
+        };
+
+        // Compute depth for each GO and filter by max_depth
+        struct GoWithDepth {
+            go_idx: usize,
+            depth: u32,
+            at_boundary: bool,
+        }
+        let mut filtered: Vec<GoWithDepth> = hierarchy_infos
+            .iter()
+            .filter_map(|info| {
+                let depth = info.transform_file_id.as_ref()
+                    .map(|tid| compute_depth(tid))
+                    .unwrap_or(0);
+                if max_depth < 50 && depth > max_depth {
+                    return None;
+                }
+                Some(GoWithDepth {
+                    go_idx: info.go_idx,
+                    depth,
+                    at_boundary: max_depth < 50 && depth == max_depth,
+                })
+            })
+            .collect();
+
+        // Apply component type filter (lightweight: just check type names from index)
+        if let Some(ref filter_type) = filter_component {
+            let type_re = regex::Regex::new(r"^([A-Za-z][A-Za-z0-9_]*):").unwrap();
+            filtered.retain(|gwd| {
+                let obj = &gameobjects[gwd.go_idx];
+                let go_block = match index.get_by_class_and_id(self.config.gameobject_class_id, &obj.file_id) {
+                    Some(b) => b,
+                    None => return false,
+                };
+                for cap in comp_re.captures_iter(go_block) {
+                    if let Some(ref_id) = cap.get(1).map(|m| m.as_str()) {
+                        if let Some((_, block)) = index.get(ref_id) {
+                            if let Some(tcaps) = type_re.captures(block) {
+                                if tcaps.get(1).map_or(false, |m| m.as_str() == filter_type.as_str()) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                false
+            });
+        }
+
+        let total = filtered.len() as u32;
+
+        // Extract prefab instances (only on first page)
+        let prefab_instances = if cursor == 0 {
+            let pis = prefab::extract_prefab_instances(&content, &self.guid_cache);
+            if pis.is_empty() { None } else { Some(pis) }
+        } else {
+            None
+        };
+
+        // Phase 3: Apply pagination BEFORE full extraction
+        let start = cursor as usize;
+        let end = (start + page_size as usize).min(filtered.len());
+        let truncated = end < filtered.len();
+        let next_cursor = if truncated { Some(end as u32) } else { None };
+
+        let page_slice = if start < filtered.len() {
+            &filtered[start..end]
+        } else {
+            &[]
+        };
+
+        // Only do full component extraction for the page slice
+        let page: Vec<GameObjectDetail> = page_slice
+            .iter()
+            .map(|gwd| {
+                let obj = &gameobjects[gwd.go_idx];
+                let components = component::extract_components_indexed(&index, &obj.file_id, &self.guid_cache, &self.config);
+                let mut detail = self.extract_gameobject_details_indexed(&index, obj, &components);
+                detail.depth = Some(gwd.depth);
+
+                if gwd.at_boundary {
+                    detail.children = None;
+                }
 
                 if !include_properties {
                     for comp in &mut detail.components {
@@ -431,129 +613,10 @@ impl Scanner {
             })
             .collect();
 
-        // Apply max_depth filter: exclude objects deeper than max_depth
-        if max_depth < 50 {
-            // Build a map of transform_id → parent_transform_id
-            let mut parent_map: HashMap<String, String> = HashMap::new();
-            for detail in &detailed {
-                if let Some(ref parent_id) = detail.parent_transform_id {
-                    for comp in &detail.components {
-                        if comp.class_id == 4 || comp.class_id == 224 {
-                            parent_map.insert(comp.file_id.clone(), parent_id.clone());
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // Compute depth by walking parent chain; stop early once past limit
-            let compute_depth = |tid: &str| -> u32 {
-                let mut depth = 0u32;
-                let mut current = tid.to_string();
-                loop {
-                    match parent_map.get(&current) {
-                        Some(parent) if parent != "0" && !parent.is_empty() => {
-                            depth += 1;
-                            if depth > max_depth {
-                                break;
-                            }
-                            current = parent.clone();
-                        }
-                        _ => break,
-                    }
-                }
-                depth
-            };
-
-            // Remove objects deeper than max_depth; clear children at the boundary.
-            // Store computed depth on each retained object.
-            detailed.retain_mut(|detail| {
-                let transform_id = detail.components.iter()
-                    .find(|c| c.class_id == 4 || c.class_id == 224)
-                    .map(|c| c.file_id.clone());
-
-                if let Some(tid) = transform_id {
-                    let depth = compute_depth(&tid);
-                    if depth > max_depth {
-                        return false;
-                    }
-                    detail.depth = Some(depth);
-                    if depth == max_depth {
-                        detail.children = None;
-                    }
-                } else {
-                    detail.depth = Some(0);
-                }
-                true
-            });
-        } else {
-            // No depth filtering, but still compute depth for each object
-            let mut parent_map: HashMap<String, String> = HashMap::new();
-            for detail in &detailed {
-                if let Some(ref parent_id) = detail.parent_transform_id {
-                    for comp in &detail.components {
-                        if comp.class_id == 4 || comp.class_id == 224 {
-                            parent_map.insert(comp.file_id.clone(), parent_id.clone());
-                            break;
-                        }
-                    }
-                }
-            }
-            for detail in &mut detailed {
-                let transform_id = detail.components.iter()
-                    .find(|c| c.class_id == 4 || c.class_id == 224)
-                    .map(|c| c.file_id.clone());
-                if let Some(tid) = transform_id {
-                    let mut depth = 0u32;
-                    let mut current = tid;
-                    loop {
-                        match parent_map.get(&current) {
-                            Some(parent) if parent != "0" && !parent.is_empty() => {
-                                depth += 1;
-                                current = parent.clone();
-                            }
-                            _ => break,
-                        }
-                    }
-                    detail.depth = Some(depth);
-                } else {
-                    detail.depth = Some(0);
-                }
-            }
-        }
-
-        // Apply component type filter before pagination
-        if let Some(ref filter_type) = filter_component {
-            detailed.retain(|detail| {
-                detail.components.iter().any(|c| c.type_name == *filter_type)
-            });
-        }
-
-        let total = detailed.len() as u32;
-
-        // Extract prefab instances (only on first page)
-        let prefab_instances = if cursor == 0 {
-            let pis = prefab::extract_prefab_instances(&content, &self.guid_cache);
-            if pis.is_empty() { None } else { Some(pis) }
-        } else {
-            None
-        };
-
-        // Apply pagination
-        let start = cursor as usize;
-        let end = (start + page_size as usize).min(detailed.len());
-        let truncated = end < detailed.len();
-        let next_cursor = if truncated { Some(end as u32) } else { None };
-
-        let page = if start < detailed.len() {
-            detailed[start..end].to_vec()
-        } else {
-            Vec::new()
-        };
-
         PaginatedInspection {
             file,
             total,
+            total_in_scene,
             cursor,
             next_cursor,
             truncated,
@@ -681,6 +744,7 @@ impl Scanner {
         }
     }
 
+    #[allow(dead_code)]
     fn get_components_for_gameobject(&self, content: &str, file_id: &str, _file: &str) -> Vec<Component> {
         component::extract_components(content, file_id, &self.guid_cache)
     }
@@ -711,8 +775,25 @@ impl Scanner {
         output
     }
 
+    #[allow(dead_code)]
     fn extract_gameobject_details(&self, content: &str, obj: &GameObject, components: &[Component]) -> GameObjectDetail {
         let (tag, layer, parent_id, children) = gameobject::extract_metadata(content, &obj.file_id);
+
+        GameObjectDetail {
+            name: obj.name.clone(),
+            file_id: obj.file_id.clone(),
+            active: obj.active,
+            tag,
+            layer,
+            depth: None,
+            components: components.to_vec(),
+            children: if children.is_empty() { None } else { Some(children) },
+            parent_transform_id: parent_id,
+        }
+    }
+
+    fn extract_gameobject_details_indexed(&self, index: &BlockIndex, obj: &GameObject, components: &[Component]) -> GameObjectDetail {
+        let (tag, layer, parent_id, children) = gameobject::extract_metadata_indexed(index, &obj.file_id, &self.config);
 
         GameObjectDetail {
             name: obj.name.clone(),

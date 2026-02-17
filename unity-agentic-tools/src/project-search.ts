@@ -215,15 +215,37 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
         try {
             let gameObjects;
 
-            // Need full GO data when filtering by tag, layer, or component
-            const needFullData = !!(component || tag || layer !== undefined);
+            // Three-path search strategy:
+            // 1. Name-only: find_by_name (fast — regex match, no block extraction)
+            // 2. Tag/layer without component: scan_scene_metadata (medium — GO block only)
+            // 3. Component filter: scan_scene_with_components (slow — full extraction)
+            const needComponents = !!component;
+            const needMetadata = !!(tag || layer !== undefined);
 
-            if (name && !needFullData) {
-                // Use name search (exact when --exact, fuzzy/substring otherwise)
+            if (name && !needMetadata && !needComponents) {
+                // Fast path: name search only
                 gameObjects = scanner.find_by_name(file, name, !exact);
-            } else if (needFullData) {
-                // Need full GO data for tag/layer/component filtering
+            } else if (needComponents) {
+                // Slow path: need full component data
                 gameObjects = scanner.scan_scene_with_components(file);
+                // If name filter is also specified, post-filter by name
+                if (name) {
+                    const nameLower = name.toLowerCase();
+                    const hasWildcard = name.includes('*') || name.includes('?');
+                    gameObjects = gameObjects.filter((go: GameObjectWithComponents) => {
+                        if (!go.name) return false;
+                        if (hasWildcard) {
+                            return glob_match(name, go.name);
+                        }
+                        if (exact) {
+                            return go.name === name;
+                        }
+                        return go.name.toLowerCase().includes(nameLower);
+                    });
+                }
+            } else if (needMetadata) {
+                // Medium path: tag/layer only — no component extraction
+                gameObjects = scanner.scan_scene_metadata(file);
                 // If name filter is also specified, post-filter by name
                 if (name) {
                     const nameLower = name.toLowerCase();

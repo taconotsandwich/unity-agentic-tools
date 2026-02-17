@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, statSync } from 'fs';
 import { join, relative, resolve } from 'path';
-import { getNativeBuildGuidCache, isNativeModuleAvailable } from './scanner';
+import { getNativeBuildGuidCache, getNativeBuildTypeRegistry, getNativeBuildPackageGuidCache, isNativeModuleAvailable } from './scanner';
 
 // Version is inlined at build time by bun's bundler (no runtime path resolution)
 const VERSION: string = (require('../package.json') as { version: string }).version;
@@ -8,6 +8,8 @@ const VERSION: string = (require('../package.json') as { version: string }).vers
 const CONFIG_DIR = '.unity-agentic';
 const CONFIG_FILE = 'config.json';
 const GUID_CACHE_FILE = 'guid-cache.json';
+const PACKAGE_CACHE_FILE = 'package-cache.json';
+const TYPE_REGISTRY_FILE = 'type-registry.json';
 const DOC_INDEX_FILE = 'doc-index.json';
 
 export interface SetupOptions {
@@ -20,8 +22,12 @@ export interface SetupResult {
   project_path: string;
   config_path: string;
   guid_cache_created: boolean;
+  package_cache_created: boolean;
+  type_registry_created: boolean;
   doc_index_created: boolean;
   guid_count?: number;
+  package_guid_count?: number;
+  type_count?: number;
   error?: string;
 }
 
@@ -43,6 +49,8 @@ export function setup(options: SetupOptions = {}): SetupResult {
       project_path: projectPath,
       config_path: '',
       guid_cache_created: false,
+      package_cache_created: false,
+      type_registry_created: false,
       doc_index_created: false,
       error: `Not a Unity project: Assets folder not found at ${assetsPath}`,
     };
@@ -69,6 +77,38 @@ export function setup(options: SetupOptions = {}): SetupResult {
   const guidCachePath = join(configPath, GUID_CACHE_FILE);
   writeFileSync(guidCachePath, JSON.stringify(guidCache, null, 2));
 
+  // Build package GUID cache (Library/PackageCache/)
+  let packageCacheCreated = false;
+  let packageGuidCount: number | undefined;
+  const nativePkgBuild = getNativeBuildPackageGuidCache();
+  if (nativePkgBuild) {
+    try {
+      const packageCache = nativePkgBuild(projectPath) as GuidCache;
+      const packageCachePath = join(configPath, PACKAGE_CACHE_FILE);
+      writeFileSync(packageCachePath, JSON.stringify(packageCache, null, 2));
+      packageCacheCreated = true;
+      packageGuidCount = Object.keys(packageCache).length;
+    } catch {
+      // Package cache is optional; don't fail setup if it errors
+    }
+  }
+
+  // Build type registry (C# class names -> GUIDs + namespaces)
+  let typeRegistryCreated = false;
+  let typeCount: number | undefined;
+  const nativeRegistryBuild = getNativeBuildTypeRegistry();
+  if (nativeRegistryBuild) {
+    try {
+      const types = nativeRegistryBuild(projectPath, true, true);
+      const registryPath = join(configPath, TYPE_REGISTRY_FILE);
+      writeFileSync(registryPath, JSON.stringify(types, null, 2));
+      typeRegistryCreated = true;
+      typeCount = types.length;
+    } catch {
+      // Type registry is optional; don't fail setup if it errors
+    }
+  }
+
   // Optionally create doc index
   let docIndexCreated = false;
   if (options.indexDocs) {
@@ -82,8 +122,12 @@ export function setup(options: SetupOptions = {}): SetupResult {
     project_path: projectPath,
     config_path: configPath,
     guid_cache_created: true,
+    package_cache_created: packageCacheCreated,
+    type_registry_created: typeRegistryCreated,
     doc_index_created: docIndexCreated,
     guid_count: Object.keys(guidCache).length,
+    package_guid_count: packageGuidCount,
+    type_count: typeCount,
   };
 }
 

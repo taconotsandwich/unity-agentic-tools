@@ -717,7 +717,228 @@ export function resolveScriptGuid(
         // Cache read failed
       }
     }
+
+    // Strategy 4: Type registry lookup by class name
+    const registryPath = path.join(projectPath, '.unity-agentic', 'type-registry.json');
+    if (existsSync(registryPath)) {
+      try {
+        const registry = JSON.parse(readFileSync(registryPath, 'utf-8')) as Array<{
+          name: string;
+          kind: string;
+          namespace: string | null;
+          file_path: string;
+          guid: string | null;
+        }>;
+
+        // Support qualified names like "TMPro.TextMeshProUGUI"
+        let targetName = script;
+        let targetNamespace: string | null = null;
+        const dotIndex = script.lastIndexOf('.');
+        if (dotIndex > 0) {
+          targetNamespace = script.substring(0, dotIndex);
+          targetName = script.substring(dotIndex + 1);
+        }
+
+        const targetNameLower = targetName.toLowerCase();
+        const matches = registry.filter(t => {
+          if (t.name.toLowerCase() !== targetNameLower) return false;
+          if (targetNamespace && t.namespace?.toLowerCase() !== targetNamespace.toLowerCase()) return false;
+          return true;
+        });
+
+        if (matches.length === 1 && matches[0].guid) {
+          return { guid: matches[0].guid, path: matches[0].file_path };
+        }
+        if (matches.length > 1) {
+          // Multiple matches: prefer the one with a GUID
+          const withGuid = matches.filter(m => m.guid);
+          if (withGuid.length === 1) {
+            return { guid: withGuid[0].guid!, path: withGuid[0].file_path };
+          }
+        }
+      } catch {
+        // Registry read failed
+      }
+    }
+
+    // Strategy 5: Package cache fallback
+    const packageCachePath = path.join(projectPath, '.unity-agentic', 'package-cache.json');
+    if (existsSync(packageCachePath)) {
+      try {
+        const packageCache = JSON.parse(readFileSync(packageCachePath, 'utf-8')) as Record<string, string>;
+        const scriptNameLower = script.toLowerCase().replace(/\.cs$/, '');
+
+        for (const [guid, assetPath] of Object.entries(packageCache)) {
+          if (!assetPath.endsWith('.cs')) continue;
+          const fileName = path.basename(assetPath, '.cs').toLowerCase();
+          if (fileName === scriptNameLower) {
+            return { guid, path: assetPath };
+          }
+        }
+      } catch {
+        // Package cache read failed
+      }
+    }
   }
 
   return null;
+}
+
+/**
+ * Resolved script info with optional field data.
+ */
+export interface ResolvedScript {
+  guid: string;
+  path: string | null;
+  fields?: import('../types').CSharpFieldRef[];
+  base_class?: string;
+  kind?: string;
+  /** Set when field extraction failed — included as a warning in results */
+  extraction_error?: string;
+}
+
+/**
+ * Resolve a script and extract its serialized fields if possible.
+ *
+ * Wraps resolveScriptGuid with on-demand field extraction.
+ * Always extracts type info (base_class, kind, fields) for validation.
+ * Version-specific type filtering happens downstream in generate_field_yaml.
+ */
+export function resolve_script_with_fields(
+  script: string,
+  project_path?: string
+): ResolvedScript | null {
+  const resolved = resolveScriptGuid(script, project_path);
+  if (!resolved) return null;
+
+  const result: ResolvedScript = {
+    guid: resolved.guid,
+    path: resolved.path,
+  };
+
+  // Can't extract fields without a project path
+  if (!project_path) return result;
+
+  // Extract fields from the resolved script file
+  if (resolved.path) {
+    try {
+      const full_path = resolved.path.startsWith('/')
+        ? resolved.path
+        : path.join(project_path, resolved.path);
+
+      if (!existsSync(full_path)) {
+        result.extraction_error = `Script file not found at resolved path: ${full_path}`;
+      } else if (resolved.path.endsWith('.cs')) {
+        const { getNativeExtractSerializedFields } = require('../scanner');
+        const extract = getNativeExtractSerializedFields();
+        if (extract) {
+          const type_infos = extract(full_path);
+          if (type_infos && type_infos.length > 0) {
+            // Prefer the type that extends MonoBehaviour or ScriptableObject
+            const mono = type_infos.find((t: import('../types').CSharpTypeInfo) =>
+              t.baseClass === 'MonoBehaviour' || t.baseClass === 'ScriptableObject' ||
+              t.baseClass === 'NetworkBehaviour' || t.baseClass === 'StateMachineBehaviour'
+            );
+            const chosen = mono || type_infos[0];
+            result.fields = chosen.fields;
+            result.base_class = chosen.baseClass ?? undefined;
+            result.kind = chosen.kind;
+          }
+        } else {
+          result.extraction_error = 'Native extractSerializedFields function not available';
+        }
+      } else if (resolved.path.endsWith('.dll')) {
+        const { getNativeExtractDllFields } = require('../scanner');
+        const extract = getNativeExtractDllFields();
+        if (extract) {
+          const type_infos = extract(full_path);
+          if (type_infos && type_infos.length > 0) {
+            // For DLLs, try to match by script name
+            const script_name = script.includes('.') ? script.split('.').pop()! : script;
+            const match = type_infos.find((t: import('../types').CSharpTypeInfo) =>
+              t.name === script_name
+            );
+            const chosen = match || type_infos[0];
+            result.fields = chosen.fields;
+            result.base_class = chosen.baseClass ?? undefined;
+            result.kind = chosen.kind;
+          }
+        } else {
+          result.extraction_error = 'Native extractDllFields function not available';
+        }
+      }
+    } catch (err: unknown) {
+      // Field extraction failed — surface the error as a warning
+      result.extraction_error = `Field extraction failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  // Cross-file enum resolution: replace enum-typed fields with "int"
+  // (same-file enums are handled in Rust; this covers cross-file enums via type registry)
+  if (result.fields && result.fields.length > 0) {
+    resolve_enum_fields(result.fields, project_path);
+  }
+
+  return result;
+}
+
+/**
+ * Resolve enum-typed fields to "int" using the type registry.
+ *
+ * Unity serializes enums as int (default 0). The Rust parser handles
+ * same-file enums, but cross-file enums need the type registry.
+ *
+ * Handles:
+ * - Simple names: `Faction` → matches registry entry `Faction`
+ * - Qualified names: `RageSpline.Outline` → matches registry entry `Outline`
+ * - Nullable enums: `Faction?` → stripped to `Faction` for lookup, but result stays nullable (skipped by YAML)
+ *
+ * Mutates fields in place.
+ */
+function resolve_enum_fields(fields: import('../types').CSharpFieldRef[], project_path: string): void {
+  const registry_path = path.join(project_path, '.unity-agentic', 'type-registry.json');
+  if (!existsSync(registry_path)) return;
+
+  try {
+    const registry = JSON.parse(readFileSync(registry_path, 'utf-8')) as Array<{
+      name: string;
+      kind: string;
+    }>;
+
+    const enum_names = new Set<string>();
+    for (const entry of registry) {
+      if (entry.kind === 'enum') {
+        enum_names.add(entry.name);
+      }
+    }
+
+    if (enum_names.size === 0) return;
+
+    for (const field of fields) {
+      // Strip nullable suffix for lookup (Unity doesn't serialize Nullable<T> —
+      // the YAML generator skips them, but we still resolve the base type)
+      let typeName = field.typeName;
+      const nullable = typeName.endsWith('?');
+      if (nullable) {
+        typeName = typeName.slice(0, -1);
+      }
+
+      // Exact match
+      if (enum_names.has(typeName)) {
+        field.typeName = nullable ? 'int?' : 'int';
+        continue;
+      }
+
+      // Qualified name match: `Outer.Inner` → check `Inner`
+      const dotIdx = typeName.lastIndexOf('.');
+      if (dotIdx > 0) {
+        const shortName = typeName.substring(dotIdx + 1);
+        if (enum_names.has(shortName)) {
+          field.typeName = nullable ? 'int?' : 'int';
+        }
+      }
+    }
+  } catch {
+    // Registry read failed — skip enum resolution
+  }
 }
