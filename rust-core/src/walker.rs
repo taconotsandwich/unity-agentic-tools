@@ -41,13 +41,22 @@ fn truncate_line(s: &str, max_bytes: usize) -> String {
 fn extension_map(file_type: &str) -> Vec<&'static str> {
     match file_type {
         "cs" => vec![".cs"],
-        "yaml" => vec![".yaml", ".yml", ".unity", ".prefab", ".asset"],
+        "yaml" => vec![
+            ".yaml", ".yml", ".unity", ".prefab", ".asset",
+            ".mat", ".anim", ".controller", ".overrideController",
+            ".mask", ".mixer", ".lighting", ".preset", ".signal",
+            ".playable", ".renderTexture", ".flare", ".guiskin",
+            ".terrainlayer", ".cubemap",
+        ],
         "unity" => vec![".unity"],
         "prefab" => vec![".prefab"],
         "asset" => vec![".asset"],
+        "mat" => vec![".mat"],
+        "anim" => vec![".anim"],
+        "controller" => vec![".controller"],
         _ => vec![
-            ".cs", ".unity", ".prefab", ".asset", ".yaml", ".yml",
-            ".txt", ".json", ".xml", ".shader", ".cginc", ".hlsl",
+            ".cs", ".unity", ".prefab", ".asset", ".mat", ".anim", ".controller",
+            ".yaml", ".yml", ".txt", ".json", ".xml", ".shader", ".cginc", ".hlsl",
             ".compute", ".asmdef", ".asmref",
         ],
     }
@@ -541,6 +550,27 @@ mod tests {
         assert!(exts.contains(&".unity"), "Should include .unity");
         assert!(exts.contains(&".prefab"), "Should include .prefab");
         assert!(exts.contains(&".asset"), "Should include .asset");
+        assert!(exts.contains(&".mat"), "yaml should include .mat");
+        assert!(exts.contains(&".anim"), "yaml should include .anim");
+        assert!(exts.contains(&".controller"), "yaml should include .controller");
+    }
+
+    #[test]
+    fn test_mat_extension_map() {
+        let exts = extension_map("mat");
+        assert!(exts.contains(&".mat"), "Should include .mat");
+    }
+
+    #[test]
+    fn test_anim_extension_map() {
+        let exts = extension_map("anim");
+        assert!(exts.contains(&".anim"), "Should include .anim");
+    }
+
+    #[test]
+    fn test_controller_extension_map() {
+        let exts = extension_map("controller");
+        assert!(exts.contains(&".controller"), "Should include .controller");
     }
 
     #[test]

@@ -131,7 +131,7 @@ program.command('grep <project_path> <pattern>')
       console.log(JSON.stringify({ success: false, error: 'Pattern must not be empty' }, null, 2));
       process.exit(1);
     }
-    const VALID_GREP_TYPES = ['cs', 'yaml', 'unity', 'prefab', 'asset', 'all'];
+    const VALID_GREP_TYPES = ['cs', 'yaml', 'unity', 'prefab', 'asset', 'mat', 'anim', 'controller', 'all'];
     if (!VALID_GREP_TYPES.includes(options.type)) {
       console.log(JSON.stringify({ success: false, error: `Invalid file type "${options.type}". Valid types: ${VALID_GREP_TYPES.join(', ')}` }, null, 2));
       process.exit(1);
