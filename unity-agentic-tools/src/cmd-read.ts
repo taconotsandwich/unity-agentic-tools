@@ -7,6 +7,129 @@ import { read_settings } from './settings';
 import { get_build_settings } from './build-settings';
 import { UnityDocument } from './editor';
 
+// ========== Material Parsing Helpers ==========
+
+interface MaterialShader {
+    guid: string | null;
+    fileID: string | null;
+}
+
+interface MaterialTexture {
+    name: string;
+    texture_guid: string | null;
+    texture_fileID: string | null;
+    scale: { x: number; y: number } | null;
+    offset: { x: number; y: number } | null;
+}
+
+interface MaterialFloat {
+    name: string;
+    value: number;
+}
+
+interface MaterialColor {
+    name: string;
+    r: number;
+    g: number;
+    b: number;
+    a: number;
+}
+
+function parse_material_shader(props: Record<string, unknown>): MaterialShader {
+    const shader = props.m_Shader as Record<string, unknown> | undefined;
+    if (!shader) return { guid: null, fileID: null };
+    return {
+        guid: (shader.guid as string) || null,
+        fileID: (shader.fileID as string) || null,
+    };
+}
+
+function parse_material_keywords(raw: unknown): string[] {
+    if (!raw) return [];
+    if (typeof raw === 'string') {
+        return raw.split(' ').filter(k => k.length > 0);
+    }
+    if (Array.isArray(raw)) return raw as string[];
+    return [];
+}
+
+function parse_material_texenvs(raw: unknown): MaterialTexture[] {
+    if (!raw || typeof raw !== 'object') return [];
+    const entries: MaterialTexture[] = [];
+
+    const process_entry = (name: string, data: unknown): void => {
+        const texData = data as Record<string, unknown> | null;
+        if (!texData) return;
+        const texture = texData.m_Texture as Record<string, unknown> | undefined;
+        const scale = texData.m_Scale as Record<string, number> | undefined;
+        const offset = texData.m_Offset as Record<string, number> | undefined;
+        entries.push({
+            name,
+            texture_guid: (texture?.guid as string) || null,
+            texture_fileID: (texture?.fileID as string) || null,
+            scale: scale ? { x: scale.x, y: scale.y } : null,
+            offset: offset ? { x: offset.x, y: offset.y } : null,
+        });
+    };
+
+    if (Array.isArray(raw)) {
+        for (const item of raw) {
+            if (typeof item === 'object' && item !== null) {
+                for (const [name, data] of Object.entries(item as Record<string, unknown>)) {
+                    process_entry(name, data);
+                }
+            }
+        }
+    } else {
+        for (const [name, data] of Object.entries(raw as Record<string, unknown>)) {
+            process_entry(name, data);
+        }
+    }
+    return entries;
+}
+
+function parse_material_floats(raw: unknown): MaterialFloat[] {
+    if (!raw || typeof raw !== 'object') return [];
+    const entries: MaterialFloat[] = [];
+
+    if (Array.isArray(raw)) {
+        for (const item of raw) {
+            if (typeof item === 'object' && item !== null) {
+                for (const [name, value] of Object.entries(item as Record<string, unknown>)) {
+                    entries.push({ name, value: Number(value) });
+                }
+            }
+        }
+    } else {
+        for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
+            entries.push({ name, value: Number(value) });
+        }
+    }
+    return entries;
+}
+
+function parse_material_colors(raw: unknown): MaterialColor[] {
+    if (!raw || typeof raw !== 'object') return [];
+    const entries: MaterialColor[] = [];
+
+    if (Array.isArray(raw)) {
+        for (const item of raw) {
+            if (typeof item === 'object' && item !== null) {
+                for (const [name, value] of Object.entries(item as Record<string, unknown>)) {
+                    const color = value as Record<string, number>;
+                    entries.push({ name, r: color.r ?? 0, g: color.g ?? 0, b: color.b ?? 0, a: color.a ?? 1 });
+                }
+            }
+        }
+    } else {
+        for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
+            const color = value as Record<string, number>;
+            entries.push({ name, r: color.r ?? 0, g: color.g ?? 0, b: color.b ?? 0, a: color.a ?? 1 });
+        }
+    }
+    return entries;
+}
+
 /** Check if a file is a Unity YAML file by reading its header. */
 function validate_unity_yaml(file: string): string | null {
     if (!existsSync(file)) {
@@ -187,6 +310,59 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 objects,
             };
             console.log(JSON.stringify(output, null, 2));
+        });
+
+    cmd.command('material <file>')
+        .description('Read a Unity Material file (.mat) with structured property output')
+        .option('--summary', 'Show shader name, property count, texture count only')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, options) => {
+            const matValidationError = validate_unity_yaml(file);
+            if (matValidationError) {
+                console.log(JSON.stringify({ error: matValidationError }, null, 2));
+                process.exit(1);
+            }
+
+            const objects = getScanner().read_asset(file);
+            const materialObj = objects.find(obj => obj.class_id === 21);
+            if (!materialObj) {
+                console.log(JSON.stringify({ error: `No Material found in "${file}". Is this a .mat file?` }, null, 2));
+                process.exit(1);
+            }
+
+            const props = (materialObj.properties || {}) as Record<string, unknown>;
+            const shader = parse_material_shader(props);
+            const renderQueue = (props.m_CustomRenderQueue as number) ?? null;
+            const keywords = parse_material_keywords(props.m_ShaderKeywords);
+            const savedProps = (props.m_SavedProperties || {}) as Record<string, unknown>;
+            const textures = parse_material_texenvs(savedProps.m_TexEnvs);
+            const floats = parse_material_floats(savedProps.m_Floats);
+            const colors = parse_material_colors(savedProps.m_Colors);
+
+            if (options.summary) {
+                console.log(JSON.stringify({
+                    file,
+                    name: materialObj.name,
+                    shader_guid: shader.guid || 'unknown',
+                    render_queue: renderQueue,
+                    keyword_count: keywords.length,
+                    texture_count: textures.length,
+                    float_count: floats.length,
+                    color_count: colors.length,
+                }, null, 2));
+                return;
+            }
+
+            console.log(JSON.stringify({
+                file,
+                name: materialObj.name,
+                shader,
+                render_queue: renderQueue,
+                keywords,
+                textures,
+                floats,
+                colors,
+            }, null, 2));
         });
 
     cmd.command('settings <project_path>')
