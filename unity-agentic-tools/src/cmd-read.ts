@@ -171,20 +171,27 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify({ file, object: result }, null, 2));
         });
 
-    cmd.command('scriptable-object <file>')
-        .description('Read a .asset file (ScriptableObject) and show its objects with properties')
+    cmd.command('asset <file>')
+        .description('Read any Unity YAML asset file (.asset, .mat, .anim, etc.)')
+        .option('-p, --properties', 'Include object properties (omitted by default for token efficiency)')
         .option('-j, --json', 'Output as JSON')
-        .action((file, _options) => {
+        .action((file, options) => {
             const soValidationError = validate_unity_yaml(file);
             if (soValidationError) {
                 console.log(JSON.stringify({ error: soValidationError }, null, 2));
                 process.exit(1);
             }
             const objects = getScanner().read_asset(file);
+            const outputObjects = options.properties
+                ? objects
+                : objects.map(obj => {
+                    const { properties: _props, ...rest } = obj;
+                    return rest;
+                });
             const output = {
                 file,
-                count: objects.length,
-                objects,
+                count: outputObjects.length,
+                objects: outputObjects,
             };
             console.log(JSON.stringify(output, null, 2));
         });

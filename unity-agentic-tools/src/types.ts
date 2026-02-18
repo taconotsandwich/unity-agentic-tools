@@ -549,7 +549,7 @@ export interface ProjectSearchResult {
 
 // ========== Project Grep Types ==========
 
-export type ProjectGrepFileType = 'cs' | 'yaml' | 'unity' | 'prefab' | 'asset' | 'all';
+export type ProjectGrepFileType = 'cs' | 'yaml' | 'unity' | 'prefab' | 'asset' | 'mat' | 'anim' | 'controller' | 'all';
 
 export interface ProjectGrepOptions {
   project_path: string;

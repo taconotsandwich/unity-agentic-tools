@@ -426,11 +426,24 @@ function grep_project_js(options: ProjectGrepOptions): ProjectGrepResult {
     // Determine extensions
     const EXTENSION_MAP: Record<string, string[]> = {
         cs: ['.cs'],
-        yaml: ['.yaml', '.yml', '.unity', '.prefab', '.asset'],
+        yaml: [
+            '.yaml', '.yml', '.unity', '.prefab', '.asset',
+            '.mat', '.anim', '.controller', '.overrideController',
+            '.mask', '.mixer', '.lighting', '.preset', '.signal',
+            '.playable', '.renderTexture', '.flare', '.guiskin',
+            '.terrainlayer', '.cubemap',
+        ],
         unity: ['.unity'],
         prefab: ['.prefab'],
         asset: ['.asset'],
-        all: ['.cs', '.unity', '.prefab', '.asset', '.yaml', '.yml', '.txt', '.json', '.xml', '.shader', '.cginc', '.hlsl', '.compute', '.asmdef', '.asmref'],
+        mat: ['.mat'],
+        anim: ['.anim'],
+        controller: ['.controller'],
+        all: [
+            '.cs', '.unity', '.prefab', '.asset', '.mat', '.anim', '.controller',
+            '.yaml', '.yml', '.txt', '.json', '.xml', '.shader', '.cginc', '.hlsl',
+            '.compute', '.asmdef', '.asmref',
+        ],
     };
 
     const extensions = EXTENSION_MAP[file_type] || EXTENSION_MAP.all;
