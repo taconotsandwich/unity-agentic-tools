@@ -47,7 +47,7 @@ interface ParsedMaterial {
 
 /** Parse a Unity .mat file from raw YAML content. */
 function parse_material_yaml(content: string): ParsedMaterial {
-    const lines = content.split('\n');
+    const lines = content.split(/\r?\n/);
     const result: ParsedMaterial = {
         name: '',
         shader: { guid: null, fileID: null },
