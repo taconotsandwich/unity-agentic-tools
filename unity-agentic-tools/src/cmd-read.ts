@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 import type { UnityScanner } from './scanner';
 import { getNativeExtractCsharpTypes, getNativeExtractDllTypes, getNativeBuildTypeRegistry } from './scanner';
@@ -7,7 +7,7 @@ import { read_settings } from './settings';
 import { get_build_settings } from './build-settings';
 import { UnityDocument } from './editor';
 
-// ========== Material Parsing Helpers ==========
+// ========== Material Parsing ==========
 
 interface MaterialShader {
     guid: string | null;
@@ -35,99 +35,172 @@ interface MaterialColor {
     a: number;
 }
 
-function parse_material_shader(props: Record<string, unknown>): MaterialShader {
-    const shader = props.m_Shader as Record<string, unknown> | undefined;
-    if (!shader) return { guid: null, fileID: null };
-    return {
-        guid: (shader.guid as string) || null,
-        fileID: (shader.fileID as string) || null,
-    };
+interface ParsedMaterial {
+    name: string;
+    shader: MaterialShader;
+    render_queue: number | null;
+    keywords: string[];
+    textures: MaterialTexture[];
+    floats: MaterialFloat[];
+    colors: MaterialColor[];
 }
 
-function parse_material_keywords(raw: unknown): string[] {
-    if (!raw) return [];
-    if (typeof raw === 'string') {
-        return raw.split(' ').filter(k => k.length > 0);
-    }
-    if (Array.isArray(raw)) return raw as string[];
-    return [];
-}
-
-function parse_material_texenvs(raw: unknown): MaterialTexture[] {
-    if (!raw || typeof raw !== 'object') return [];
-    const entries: MaterialTexture[] = [];
-
-    const process_entry = (name: string, data: unknown): void => {
-        const texData = data as Record<string, unknown> | null;
-        if (!texData) return;
-        const texture = texData.m_Texture as Record<string, unknown> | undefined;
-        const scale = texData.m_Scale as Record<string, number> | undefined;
-        const offset = texData.m_Offset as Record<string, number> | undefined;
-        entries.push({
-            name,
-            texture_guid: (texture?.guid as string) || null,
-            texture_fileID: (texture?.fileID as string) || null,
-            scale: scale ? { x: scale.x, y: scale.y } : null,
-            offset: offset ? { x: offset.x, y: offset.y } : null,
-        });
+/** Parse a Unity .mat file from raw YAML content. */
+function parse_material_yaml(content: string): ParsedMaterial {
+    const lines = content.split('\n');
+    const result: ParsedMaterial = {
+        name: '',
+        shader: { guid: null, fileID: null },
+        render_queue: null,
+        keywords: [],
+        textures: [],
+        floats: [],
+        colors: [],
     };
 
-    if (Array.isArray(raw)) {
-        for (const item of raw) {
-            if (typeof item === 'object' && item !== null) {
-                for (const [name, data] of Object.entries(item as Record<string, unknown>)) {
-                    process_entry(name, data);
+    // Inline reference pattern: {fileID: 123, guid: abc, type: 3}
+    const inline_ref_re = /\{[^}]*fileID:\s*(\d+)[^}]*guid:\s*([a-f0-9]+)[^}]*\}/;
+    const color_re = /\{[^}]*r:\s*([\d.e+-]+)[^}]*g:\s*([\d.e+-]+)[^}]*b:\s*([\d.e+-]+)[^}]*a:\s*([\d.e+-]+)[^}]*\}/;
+    const scale_offset_re = /\{[^}]*x:\s*([\d.e+-]+)[^}]*y:\s*([\d.e+-]+)[^}]*\}/;
+
+    let i = 0;
+    while (i < lines.length) {
+        const line = lines[i];
+        const trimmed = line.trimStart();
+
+        // m_Name
+        if (trimmed.startsWith('m_Name:')) {
+            result.name = trimmed.slice('m_Name:'.length).trim();
+            i++;
+            continue;
+        }
+
+        // m_Shader
+        if (trimmed.startsWith('m_Shader:')) {
+            const ref_match = inline_ref_re.exec(trimmed);
+            if (ref_match) {
+                result.shader = { fileID: ref_match[1], guid: ref_match[2] };
+            }
+            i++;
+            continue;
+        }
+
+        // m_CustomRenderQueue
+        if (trimmed.startsWith('m_CustomRenderQueue:')) {
+            const val = parseInt(trimmed.slice('m_CustomRenderQueue:'.length).trim(), 10);
+            result.render_queue = isNaN(val) ? null : val;
+            i++;
+            continue;
+        }
+
+        // m_ShaderKeywords (older format: space-separated string)
+        if (trimmed.startsWith('m_ShaderKeywords:')) {
+            const kw_str = trimmed.slice('m_ShaderKeywords:'.length).trim();
+            if (kw_str.length > 0) {
+                result.keywords = kw_str.split(' ').filter(k => k.length > 0);
+            }
+            i++;
+            continue;
+        }
+
+        // m_ValidKeywords (newer format: YAML list)
+        if (trimmed.startsWith('m_ValidKeywords:')) {
+            const inline = trimmed.slice('m_ValidKeywords:'.length).trim();
+            if (inline.startsWith('[') && inline.endsWith(']')) {
+                const inner = inline.slice(1, -1).trim();
+                if (inner.length > 0) {
+                    result.keywords = inner.split(',').map(s => s.trim()).filter(s => s.length > 0);
                 }
             }
+            i++;
+            continue;
         }
-    } else {
-        for (const [name, data] of Object.entries(raw as Record<string, unknown>)) {
-            process_entry(name, data);
-        }
-    }
-    return entries;
-}
 
-function parse_material_floats(raw: unknown): MaterialFloat[] {
-    if (!raw || typeof raw !== 'object') return [];
-    const entries: MaterialFloat[] = [];
-
-    if (Array.isArray(raw)) {
-        for (const item of raw) {
-            if (typeof item === 'object' && item !== null) {
-                for (const [name, value] of Object.entries(item as Record<string, unknown>)) {
-                    entries.push({ name, value: Number(value) });
+        // m_TexEnvs section
+        if (trimmed.startsWith('m_TexEnvs:')) {
+            const section_val = trimmed.slice('m_TexEnvs:'.length).trim();
+            if (section_val === '{}' || section_val === '[]') { i++; continue; }
+            i++;
+            while (i < lines.length) {
+                const tline = lines[i];
+                const ttrimmed = tline.trimStart();
+                // Each texture entry starts with "- _TexName:"
+                const tex_name_match = ttrimmed.match(/^-\s+(\S+):$/);
+                if (!tex_name_match) break;
+                const tex_name = tex_name_match[1];
+                const tex: MaterialTexture = {
+                    name: tex_name,
+                    texture_guid: null, texture_fileID: null,
+                    scale: null, offset: null,
+                };
+                i++;
+                // Read indented sub-properties (m_Texture, m_Scale, m_Offset)
+                while (i < lines.length) {
+                    const sub = lines[i].trimStart();
+                    if (sub.startsWith('m_Texture:')) {
+                        const m = inline_ref_re.exec(sub);
+                        if (m) { tex.texture_fileID = m[1]; tex.texture_guid = m[2]; }
+                        i++;
+                    } else if (sub.startsWith('m_Scale:')) {
+                        const m = scale_offset_re.exec(sub);
+                        if (m) tex.scale = { x: parseFloat(m[1]), y: parseFloat(m[2]) };
+                        i++;
+                    } else if (sub.startsWith('m_Offset:')) {
+                        const m = scale_offset_re.exec(sub);
+                        if (m) tex.offset = { x: parseFloat(m[1]), y: parseFloat(m[2]) };
+                        i++;
+                    } else {
+                        break;
+                    }
                 }
+                result.textures.push(tex);
             }
+            continue;
         }
-    } else {
-        for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
-            entries.push({ name, value: Number(value) });
+
+        // m_Floats section
+        if (trimmed.startsWith('m_Floats:')) {
+            const section_val = trimmed.slice('m_Floats:'.length).trim();
+            if (section_val === '{}' || section_val === '[]') { i++; continue; }
+            i++;
+            while (i < lines.length) {
+                const fline = lines[i].trimStart();
+                // "- _FloatName: 0.5"
+                const float_match = fline.match(/^-\s+(\S+):\s+([\d.e+-]+)$/);
+                if (!float_match) break;
+                result.floats.push({ name: float_match[1], value: parseFloat(float_match[2]) });
+                i++;
+            }
+            continue;
         }
-    }
-    return entries;
-}
 
-function parse_material_colors(raw: unknown): MaterialColor[] {
-    if (!raw || typeof raw !== 'object') return [];
-    const entries: MaterialColor[] = [];
-
-    if (Array.isArray(raw)) {
-        for (const item of raw) {
-            if (typeof item === 'object' && item !== null) {
-                for (const [name, value] of Object.entries(item as Record<string, unknown>)) {
-                    const color = value as Record<string, number>;
-                    entries.push({ name, r: color.r ?? 0, g: color.g ?? 0, b: color.b ?? 0, a: color.a ?? 1 });
+        // m_Colors section
+        if (trimmed.startsWith('m_Colors:')) {
+            const section_val = trimmed.slice('m_Colors:'.length).trim();
+            if (section_val === '{}' || section_val === '[]') { i++; continue; }
+            i++;
+            while (i < lines.length) {
+                const cline = lines[i].trimStart();
+                // "- _Color: {r: 1, g: 1, b: 1, a: 1}"
+                const name_match = cline.match(/^-\s+(\S+):/);
+                if (!name_match) break;
+                const cm = color_re.exec(cline);
+                if (cm) {
+                    result.colors.push({
+                        name: name_match[1],
+                        r: parseFloat(cm[1]), g: parseFloat(cm[2]),
+                        b: parseFloat(cm[3]), a: parseFloat(cm[4]),
+                    });
                 }
+                i++;
             }
+            continue;
         }
-    } else {
-        for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
-            const color = value as Record<string, number>;
-            entries.push({ name, r: color.r ?? 0, g: color.g ?? 0, b: color.b ?? 0, a: color.a ?? 1 });
-        }
+
+        i++;
     }
-    return entries;
+
+    return result;
 }
 
 /** Check if a file is a Unity YAML file by reading its header. */
@@ -323,45 +396,37 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 process.exit(1);
             }
 
-            const objects = getScanner().read_asset(file);
-            const materialObj = objects.find(obj => obj.class_id === 21);
-            if (!materialObj) {
+            const content = readFileSync(file, 'utf-8');
+            const mat = parse_material_yaml(content);
+
+            if (!mat.name) {
                 console.log(JSON.stringify({ error: `No Material found in "${file}". Is this a .mat file?` }, null, 2));
                 process.exit(1);
             }
 
-            const props = (materialObj.properties || {}) as Record<string, unknown>;
-            const shader = parse_material_shader(props);
-            const renderQueue = (props.m_CustomRenderQueue as number) ?? null;
-            const keywords = parse_material_keywords(props.m_ShaderKeywords);
-            const savedProps = (props.m_SavedProperties || {}) as Record<string, unknown>;
-            const textures = parse_material_texenvs(savedProps.m_TexEnvs);
-            const floats = parse_material_floats(savedProps.m_Floats);
-            const colors = parse_material_colors(savedProps.m_Colors);
-
             if (options.summary) {
                 console.log(JSON.stringify({
                     file,
-                    name: materialObj.name,
-                    shader_guid: shader.guid || 'unknown',
-                    render_queue: renderQueue,
-                    keyword_count: keywords.length,
-                    texture_count: textures.length,
-                    float_count: floats.length,
-                    color_count: colors.length,
+                    name: mat.name,
+                    shader_guid: mat.shader.guid || 'unknown',
+                    render_queue: mat.render_queue,
+                    keyword_count: mat.keywords.length,
+                    texture_count: mat.textures.length,
+                    float_count: mat.floats.length,
+                    color_count: mat.colors.length,
                 }, null, 2));
                 return;
             }
 
             console.log(JSON.stringify({
                 file,
-                name: materialObj.name,
-                shader,
-                render_queue: renderQueue,
-                keywords,
-                textures,
-                floats,
-                colors,
+                name: mat.name,
+                shader: mat.shader,
+                render_queue: mat.render_queue,
+                keywords: mat.keywords,
+                textures: mat.textures,
+                floats: mat.floats,
+                colors: mat.colors,
             }, null, 2));
         });
 
