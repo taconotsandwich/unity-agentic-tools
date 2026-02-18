@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { existsSync, readFileSync } from 'fs';
-import { resolve } from 'path';
+import { resolve, dirname, extname, join } from 'path';
 import type { UnityScanner } from './scanner';
 import { getNativeExtractCsharpTypes, getNativeExtractDllTypes, getNativeBuildTypeRegistry } from './scanner';
 import { read_settings } from './settings';
@@ -201,6 +201,40 @@ function parse_material_yaml(content: string): ParsedMaterial {
     }
 
     return result;
+}
+
+// ========== Dependency Graph Helpers ==========
+
+/** Categorize an asset by its file extension. */
+function categorize_asset(filePath: string): string {
+    const ext = extname(filePath).toLowerCase();
+    const categories: Record<string, string> = {
+        '.cs': 'script', '.mat': 'material', '.unity': 'scene', '.prefab': 'prefab',
+        '.asset': 'asset', '.png': 'texture', '.jpg': 'texture', '.jpeg': 'texture',
+        '.tga': 'texture', '.psd': 'texture', '.tif': 'texture', '.tiff': 'texture',
+        '.bmp': 'texture', '.gif': 'texture', '.fbx': 'model', '.obj': 'model',
+        '.dae': 'model', '.blend': 'model', '.anim': 'animation', '.controller': 'animator',
+        '.overrideController': 'animator', '.shader': 'shader', '.cginc': 'shader',
+        '.hlsl': 'shader', '.compute': 'shader', '.mp3': 'audio', '.wav': 'audio',
+        '.ogg': 'audio', '.aif': 'audio', '.ttf': 'font', '.otf': 'font',
+        '.mask': 'avatar_mask', '.mixer': 'audio_mixer', '.renderTexture': 'render_texture',
+        '.flare': 'flare', '.guiskin': 'gui_skin', '.terrainlayer': 'terrain', '.cubemap': 'cubemap',
+    };
+    return categories[ext] || 'other';
+}
+
+/** Walk up from a file path to find the Unity project root (has Assets/ and ProjectSettings/). */
+function find_project_root_from_file(filePath: string): string | null {
+    let dir = dirname(resolve(filePath));
+    for (let i = 0; i < 20; i++) {
+        if (existsSync(join(dir, 'Assets')) && existsSync(join(dir, 'ProjectSettings'))) {
+            return dir;
+        }
+        const parent = dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+    }
+    return null;
 }
 
 /** Check if a file is a Unity YAML file by reading its header. */
@@ -434,6 +468,90 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 textures: mat.textures,
                 floats: mat.floats,
                 colors: mat.colors,
+            }, null, 2));
+        });
+
+    cmd.command('dependencies <file>')
+        .description('List asset dependencies (GUIDs referenced by this file)')
+        .option('--project <path>', 'Unity project root (for GUID resolution)')
+        .option('--unresolved', 'Show only GUIDs that could not be resolved')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, options) => {
+            if (!existsSync(file)) {
+                console.log(JSON.stringify({ error: `File not found: ${file}` }, null, 2));
+                process.exit(1);
+            }
+
+            let content: string;
+            try {
+                content = readFileSync(file, 'utf-8');
+            } catch {
+                console.log(JSON.stringify({ error: `Cannot read file: ${file}` }, null, 2));
+                process.exit(1);
+                return;
+            }
+
+            // Extract all GUID references
+            const guidRegex = /guid:\s*([a-f0-9]{32})/g;
+            const guids = new Set<string>();
+            let guidMatch: RegExpExecArray | null;
+            while ((guidMatch = guidRegex.exec(content)) !== null) {
+                guids.add(guidMatch[1]);
+            }
+
+            // Load GUID cache for resolution
+            let guidCache: Record<string, string> = {};
+            const projectPath = options.project || find_project_root_from_file(file);
+            if (projectPath) {
+                const cachePath = join(projectPath, '.unity-agentic', 'guid-cache.json');
+                if (existsSync(cachePath)) {
+                    try {
+                        guidCache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
+                    } catch {
+                        // Ignore parse errors
+                    }
+                }
+            }
+
+            // Build dependency list
+            interface Dependency {
+                guid: string;
+                path: string | null;
+                type: string;
+            }
+
+            const dependencies: Dependency[] = [];
+            for (const guid of guids) {
+                const resolvedPath = guidCache[guid] || null;
+                const assetType = resolvedPath ? categorize_asset(resolvedPath) : 'unknown';
+                dependencies.push({ guid, path: resolvedPath, type: assetType });
+            }
+
+            dependencies.sort((a, b) => {
+                if (a.path && !b.path) return -1;
+                if (!a.path && b.path) return 1;
+                return a.type.localeCompare(b.type);
+            });
+
+            const filtered = options.unresolved
+                ? dependencies.filter(d => d.path === null)
+                : dependencies;
+
+            // Group by type
+            const byType: Record<string, Dependency[]> = {};
+            for (const dep of filtered) {
+                if (!byType[dep.type]) byType[dep.type] = [];
+                byType[dep.type].push(dep);
+            }
+
+            console.log(JSON.stringify({
+                file,
+                project_path: projectPath || null,
+                total_references: guids.size,
+                resolved: dependencies.filter(d => d.path !== null).length,
+                unresolved: dependencies.filter(d => d.path === null).length,
+                dependencies: options.unresolved ? filtered : undefined,
+                by_type: options.unresolved ? undefined : byType,
             }, null, 2));
         });
 
