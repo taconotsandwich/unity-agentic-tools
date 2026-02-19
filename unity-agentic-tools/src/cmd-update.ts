@@ -1,6 +1,8 @@
 import { Command } from 'commander';
+import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from 'fs';
+import { join, basename, resolve, dirname } from 'path';
 import type { UnityScanner } from './scanner';
-import type { FindResult, Component, AssetObject, ComponentPropertyEdit, PropertyEdit } from './types';
+import type { FindResult, Component, ComponentPropertyEdit, PropertyEdit } from './types';
 import {
     editProperty,
     editTransform,
@@ -437,6 +439,277 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 component_ref: gameobject_ref,
             });
             console.log(JSON.stringify(result, null, 2));
+        });
+
+    // ========== P2.2: Material editing ==========
+    cmd.command('material <file>')
+        .description('Edit Unity Material properties (.mat file)')
+        .option('--set <property=value>', 'Set a float property (e.g., _Metallic=0.8)', (v: string, p: string[]) => [...p, v], [] as string[])
+        .option('--set-color <property=r,g,b,a>', 'Set a color property (e.g., _Color=1,0,0,1)', (v: string, p: string[]) => [...p, v], [] as string[])
+        .option('--set-texture <property=guid>', 'Set a texture property GUID (e.g., _MainTex=abc123)')
+        .option('--shader <guid>', 'Change shader reference GUID')
+        .option('--keyword-add <keyword>', 'Add a shader keyword', (v: string, p: string[]) => [...p, v], [] as string[])
+        .option('--keyword-remove <keyword>', 'Remove a shader keyword', (v: string, p: string[]) => [...p, v], [] as string[])
+        .option('-j, --json', 'Output as JSON')
+        .action((file, options) => {
+            if (!existsSync(file)) {
+                console.log(JSON.stringify({ success: false, error: `File not found: ${file}` }, null, 2));
+                process.exit(1);
+            }
+            let content = readFileSync(file, 'utf-8');
+            const changes: string[] = [];
+
+            // --shader: replace m_Shader GUID
+            if (options.shader) {
+                const guid = options.shader as string;
+                content = content.replace(
+                    /(m_Shader:\s*\{[^}]*guid:\s*)[a-f0-9]+/,
+                    `$1${guid}`
+                );
+                changes.push(`shader -> ${guid}`);
+            }
+
+            // --set: float properties in m_Floats section
+            for (const entry of (options.set as string[])) {
+                const eq = entry.indexOf('=');
+                if (eq < 0) { console.log(JSON.stringify({ success: false, error: `Invalid --set format: "${entry}". Use property=value` }, null, 2)); process.exit(1); }
+                const prop = entry.slice(0, eq);
+                const val = entry.slice(eq + 1);
+                const re = new RegExp(`(- ${prop.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*)[\\d.e+-]+`);
+                if (re.test(content)) {
+                    content = content.replace(re, `$1${val}`);
+                    changes.push(`${prop} -> ${val}`);
+                } else {
+                    changes.push(`${prop}: not found (skipped)`);
+                }
+            }
+
+            // --set-color: color properties in m_Colors section
+            for (const entry of (options.setColor as string[])) {
+                const eq = entry.indexOf('=');
+                if (eq < 0) { console.log(JSON.stringify({ success: false, error: `Invalid --set-color format: "${entry}". Use property=r,g,b,a` }, null, 2)); process.exit(1); }
+                const prop = entry.slice(0, eq);
+                const parts = entry.slice(eq + 1).split(',').map(Number);
+                if (parts.length !== 4 || parts.some(v => !Number.isFinite(v))) {
+                    console.log(JSON.stringify({ success: false, error: `Invalid color format for "${prop}". Use r,g,b,a (e.g., 1,0,0,1)` }, null, 2));
+                    process.exit(1);
+                }
+                const re = new RegExp(`(- ${prop.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*)\{[^}]*\}`);
+                if (re.test(content)) {
+                    content = content.replace(re, `$1{r: ${parts[0]}, g: ${parts[1]}, b: ${parts[2]}, a: ${parts[3]}}`);
+                    changes.push(`${prop} -> {r: ${parts[0]}, g: ${parts[1]}, b: ${parts[2]}, a: ${parts[3]}}`);
+                } else {
+                    changes.push(`${prop}: not found (skipped)`);
+                }
+            }
+
+            // --set-texture: texture GUID in m_TexEnvs section
+            if (options.setTexture) {
+                const eq = (options.setTexture as string).indexOf('=');
+                if (eq < 0) { console.log(JSON.stringify({ success: false, error: 'Invalid --set-texture format. Use property=guid' }, null, 2)); process.exit(1); }
+                const prop = (options.setTexture as string).slice(0, eq);
+                const guid = (options.setTexture as string).slice(eq + 1);
+                // Find the texture entry and replace its guid
+                const tex_section_re = new RegExp(`(- ${prop.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:[\\s\\S]*?m_Texture:\\s*\\{[^}]*guid:\\s*)[a-f0-9]+`);
+                if (tex_section_re.test(content)) {
+                    content = content.replace(tex_section_re, `$1${guid}`);
+                    changes.push(`${prop} texture -> ${guid}`);
+                } else {
+                    changes.push(`${prop} texture: not found (skipped)`);
+                }
+            }
+
+            // --keyword-add / --keyword-remove
+            for (const kw of (options.keywordAdd as string[])) {
+                const kw_re = /m_ShaderKeywords:\s*(.*)/;
+                const m = kw_re.exec(content);
+                if (m) {
+                    const existing = m[1].trim();
+                    const keywords = existing.length > 0 ? existing.split(' ') : [];
+                    if (!keywords.includes(kw)) keywords.push(kw);
+                    content = content.replace(kw_re, `m_ShaderKeywords: ${keywords.join(' ')}`);
+                    changes.push(`keyword added: ${kw}`);
+                }
+            }
+            for (const kw of (options.keywordRemove as string[])) {
+                const kw_re = /m_ShaderKeywords:\s*(.*)/;
+                const m = kw_re.exec(content);
+                if (m) {
+                    const existing = m[1].trim();
+                    const keywords = existing.split(' ').filter(k => k !== kw);
+                    content = content.replace(kw_re, `m_ShaderKeywords: ${keywords.join(' ')}`);
+                    changes.push(`keyword removed: ${kw}`);
+                }
+            }
+
+            if (changes.length === 0) {
+                console.log(JSON.stringify({ success: false, error: 'No changes specified. Use --set, --set-color, --set-texture, --shader, --keyword-add, or --keyword-remove' }, null, 2));
+                process.exit(1);
+            }
+
+            writeFileSync(file, content, 'utf-8');
+            console.log(JSON.stringify({ success: true, file, changes }, null, 2));
+        });
+
+    // ========== P4.2: Meta file editing ==========
+    cmd.command('meta [file]')
+        .description('Edit Unity .meta file importer settings')
+        .option('--set <key=value>', 'Set an importer setting (e.g., isReadable=1)', (v: string, p: string[]) => [...p, v], [] as string[])
+        .option('--max-size <n>', 'Set TextureImporter maxTextureSize')
+        .option('--compression <type>', 'Set textureCompression (0=None, 1=LowQuality, 2=Normal, 3=HighQuality)')
+        .option('--filter-mode <mode>', 'Set filterMode (0=Point, 1=Bilinear, 2=Trilinear)')
+        .option('--read-write', 'Enable isReadable')
+        .option('--no-read-write', 'Disable isReadable')
+        .option('--batch <glob>', 'Apply to all matching files')
+        .option('--dry-run', 'Preview changes without writing')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, options) => {
+            if (!file && !options.batch) {
+                console.log(JSON.stringify({ success: false, error: 'Provide a file path or use --batch <glob>' }, null, 2));
+                process.exit(1);
+            }
+            const metaPath = file ? (file.endsWith('.meta') ? file : `${file}.meta`) : '';
+            // Build key-value edits from options
+            const edits: Array<{ key: string; value: string }> = [];
+
+            for (const entry of (options.set as string[])) {
+                const eq = entry.indexOf('=');
+                if (eq < 0) { console.log(JSON.stringify({ success: false, error: `Invalid --set format: "${entry}". Use key=value` }, null, 2)); process.exit(1); }
+                edits.push({ key: entry.slice(0, eq), value: entry.slice(eq + 1) });
+            }
+            if (options.maxSize) edits.push({ key: 'maxTextureSize', value: options.maxSize as string });
+            if (options.compression) edits.push({ key: 'textureCompression', value: options.compression as string });
+            if (options.filterMode) edits.push({ key: 'filterMode', value: options.filterMode as string });
+            if (options.readWrite === true) edits.push({ key: 'isReadable', value: '1' });
+            if (options.readWrite === false) edits.push({ key: 'isReadable', value: '0' });
+
+            if (edits.length === 0) {
+                console.log(JSON.stringify({ success: false, error: 'No edits specified. Use --set, --max-size, --compression, --filter-mode, or --read-write' }, null, 2));
+                process.exit(1);
+            }
+
+            // Handle batch mode (P4.3)
+            if (options.batch) {
+                const glob_pattern = options.batch as string;
+                const pattern = glob_pattern.endsWith('.meta') ? glob_pattern : `${glob_pattern}.meta`;
+                // Simple glob: split at last '/' before glob chars, scan dir for matching suffix
+                const first_glob = pattern.search(/[*?[\]{}]/);
+                const dir_part = first_glob >= 0 ? pattern.slice(0, pattern.lastIndexOf('/', first_glob)) : dirname(pattern);
+                const dir = resolve(dir_part);
+                const suffix = basename(pattern).replace(/^\*+/, '');
+                const meta_files: string[] = [];
+                const scan = (d: string): void => {
+                    for (const entry of readdirSync(d)) {
+                        const full = join(d, entry);
+                        if (statSync(full).isDirectory()) {
+                            if (pattern.includes('**')) scan(full);
+                        } else if (entry.endsWith(suffix)) {
+                            meta_files.push(full);
+                        }
+                    }
+                };
+                if (existsSync(dir)) scan(dir);
+                if (meta_files.length === 0) {
+                    console.log(JSON.stringify({ success: false, error: `No files matched pattern: ${glob_pattern}` }, null, 2));
+                    process.exit(1);
+                }
+
+                const results: { file: string; changes: string[] }[] = [];
+                for (const mf of meta_files) {
+                    let mc = readFileSync(mf, 'utf-8');
+                    const file_changes: string[] = [];
+                    for (const edit of edits) {
+                        const re = new RegExp(`^(\\s*${edit.key}:\\s*).+$`, 'm');
+                        if (re.test(mc)) {
+                            mc = mc.replace(re, `$1${edit.value}`);
+                            file_changes.push(`${edit.key} -> ${edit.value}`);
+                        }
+                    }
+                    if (file_changes.length > 0) {
+                        if (!options.dryRun) writeFileSync(mf, mc, 'utf-8');
+                        results.push({ file: mf, changes: file_changes });
+                    }
+                }
+
+                console.log(JSON.stringify({
+                    success: true,
+                    dry_run: !!options.dryRun,
+                    files_matched: meta_files.length,
+                    files_modified: results.length,
+                    results,
+                }, null, 2));
+                return;
+            }
+
+            if (!existsSync(metaPath)) {
+                console.log(JSON.stringify({ success: false, error: `Meta file not found: ${metaPath}` }, null, 2));
+                process.exit(1);
+            }
+
+            let content = readFileSync(metaPath, 'utf-8');
+            const changes: string[] = [];
+
+            for (const edit of edits) {
+                // Match "  key: value" at any indentation level
+                const re = new RegExp(`^(\\s*${edit.key}:\\s*).+$`, 'm');
+                if (re.test(content)) {
+                    content = content.replace(re, `$1${edit.value}`);
+                    changes.push(`${edit.key} -> ${edit.value}`);
+                } else {
+                    changes.push(`${edit.key}: not found (skipped)`);
+                }
+            }
+
+            if (options.dryRun) {
+                console.log(JSON.stringify({ success: true, dry_run: true, file: metaPath, changes }, null, 2));
+                return;
+            }
+
+            writeFileSync(metaPath, content, 'utf-8');
+            console.log(JSON.stringify({ success: true, file: metaPath, changes }, null, 2));
+        });
+
+    // ========== P5.2: Animation event editing ==========
+    cmd.command('animation <file>')
+        .description('Edit AnimationClip settings')
+        .option('--set <property=value>', 'Set a clip property (e.g., wrap-mode=2 for Loop)', (v: string, p: string[]) => [...p, v], [] as string[])
+        .option('-j, --json', 'Output as JSON')
+        .action((file, options) => {
+            if (!existsSync(file)) {
+                console.log(JSON.stringify({ success: false, error: `File not found: ${file}` }, null, 2));
+                process.exit(1);
+            }
+            let content = readFileSync(file, 'utf-8');
+            const changes: string[] = [];
+
+            const property_map: Record<string, string> = {
+                'wrap-mode': 'm_WrapMode',
+                'sample-rate': 'm_SampleRate',
+                'loop-time': 'm_LoopTime',
+            };
+
+            for (const entry of (options.set as string[])) {
+                const eq = entry.indexOf('=');
+                if (eq < 0) { console.log(JSON.stringify({ success: false, error: `Invalid --set format: "${entry}". Use property=value` }, null, 2)); process.exit(1); }
+                const prop = entry.slice(0, eq);
+                const val = entry.slice(eq + 1);
+                const yaml_key = property_map[prop] || prop;
+                const re = new RegExp(`^(\\s*${yaml_key}:\\s*).+$`, 'm');
+                if (re.test(content)) {
+                    content = content.replace(re, `$1${val}`);
+                    changes.push(`${yaml_key} -> ${val}`);
+                } else {
+                    changes.push(`${yaml_key}: not found (skipped)`);
+                }
+            }
+
+            if (changes.length === 0) {
+                console.log(JSON.stringify({ success: false, error: 'No changes specified. Use --set property=value' }, null, 2));
+                process.exit(1);
+            }
+
+            writeFileSync(file, content, 'utf-8');
+            console.log(JSON.stringify({ success: true, file, changes }, null, 2));
         });
 
     cmd.addCommand(prefab_cmd);
