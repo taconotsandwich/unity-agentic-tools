@@ -1,6 +1,7 @@
 import { Command } from 'commander';
-import { existsSync, readFileSync } from 'fs';
-import { resolve, dirname, extname, join } from 'path';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { resolve, dirname, extname, join, basename, relative } from 'path';
+import { homedir, platform } from 'os';
 import type { UnityScanner } from './scanner';
 import { getNativeExtractCsharpTypes, getNativeExtractDllTypes, getNativeBuildTypeRegistry } from './scanner';
 import { read_settings } from './settings';
@@ -235,6 +236,264 @@ function find_project_root_from_file(filePath: string): string | null {
         dir = parent;
     }
     return null;
+}
+
+// ========== Editor Log Helpers ==========
+
+/** Get the default Unity Editor.log path for the current platform. */
+function get_editor_log_path(): string | null {
+    const p = platform();
+    if (p === 'darwin') return join(homedir(), 'Library', 'Logs', 'Unity', 'Editor.log');
+    if (p === 'win32') {
+        const localAppData = process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local');
+        return join(localAppData, 'Unity', 'Editor', 'Editor.log');
+    }
+    if (p === 'linux') return join(homedir(), '.config', 'unity3d', 'Editor.log');
+    return null;
+}
+
+interface LogEntry {
+    line_number: number;
+    level: 'error' | 'warning' | 'info';
+    message: string;
+    stack_trace?: string[];
+}
+
+/** Parse Unity Editor.log lines into structured entries. */
+function parse_log_entries(lines: string[]): LogEntry[] {
+    const entries: LogEntry[] = [];
+    const error_re = /^(error|exception|Error|Exception|ERROR)/i;
+    const warning_re = /^(warning|Warning|WARNING)/i;
+    const compile_re = /Assets\/.*\.cs\(\d+,\d+\):\s*error\s+CS/;
+    const stack_re = /^\s+at\s+|^\s*\(Filename:/;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.trim().length === 0) continue;
+
+        let level: LogEntry['level'] = 'info';
+        if (error_re.test(line) || compile_re.test(line)) level = 'error';
+        else if (warning_re.test(line)) level = 'warning';
+
+        // Collect stack trace lines
+        const stack: string[] = [];
+        let j = i + 1;
+        while (j < lines.length && stack_re.test(lines[j])) {
+            stack.push(lines[j].trim());
+            j++;
+        }
+
+        if (level !== 'info' || stack.length > 0) {
+            const entry: LogEntry = { line_number: i + 1, level, message: line };
+            if (stack.length > 0) entry.stack_trace = stack;
+            entries.push(entry);
+            i = j - 1;
+        }
+    }
+    return entries;
+}
+
+// ========== Animation Clip Helpers ==========
+
+interface ParsedAnimationClip {
+    name: string;
+    legacy: boolean;
+    sample_rate: number;
+    wrap_mode: number;
+    loop_time: boolean;
+    duration: number;
+    position_curve_count: number;
+    rotation_curve_count: number;
+    scale_curve_count: number;
+    float_curve_count: number;
+    euler_curve_count: number;
+    animated_paths: string[];
+    events: { time: number; function_name: string; data: string; int_parameter: number; float_parameter: number }[];
+}
+
+/** Parse an AnimationClip from raw YAML content. */
+function parse_animation_yaml(content: string): ParsedAnimationClip | null {
+    const lines = content.split(/\r?\n/);
+    const result: ParsedAnimationClip = {
+        name: '', legacy: false, sample_rate: 60, wrap_mode: 0,
+        loop_time: false, duration: 0,
+        position_curve_count: 0, rotation_curve_count: 0,
+        scale_curve_count: 0, float_curve_count: 0, euler_curve_count: 0,
+        animated_paths: [], events: [],
+    };
+
+    // Check for AnimationClip header
+    if (!content.includes('AnimationClip:')) return null;
+
+    const paths = new Set<string>();
+
+    for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trimStart();
+
+        if (trimmed.startsWith('m_Name:')) {
+            result.name = trimmed.slice('m_Name:'.length).trim();
+        } else if (trimmed.startsWith('m_Legacy:')) {
+            result.legacy = trimmed.slice('m_Legacy:'.length).trim() === '1';
+        } else if (trimmed.startsWith('m_SampleRate:')) {
+            result.sample_rate = parseFloat(trimmed.slice('m_SampleRate:'.length).trim()) || 60;
+        } else if (trimmed.startsWith('m_WrapMode:')) {
+            result.wrap_mode = parseInt(trimmed.slice('m_WrapMode:'.length).trim(), 10) || 0;
+        } else if (trimmed.startsWith('m_LoopTime:')) {
+            result.loop_time = trimmed.slice('m_LoopTime:'.length).trim() === '1';
+        } else if (trimmed.startsWith('m_StopTime:')) {
+            result.duration = parseFloat(trimmed.slice('m_StopTime:'.length).trim()) || 0;
+        } else if (trimmed.startsWith('m_PositionCurves:') && !trimmed.endsWith('[]')) {
+            result.position_curve_count++;
+        } else if (trimmed.startsWith('m_RotationCurves:') && !trimmed.endsWith('[]')) {
+            result.rotation_curve_count++;
+        } else if (trimmed.startsWith('m_ScaleCurves:') && !trimmed.endsWith('[]')) {
+            result.scale_curve_count++;
+        } else if (trimmed.startsWith('m_FloatCurves:') && !trimmed.endsWith('[]')) {
+            result.float_curve_count++;
+        } else if (trimmed.startsWith('m_EulerCurves:') && !trimmed.endsWith('[]')) {
+            result.euler_curve_count++;
+        } else if (trimmed.startsWith('path:')) {
+            const p = trimmed.slice('path:'.length).trim();
+            if (p.length > 0) paths.add(p);
+        } else if (trimmed.startsWith('functionName:')) {
+            const fn_name = trimmed.slice('functionName:'.length).trim();
+            // Read surrounding event fields
+            let time = 0, data = '', int_param = 0, float_param = 0;
+            for (let j = Math.max(0, i - 3); j <= Math.min(lines.length - 1, i + 3); j++) {
+                const et = lines[j].trimStart();
+                if (et.startsWith('time:')) time = parseFloat(et.slice('time:'.length).trim()) || 0;
+                if (et.startsWith('data:')) data = et.slice('data:'.length).trim();
+                if (et.startsWith('intParameter:')) int_param = parseInt(et.slice('intParameter:'.length).trim(), 10) || 0;
+                if (et.startsWith('floatParameter:')) float_param = parseFloat(et.slice('floatParameter:'.length).trim()) || 0;
+            }
+            result.events.push({ time, function_name: fn_name, data, int_parameter: int_param, float_parameter: float_param });
+        }
+    }
+
+    // Count curves more accurately by counting "- curve:" entries in each section
+    let in_section = '';
+    let pos_count = 0, rot_count = 0, scale_count = 0, float_count = 0, euler_count = 0;
+    for (const line of lines) {
+        const t = line.trimStart();
+        if (t.startsWith('m_PositionCurves:')) in_section = 'pos';
+        else if (t.startsWith('m_RotationCurves:') || t.startsWith('m_CompressedRotationCurves:')) in_section = 'rot';
+        else if (t.startsWith('m_ScaleCurves:')) in_section = 'scale';
+        else if (t.startsWith('m_FloatCurves:')) in_section = 'float';
+        else if (t.startsWith('m_EulerCurves:')) in_section = 'euler';
+        else if (t.startsWith('m_') && t.includes(':')) in_section = '';
+
+        if (t.startsWith('- curve:')) {
+            if (in_section === 'pos') pos_count++;
+            else if (in_section === 'rot') rot_count++;
+            else if (in_section === 'scale') scale_count++;
+            else if (in_section === 'float') float_count++;
+            else if (in_section === 'euler') euler_count++;
+        }
+    }
+    result.position_curve_count = pos_count;
+    result.rotation_curve_count = rot_count;
+    result.scale_curve_count = scale_count;
+    result.float_curve_count = float_count;
+    result.euler_curve_count = euler_count;
+
+    result.animated_paths = Array.from(paths);
+    return result;
+}
+
+// ========== Animator Controller Helpers ==========
+
+const ANIMATOR_PARAM_TYPES: Record<number, string> = {
+    1: 'Float', 3: 'Int', 4: 'Bool', 9: 'Trigger',
+};
+
+const ANIMATOR_CONDITION_MODES: Record<number, string> = {
+    1: 'If', 2: 'IfNot', 3: 'Greater', 4: 'Less', 6: 'Equals', 7: 'NotEqual',
+};
+
+interface AnimatorBlock {
+    file_id: string;
+    class_id: number;
+    type_name: string;
+    raw: string;
+}
+
+/** Split a multi-document Unity YAML into blocks. */
+function split_yaml_blocks(content: string): AnimatorBlock[] {
+    const blocks: AnimatorBlock[] = [];
+    const doc_re = /^--- !u!(\d+) &(\d+)/;
+    const lines = content.split(/\r?\n/);
+    let current_lines: string[] = [];
+    let current_class_id = 0;
+    let current_file_id = '';
+
+    for (const line of lines) {
+        const m = doc_re.exec(line);
+        if (m) {
+            if (current_lines.length > 0) {
+                const type_line = current_lines.find(l => /^\w+:/.test(l.trimStart()));
+                blocks.push({
+                    file_id: current_file_id,
+                    class_id: current_class_id,
+                    type_name: type_line ? type_line.trimStart().replace(/:.*/, '') : 'Unknown',
+                    raw: current_lines.join('\n'),
+                });
+            }
+            current_class_id = parseInt(m[1], 10);
+            current_file_id = m[2];
+            current_lines = [];
+        } else if (!line.startsWith('%')) {
+            current_lines.push(line);
+        }
+    }
+    if (current_lines.length > 0) {
+        const type_line = current_lines.find(l => /^\w+:/.test(l.trimStart()));
+        blocks.push({
+            file_id: current_file_id,
+            class_id: current_class_id,
+            type_name: type_line ? type_line.trimStart().replace(/:.*/, '') : 'Unknown',
+            raw: current_lines.join('\n'),
+        });
+    }
+    return blocks;
+}
+
+/** Extract a YAML field value from a block's raw text. */
+function yaml_field(raw: string, field: string): string | null {
+    const re = new RegExp(`^\\s*${field}:\\s*(.*)$`, 'm');
+    const m = re.exec(raw);
+    return m ? m[1].trim() : null;
+}
+
+/** Extract an inline reference {fileID: X, guid: Y} from a string. */
+function parse_inline_ref(str: string): { fileID: string; guid: string } | null {
+    const m = /\{[^}]*fileID:\s*(\d+)(?:[^}]*guid:\s*([a-f0-9]+))?/.exec(str);
+    return m ? { fileID: m[1], guid: m[2] || '' } : null;
+}
+
+// ========== Dependency scan helpers ==========
+
+/** Recursively walk a directory, yielding file paths. */
+function walk_files(dir: string, extensions: Set<string>): string[] {
+    const results: string[] = [];
+    const stack = [dir];
+    while (stack.length > 0) {
+        const current = stack.pop()!;
+        let entries: string[];
+        try { entries = readdirSync(current); } catch { continue; }
+        for (const entry of entries) {
+            if (entry.startsWith('.')) continue;
+            const full = join(current, entry);
+            try {
+                const stat = statSync(full);
+                if (stat.isDirectory()) {
+                    stack.push(full);
+                } else if (extensions.has(extname(full).toLowerCase())) {
+                    results.push(full);
+                }
+            } catch { continue; }
+        }
+    }
+    return results;
 }
 
 /** Check if a file is a Unity YAML file by reading its header. */
@@ -802,6 +1061,575 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 total: types.length,
                 truncated,
                 types: displayed,
+            }, null, 2));
+        });
+
+    // ========== P3.1: Editor.log reading ==========
+    cmd.command('log')
+        .description('Read and filter the Unity Editor.log')
+        .option('--path <file>', 'Path to Editor.log (auto-detected if omitted)')
+        .option('--tail <n>', 'Show last N lines (default 50)', '50')
+        .option('--errors', 'Show only error entries')
+        .option('--warnings', 'Show only warning entries')
+        .option('--compile-errors', 'Show only C# compilation errors')
+        .option('--since <timestamp>', 'Filter entries after this timestamp (YYYY-MM-DD or HH:MM:SS)')
+        .option('--search <pattern>', 'Regex filter on log content')
+        .option('-j, --json', 'Output as JSON')
+        .action((options) => {
+            const logPath = options.path || get_editor_log_path();
+            if (!logPath || !existsSync(logPath)) {
+                console.log(JSON.stringify({ error: `Editor.log not found${logPath ? `: ${logPath}` : '. Could not detect platform log path.'}` }, null, 2));
+                process.exit(1);
+            }
+
+            const content = readFileSync(logPath, 'utf-8');
+            let lines = content.split(/\r?\n/);
+
+            // Apply --since filter
+            if (options.since) {
+                const since = options.since as string;
+                const sinceIdx = lines.findIndex(l => l.includes(since));
+                if (sinceIdx >= 0) lines = lines.slice(sinceIdx);
+            }
+
+            // Apply --search filter
+            if (options.search) {
+                const re = new RegExp(options.search as string, 'i');
+                lines = lines.filter(l => re.test(l));
+            }
+
+            // Parse structured entries for error/warning/compile-errors modes
+            if (options.errors || options.warnings || options.compileErrors) {
+                const entries = parse_log_entries(lines);
+                let filtered = entries;
+                if (options.compileErrors) {
+                    const compileRe = /Assets\/.*\.cs\(\d+,\d+\):\s*error\s+CS/;
+                    filtered = entries.filter(e => compileRe.test(e.message));
+                } else if (options.errors) {
+                    filtered = entries.filter(e => e.level === 'error');
+                } else if (options.warnings) {
+                    filtered = entries.filter(e => e.level === 'warning');
+                }
+                const tail = parseInt(options.tail as string, 10) || 50;
+                const shown = filtered.slice(-tail);
+                console.log(JSON.stringify({
+                    log_path: logPath,
+                    total_entries: filtered.length,
+                    shown: shown.length,
+                    entries: shown,
+                }, null, 2));
+                return;
+            }
+
+            // Default: show last N lines
+            const tail = parseInt(options.tail as string, 10) || 50;
+            const tailLines = lines.slice(-tail);
+            console.log(JSON.stringify({
+                log_path: logPath,
+                total_lines: lines.length,
+                shown: tailLines.length,
+                lines: tailLines,
+            }, null, 2));
+        });
+
+    // ========== P4.1: Meta file reading ==========
+    cmd.command('meta <file>')
+        .description('Read a Unity .meta file and show importer settings')
+        .option('--summary', 'Show importer type and key settings only')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, options) => {
+            const metaPath = file.endsWith('.meta') ? file : `${file}.meta`;
+            if (!existsSync(metaPath)) {
+                console.log(JSON.stringify({ error: `Meta file not found: ${metaPath}` }, null, 2));
+                process.exit(1);
+            }
+
+            const content = readFileSync(metaPath, 'utf-8');
+            const lines = content.split(/\r?\n/);
+
+            // Extract top-level fields
+            let guid = '';
+            let importer_type = 'Unknown';
+            const settings: Record<string, string> = {};
+            let in_importer = false;
+            let importer_indent = 0;
+
+            for (const line of lines) {
+                const trimmed = line.trimStart();
+                const indent = line.length - line.trimStart().length;
+
+                if (trimmed.startsWith('guid:')) {
+                    guid = trimmed.slice('guid:'.length).trim();
+                    continue;
+                }
+
+                // Detect importer type line (e.g., "TextureImporter:", "NativeFormatImporter:")
+                if (indent === 0 && trimmed.endsWith(':') && trimmed.includes('Importer')) {
+                    importer_type = trimmed.replace(':', '');
+                    in_importer = true;
+                    importer_indent = 0;
+                    continue;
+                }
+
+                if (in_importer && indent > importer_indent) {
+                    // Capture key-value pairs (skip deeply nested ones for summary)
+                    const kv_match = trimmed.match(/^(\w+):\s*(.+)$/);
+                    if (kv_match && indent <= 4) {
+                        settings[kv_match[1]] = kv_match[2];
+                    }
+                }
+            }
+
+            if (options.summary) {
+                const key_settings: Record<string, string> = {};
+                const important_keys = [
+                    'maxTextureSize', 'textureCompression', 'filterMode', 'isReadable',
+                    'spriteMode', 'textureType', 'textureFormat', 'compressionQuality',
+                    'mainObjectFileID', 'meshCompression', 'importAnimation',
+                ];
+                for (const key of important_keys) {
+                    if (settings[key]) key_settings[key] = settings[key];
+                }
+                console.log(JSON.stringify({
+                    file: metaPath,
+                    guid,
+                    importer_type,
+                    settings: key_settings,
+                }, null, 2));
+                return;
+            }
+
+            console.log(JSON.stringify({
+                file: metaPath,
+                guid,
+                importer_type,
+                settings,
+            }, null, 2));
+        });
+
+    // ========== P5.1: Animation clip reading ==========
+    cmd.command('animation <file>')
+        .description('Read a Unity AnimationClip file (.anim)')
+        .option('--summary', 'Show name, duration, curve count, event count only')
+        .option('--paths', 'List only animated property paths')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, options) => {
+            const animValidationError = validate_unity_yaml(file);
+            if (animValidationError) {
+                console.log(JSON.stringify({ error: animValidationError }, null, 2));
+                process.exit(1);
+            }
+
+            const content = readFileSync(file, 'utf-8');
+            const clip = parse_animation_yaml(content);
+            if (!clip) {
+                console.log(JSON.stringify({ error: `No AnimationClip found in "${file}". Is this an .anim file?` }, null, 2));
+                process.exit(1);
+            }
+
+            const wrap_modes: Record<number, string> = { 0: 'Default', 1: 'Once', 2: 'Loop', 4: 'PingPong', 8: 'ClampForever' };
+            const total_curves = clip.position_curve_count + clip.rotation_curve_count +
+                clip.scale_curve_count + clip.float_curve_count + clip.euler_curve_count;
+
+            if (options.paths) {
+                console.log(JSON.stringify({
+                    file,
+                    name: clip.name,
+                    animated_paths: clip.animated_paths,
+                }, null, 2));
+                return;
+            }
+
+            if (options.summary) {
+                console.log(JSON.stringify({
+                    file,
+                    name: clip.name,
+                    duration: clip.duration,
+                    sample_rate: clip.sample_rate,
+                    wrap_mode: wrap_modes[clip.wrap_mode] || String(clip.wrap_mode),
+                    loop_time: clip.loop_time,
+                    legacy: clip.legacy,
+                    total_curves,
+                    event_count: clip.events.length,
+                    path_count: clip.animated_paths.length,
+                }, null, 2));
+                return;
+            }
+
+            console.log(JSON.stringify({
+                file,
+                name: clip.name,
+                duration: clip.duration,
+                sample_rate: clip.sample_rate,
+                wrap_mode: wrap_modes[clip.wrap_mode] || String(clip.wrap_mode),
+                loop_time: clip.loop_time,
+                legacy: clip.legacy,
+                curves: {
+                    position: clip.position_curve_count,
+                    rotation: clip.rotation_curve_count,
+                    scale: clip.scale_curve_count,
+                    float: clip.float_curve_count,
+                    euler: clip.euler_curve_count,
+                    total: total_curves,
+                },
+                animated_paths: clip.animated_paths,
+                events: clip.events,
+            }, null, 2));
+        });
+
+    // ========== P7.1: AnimatorController reading ==========
+    cmd.command('animator <file>')
+        .description('Read a Unity AnimatorController file (.controller)')
+        .option('--summary', 'Show parameter count, layer count, state count, transition count')
+        .option('--parameters', 'List parameters only')
+        .option('--states', 'List states only (per layer)')
+        .option('--transitions', 'List transitions with conditions')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, options) => {
+            const ctrlValidationError = validate_unity_yaml(file);
+            if (ctrlValidationError) {
+                console.log(JSON.stringify({ error: ctrlValidationError }, null, 2));
+                process.exit(1);
+            }
+
+            const content = readFileSync(file, 'utf-8');
+            const blocks = split_yaml_blocks(content);
+            const controller_block = blocks.find(b => b.class_id === 91);
+            if (!controller_block) {
+                console.log(JSON.stringify({ error: `No AnimatorController found in "${file}".` }, null, 2));
+                process.exit(1);
+            }
+
+            // Parse parameters
+            interface Param { name: string; type: string; default_value: number | boolean }
+            const params: Param[] = [];
+            const param_re = /m_Name:\s*(.+)/;
+            const ptype_re = /m_Type:\s*(\d+)/;
+            const ctrl_lines = controller_block.raw.split(/\r?\n/);
+            let in_params = false;
+            for (let i = 0; i < ctrl_lines.length; i++) {
+                const t = ctrl_lines[i].trimStart();
+                if (t.startsWith('m_AnimatorParameters:')) {
+                    in_params = !t.endsWith('[]');
+                    continue;
+                }
+                if (in_params && t.startsWith('- m_Name:')) {
+                    const name = t.slice('- m_Name:'.length).trim();
+                    const type_line = ctrl_lines[i + 1]?.trimStart() || '';
+                    const type_match = ptype_re.exec(type_line);
+                    const type_num = type_match ? parseInt(type_match[1], 10) : 0;
+                    const type_name = ANIMATOR_PARAM_TYPES[type_num] || `Unknown(${type_num})`;
+
+                    let default_value: number | boolean = 0;
+                    if (type_num === 1) default_value = parseFloat(yaml_field(ctrl_lines.slice(i, i + 6).join('\n'), 'm_DefaultFloat') || '0');
+                    else if (type_num === 3) default_value = parseInt(yaml_field(ctrl_lines.slice(i, i + 6).join('\n'), 'm_DefaultInt') || '0', 10);
+                    else if (type_num === 4) default_value = (yaml_field(ctrl_lines.slice(i, i + 6).join('\n'), 'm_DefaultBool') || '0') !== '0';
+
+                    params.push({ name, type: type_name, default_value });
+                }
+                if (in_params && t.startsWith('m_AnimatorLayers:')) in_params = false;
+            }
+
+            // Parse layers
+            interface Layer { name: string; state_machine_id: string; blending_mode: number; weight: number }
+            const layers: Layer[] = [];
+            let in_layers = false;
+            for (let i = 0; i < ctrl_lines.length; i++) {
+                const t = ctrl_lines[i].trimStart();
+                if (t.startsWith('m_AnimatorLayers:')) {
+                    in_layers = !t.endsWith('[]');
+                    continue;
+                }
+                if (in_layers && t.startsWith('m_Name:')) {
+                    const name = t.slice('m_Name:'.length).trim();
+                    const sm_line = ctrl_lines[i + 1]?.trimStart() || '';
+                    const sm_ref = parse_inline_ref(sm_line);
+                    const blend_line = ctrl_lines.slice(i, i + 8).find(l => l.trimStart().startsWith('m_BlendingMode:'));
+                    const weight_line = ctrl_lines.slice(i, i + 8).find(l => l.trimStart().startsWith('m_DefaultWeight:'));
+                    layers.push({
+                        name,
+                        state_machine_id: sm_ref?.fileID || '',
+                        blending_mode: parseInt(blend_line?.trimStart().split(':')[1] || '0', 10),
+                        weight: parseFloat(weight_line?.trimStart().split(':')[1] || '1'),
+                    });
+                }
+            }
+
+            // Parse states
+            interface State { file_id: string; name: string; speed: number; motion_ref: string | null; layer: string }
+            const state_blocks = blocks.filter(b => b.class_id === 1102);
+            const sm_blocks = blocks.filter(b => b.class_id === 1107);
+
+            // Build state machine -> layer mapping
+            const sm_to_layer: Record<string, string> = {};
+            for (const layer of layers) {
+                sm_to_layer[layer.state_machine_id] = layer.name;
+            }
+
+            // Build state -> layer mapping via state machine child states
+            const state_to_layer: Record<string, string> = {};
+            for (const sm of sm_blocks) {
+                const layer_name = sm_to_layer[sm.file_id] || 'Unknown';
+                const child_re = /m_State:\s*\{fileID:\s*(\d+)/g;
+                let cm: RegExpExecArray | null;
+                while ((cm = child_re.exec(sm.raw)) !== null) {
+                    state_to_layer[cm[1]] = layer_name;
+                }
+            }
+
+            const states: State[] = state_blocks.map(sb => {
+                const name = yaml_field(sb.raw, 'm_Name') || '';
+                const speed = parseFloat(yaml_field(sb.raw, 'm_Speed') || '1');
+                const motion_line = sb.raw.split(/\r?\n/).find(l => l.trimStart().startsWith('m_Motion:'));
+                const motion_ref = motion_line ? parse_inline_ref(motion_line) : null;
+                return {
+                    file_id: sb.file_id,
+                    name,
+                    speed,
+                    motion_ref: motion_ref?.guid || null,
+                    layer: state_to_layer[sb.file_id] || 'Unknown',
+                };
+            });
+
+            // Parse transitions
+            interface Transition {
+                file_id: string;
+                conditions: { parameter: string; mode: string; threshold: number }[];
+                duration: number;
+                offset: number;
+                destination_state_id: string;
+            }
+            const transition_blocks = blocks.filter(b => b.class_id === 1101);
+            const transitions: Transition[] = transition_blocks.map(tb => {
+                const t_lines = tb.raw.split(/\r?\n/);
+                const conditions: Transition['conditions'] = [];
+                let in_conditions = false;
+                for (const tl of t_lines) {
+                    const tt = tl.trimStart();
+                    if (tt.startsWith('m_Conditions:')) { in_conditions = !tt.endsWith('[]'); continue; }
+                    if (in_conditions && tt.startsWith('- m_ConditionMode:')) {
+                        const mode = parseInt(tt.split(':')[1].trim(), 10);
+                        const param_line = t_lines[t_lines.indexOf(tl) + 1]?.trimStart() || '';
+                        const thresh_line = t_lines[t_lines.indexOf(tl) + 2]?.trimStart() || '';
+                        conditions.push({
+                            mode: ANIMATOR_CONDITION_MODES[mode] || String(mode),
+                            parameter: param_line.includes('m_ConditionEvent:') ? param_line.split(':')[1].trim() : '',
+                            threshold: parseFloat(thresh_line.includes('m_EventTreshold:') ? thresh_line.split(':')[1].trim() : '0'),
+                        });
+                    }
+                    if (in_conditions && !tt.startsWith('-') && !tt.startsWith('m_Condition')) in_conditions = false;
+                }
+                const dst_line = t_lines.find(l => l.trimStart().startsWith('m_DstState:'));
+                const dst_ref = dst_line ? parse_inline_ref(dst_line) : null;
+                return {
+                    file_id: tb.file_id,
+                    conditions,
+                    duration: parseFloat(yaml_field(tb.raw, 'm_TransitionDuration') || '0'),
+                    offset: parseFloat(yaml_field(tb.raw, 'm_TransitionOffset') || '0'),
+                    destination_state_id: dst_ref?.fileID || '',
+                };
+            });
+
+            // Output
+            if (options.parameters) {
+                console.log(JSON.stringify({ file, parameters: params }, null, 2));
+                return;
+            }
+            if (options.states) {
+                const by_layer: Record<string, { name: string; speed: number; motion_guid: string | null }[]> = {};
+                for (const s of states) {
+                    if (!by_layer[s.layer]) by_layer[s.layer] = [];
+                    by_layer[s.layer].push({ name: s.name, speed: s.speed, motion_guid: s.motion_ref });
+                }
+                console.log(JSON.stringify({ file, states_by_layer: by_layer }, null, 2));
+                return;
+            }
+            if (options.transitions) {
+                // Resolve destination state names
+                const state_names: Record<string, string> = {};
+                for (const s of states) state_names[s.file_id] = s.name;
+                const resolved = transitions.map(t => ({
+                    ...t,
+                    destination_state: state_names[t.destination_state_id] || t.destination_state_id,
+                }));
+                console.log(JSON.stringify({ file, transitions: resolved }, null, 2));
+                return;
+            }
+            if (options.summary) {
+                console.log(JSON.stringify({
+                    file,
+                    name: yaml_field(controller_block.raw, 'm_Name') || basename(file),
+                    parameter_count: params.length,
+                    layer_count: layers.length,
+                    state_count: states.length,
+                    transition_count: transitions.length,
+                }, null, 2));
+                return;
+            }
+
+            console.log(JSON.stringify({
+                file,
+                name: yaml_field(controller_block.raw, 'm_Name') || basename(file),
+                parameters: params,
+                layers: layers.map(l => l.name),
+                states: states.map(s => ({ name: s.name, layer: s.layer, speed: s.speed, motion_guid: s.motion_ref })),
+                transitions: transitions.length,
+            }, null, 2));
+        });
+
+    // ========== P6.2: Reverse dependency lookup ==========
+    cmd.command('dependents <project_path> <guid>')
+        .description('Find which files reference a given GUID (reverse dependency lookup)')
+        .option('--type <type>', 'Filter to specific file types (scene, prefab, mat, etc.)')
+        .option('-j, --json', 'Output as JSON')
+        .action((project_path, guid, options) => {
+            const assetsDir = join(resolve(project_path), 'Assets');
+            if (!existsSync(assetsDir)) {
+                console.log(JSON.stringify({ error: `Assets directory not found in "${project_path}"` }, null, 2));
+                process.exit(1);
+            }
+
+            // Walk all YAML-like files
+            const scan_extensions = new Set([
+                '.unity', '.prefab', '.asset', '.mat', '.anim', '.controller',
+                '.overrideController', '.mask', '.mixer', '.lighting', '.preset',
+                '.signal', '.playable', '.renderTexture', '.flare', '.guiskin',
+                '.terrainlayer', '.cubemap',
+            ]);
+            const files = walk_files(assetsDir, scan_extensions);
+
+            const referencing: { path: string; type: string }[] = [];
+            const guid_pattern = `guid: ${guid}`;
+
+            for (const f of files) {
+                try {
+                    const fc = readFileSync(f, 'utf-8');
+                    if (fc.includes(guid_pattern)) {
+                        const rel = relative(resolve(project_path), f);
+                        const ftype = categorize_asset(f);
+                        referencing.push({ path: rel, type: ftype });
+                    }
+                } catch { continue; }
+            }
+
+            let filtered = referencing;
+            if (options.type) {
+                filtered = referencing.filter(r => r.type === options.type);
+            }
+
+            // Group by type
+            const by_type: Record<string, string[]> = {};
+            for (const r of filtered) {
+                if (!by_type[r.type]) by_type[r.type] = [];
+                by_type[r.type].push(r.path);
+            }
+
+            console.log(JSON.stringify({
+                project_path: resolve(project_path),
+                guid,
+                total_references: filtered.length,
+                by_type,
+            }, null, 2));
+        });
+
+    // ========== P6.3: Unused asset detection ==========
+    cmd.command('unused <project_path>')
+        .description('Find potentially unused assets (zero inbound GUID references)')
+        .option('--type <type>', 'Filter to specific asset types')
+        .option('--ignore <glob>', 'Exclude paths matching this pattern')
+        .option('--max <n>', 'Maximum results to return (default 200)', '200')
+        .option('-j, --json', 'Output as JSON')
+        .action((project_path, options) => {
+            const resolvedProject = resolve(project_path);
+            const assetsDir = join(resolvedProject, 'Assets');
+            if (!existsSync(assetsDir)) {
+                console.log(JSON.stringify({ error: `Assets directory not found in "${project_path}"` }, null, 2));
+                process.exit(1);
+            }
+
+            // Load GUID cache
+            const cachePath = join(resolvedProject, '.unity-agentic', 'guid-cache.json');
+            if (!existsSync(cachePath)) {
+                console.log(JSON.stringify({ error: 'GUID cache not found. Run "setup" first.' }, null, 2));
+                process.exit(1);
+            }
+            const guidCache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
+
+            // Build set of all GUIDs referenced in project files
+            const scan_extensions = new Set([
+                '.unity', '.prefab', '.asset', '.mat', '.anim', '.controller',
+                '.overrideController', '.mask', '.mixer', '.lighting', '.preset',
+            ]);
+            const files = walk_files(assetsDir, scan_extensions);
+            const referenced_guids = new Set<string>();
+            const guid_re = /guid:\s*([a-f0-9]{32})/g;
+
+            for (const f of files) {
+                try {
+                    const fc = readFileSync(f, 'utf-8');
+                    let gm: RegExpExecArray | null;
+                    while ((gm = guid_re.exec(fc)) !== null) {
+                        referenced_guids.add(gm[1]);
+                    }
+                } catch { continue; }
+            }
+
+            // Also scan .meta files in build settings scenes
+            const buildSettingsPath = join(resolvedProject, 'ProjectSettings', 'EditorBuildSettings.asset');
+            const build_scene_guids = new Set<string>();
+            if (existsSync(buildSettingsPath)) {
+                const bsc = readFileSync(buildSettingsPath, 'utf-8');
+                let bm: RegExpExecArray | null;
+                while ((bm = guid_re.exec(bsc)) !== null) {
+                    build_scene_guids.add(bm[1]);
+                }
+            }
+
+            // Find unreferenced assets
+            interface UnusedAsset { guid: string; path: string; type: string }
+            const unused: UnusedAsset[] = [];
+            const ignore_pattern = options.ignore ? new RegExp(options.ignore as string) : null;
+
+            for (const [guid_val, asset_path] of Object.entries(guidCache)) {
+                // Skip if referenced
+                if (referenced_guids.has(guid_val)) continue;
+                // Skip build settings scenes
+                if (build_scene_guids.has(guid_val)) continue;
+                // Skip Resources/ folder (auto-loaded at runtime)
+                if (asset_path.includes('Resources/') || asset_path.includes('Resources\\')) continue;
+                // Skip StreamingAssets/
+                if (asset_path.includes('StreamingAssets/') || asset_path.includes('StreamingAssets\\')) continue;
+                // Skip Editor/ scripts
+                if (asset_path.includes('/Editor/') || asset_path.includes('\\Editor\\')) continue;
+                // Apply ignore filter
+                if (ignore_pattern && ignore_pattern.test(asset_path)) continue;
+
+                const asset_type = categorize_asset(asset_path);
+                if (options.type && asset_type !== options.type) continue;
+
+                unused.push({ guid: guid_val, path: asset_path, type: asset_type });
+            }
+
+            // Sort by type then path
+            unused.sort((a, b) => a.type.localeCompare(b.type) || a.path.localeCompare(b.path));
+
+            const maxResults = parseInt(options.max as string, 10) || 200;
+            const truncated = unused.length > maxResults;
+
+            // Group by type
+            const by_type: Record<string, string[]> = {};
+            for (const u of unused.slice(0, maxResults)) {
+                if (!by_type[u.type]) by_type[u.type] = [];
+                by_type[u.type].push(u.path);
+            }
+
+            console.log(JSON.stringify({
+                project_path: resolvedProject,
+                total_assets: Object.keys(guidCache).length,
+                referenced: referenced_guids.size,
+                potentially_unused: unused.length,
+                truncated,
+                by_type,
             }, null, 2));
         });
 
