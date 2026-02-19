@@ -1173,8 +1173,9 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
                 if (in_importer && indent > importer_indent) {
                     // Capture key-value pairs (skip deeply nested ones for summary)
+                    // Use first occurrence only — platform overrides can repeat keys like maxTextureSize
                     const kv_match = trimmed.match(/^(\w+):\s*(.+)$/);
-                    if (kv_match && indent <= 4) {
+                    if (kv_match && indent <= 4 && !(kv_match[1] in settings)) {
                         settings[kv_match[1]] = kv_match[2];
                     }
                 }
@@ -1303,7 +1304,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             // Parse parameters
             interface Param { name: string; type: string; default_value: number | boolean }
             const params: Param[] = [];
-            const param_re = /m_Name:\s*(.+)/;
             const ptype_re = /m_Type:\s*(\d+)/;
             const ctrl_lines = controller_block.raw.split(/\r?\n/);
             let in_params = false;

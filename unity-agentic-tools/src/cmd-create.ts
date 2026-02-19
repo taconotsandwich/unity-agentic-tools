@@ -1,4 +1,6 @@
 import { Command } from 'commander';
+import { existsSync, writeFileSync } from 'fs';
+import { randomBytes } from 'crypto';
 import {
     createGameObject,
     createScene,
@@ -126,6 +128,120 @@ export function build_create_command(): Command {
             } catch (err) {
                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
             }
+        });
+
+    // ========== P2.3: Create Material ==========
+    cmd.command('material <output_path>')
+        .description('Create a new Unity Material file (.mat)')
+        .option('--shader <guid>', 'Shader GUID (required)')
+        .option('--shader-fileid <id>', 'Shader fileID (default: 4800000)', '4800000')
+        .option('--name <name>', 'Material name (defaults to filename)')
+        .option('--properties <json>', 'Initial properties JSON: {"floats":{"_Metallic":0.5},"colors":{"_Color":[1,0,0,1]}}')
+        .option('-j, --json', 'Output as JSON')
+        .action((output_path, options) => {
+            if (!options.shader) {
+                console.log(JSON.stringify({ success: false, error: '--shader <guid> is required' }, null, 2));
+                process.exit(1);
+            }
+
+            if (existsSync(output_path)) {
+                console.log(JSON.stringify({ success: false, error: `File already exists: ${output_path}` }, null, 2));
+                process.exit(1);
+            }
+
+            const name = (options.name as string) || output_path.replace(/.*[/\\]/, '').replace(/\.mat$/, '');
+            const shader_guid = options.shader as string;
+            const shader_fid = options.shaderFileid as string;
+
+            // Parse optional initial properties
+            let floats: Record<string, number> = {};
+            let colors: Record<string, number[]> = {};
+            if (options.properties) {
+                try {
+                    const props = JSON.parse(options.properties as string) as {
+                        floats?: Record<string, number>;
+                        colors?: Record<string, number[]>;
+                    };
+                    floats = props.floats || {};
+                    colors = props.colors || {};
+                } catch {
+                    console.log(JSON.stringify({ success: false, error: 'Invalid --properties JSON' }, null, 2));
+                    process.exit(1);
+                }
+            }
+
+            // Build float entries
+            let float_section = '{}';
+            const float_entries = Object.entries(floats);
+            if (float_entries.length > 0) {
+                float_section = '\n' + float_entries.map(([k, v]) => `    - ${k}: ${v}`).join('\n');
+            }
+
+            // Build color entries
+            let color_section = '\n    - _Color: {r: 1, g: 1, b: 1, a: 1}';
+            const color_entries = Object.entries(colors);
+            if (color_entries.length > 0) {
+                color_section = '\n' + color_entries.map(([k, v]) => {
+                    const [r, g, b, a] = v;
+                    return `    - ${k}: {r: ${r}, g: ${g}, b: ${b}, a: ${a}}`;
+                }).join('\n');
+            }
+
+            const mat_content = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: ${name}
+  m_Shader: {fileID: ${shader_fid}, guid: ${shader_guid}, type: 3}
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _MainTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats: ${float_section}
+    m_Colors: ${color_section}
+  m_BuildTextureStacks: []
+`;
+
+            writeFileSync(output_path, mat_content, 'utf-8');
+
+            // Generate .meta file
+            const guid = randomBytes(16).toString('hex');
+            const meta_content = `fileFormatVersion: 2
+guid: ${guid}
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+`;
+            writeFileSync(`${output_path}.meta`, meta_content, 'utf-8');
+
+            console.log(JSON.stringify({
+                success: true,
+                file: output_path,
+                meta_file: `${output_path}.meta`,
+                guid,
+                name,
+                shader_guid,
+            }, null, 2));
         });
 
     return cmd;
