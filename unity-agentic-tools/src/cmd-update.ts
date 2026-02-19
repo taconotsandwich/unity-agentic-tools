@@ -712,6 +712,140 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify({ success: true, file, changes }, null, 2));
         });
 
+    // ========== P7.2: AnimatorController parameter editing ==========
+    const PARAM_TYPE_MAP: Record<string, number> = { float: 1, int: 3, bool: 4, trigger: 9 };
+
+    cmd.command('animator <file>')
+        .description('Edit AnimatorController parameters')
+        .option('--add-parameter <name>', 'Add a new parameter')
+        .option('--type <float|int|bool|trigger>', 'Parameter type (required with --add-parameter)')
+        .option('--remove-parameter <name>', 'Remove a parameter by name')
+        .option('--set-default <param=value>', 'Set parameter default value (e.g., Speed=1.5)', (v: string, p: string[]) => [...p, v], [] as string[])
+        .option('-j, --json', 'Output as JSON')
+        .action((file, options) => {
+            if (!existsSync(file)) {
+                console.log(JSON.stringify({ success: false, error: `File not found: ${file}` }, null, 2));
+                process.exit(1);
+            }
+
+            let content = readFileSync(file, 'utf-8');
+            // Normalize line endings for consistent regex matching
+            const had_crlf = content.includes('\r\n');
+            if (had_crlf) content = content.replace(/\r\n/g, '\n');
+            const changes: string[] = [];
+
+            // Find m_AnimatorParameters section in the AnimatorController block
+            const ctrl_match = content.match(/^--- !u!91 &(\d+)/m);
+            if (!ctrl_match) {
+                console.log(JSON.stringify({ success: false, error: 'No AnimatorController block found (class_id 91)' }, null, 2));
+                process.exit(1);
+            }
+            const ctrl_file_id = ctrl_match[1];
+
+            // --add-parameter
+            if (options.addParameter) {
+                const name = options.addParameter as string;
+                const type_str = (options.type as string || '').toLowerCase();
+                const type_num = PARAM_TYPE_MAP[type_str];
+                if (type_num === undefined) {
+                    console.log(JSON.stringify({ success: false, error: `--type is required with --add-parameter. Options: float, int, bool, trigger` }, null, 2));
+                    process.exit(1);
+                }
+
+                const param_entry = [
+                    `  - m_Name: ${name}`,
+                    `    m_Type: ${type_num}`,
+                    `    m_DefaultFloat: 0`,
+                    `    m_DefaultInt: 0`,
+                    `    m_DefaultBool: 0`,
+                    `    m_Controller: {fileID: ${ctrl_file_id}}`,
+                ].join('\n');
+
+                // Check for empty parameters array
+                const empty_re = /m_AnimatorParameters: \[\]/;
+                if (empty_re.test(content)) {
+                    content = content.replace(empty_re, `m_AnimatorParameters:\n${param_entry}`);
+                } else {
+                    // Append before m_AnimatorLayers
+                    const layers_re = /(  m_AnimatorLayers:)/;
+                    if (layers_re.test(content)) {
+                        content = content.replace(layers_re, `${param_entry}\n$1`);
+                    }
+                }
+                changes.push(`added parameter "${name}" (${type_str})`);
+            }
+
+            // --remove-parameter
+            if (options.removeParameter) {
+                const name = options.removeParameter as string;
+                // Match the full parameter entry block (from "  - m_Name: <name>" through to next "  - m_Name:" or "  m_Animator")
+                const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const param_re = new RegExp(`  - m_Name: ${escaped}\\n(?:    [^\\n]+\\n)*`, 'g');
+                if (param_re.test(content)) {
+                    content = content.replace(param_re, '');
+                    // If all parameters removed, restore empty array notation
+                    if (/m_AnimatorParameters:\n  m_AnimatorLayers:/.test(content)) {
+                        content = content.replace(/m_AnimatorParameters:\n(  m_AnimatorLayers:)/, 'm_AnimatorParameters: []\n$1');
+                    }
+                    changes.push(`removed parameter "${name}"`);
+                } else {
+                    changes.push(`parameter "${name}": not found (skipped)`);
+                }
+            }
+
+            // --set-default
+            for (const entry of (options.setDefault as string[])) {
+                const eq = entry.indexOf('=');
+                if (eq < 0) {
+                    console.log(JSON.stringify({ success: false, error: `Invalid --set-default format: "${entry}". Use param=value` }, null, 2));
+                    process.exit(1);
+                }
+                const param_name = entry.slice(0, eq);
+                const val = entry.slice(eq + 1);
+                const escaped = param_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+                // Find the parameter entry and determine its type
+                const param_block_re = new RegExp(`(  - m_Name: ${escaped}\\n    m_Type: (\\d+)\\n)`);
+                const block_match = param_block_re.exec(content);
+                if (!block_match) {
+                    changes.push(`parameter "${param_name}": not found (skipped)`);
+                    continue;
+                }
+
+                const ptype = parseInt(block_match[2], 10);
+                // Update the appropriate default field based on type
+                if (ptype === 1) {
+                    // Float
+                    const re = new RegExp(`(  - m_Name: ${escaped}\\n[\\s\\S]*?m_DefaultFloat:\\s*)([\\d.e+-]+)`);
+                    content = content.replace(re, `$1${val}`);
+                    changes.push(`${param_name} default -> ${val} (float)`);
+                } else if (ptype === 3) {
+                    // Int
+                    const re = new RegExp(`(  - m_Name: ${escaped}\\n[\\s\\S]*?m_DefaultInt:\\s*)(\\d+)`);
+                    content = content.replace(re, `$1${val}`);
+                    changes.push(`${param_name} default -> ${val} (int)`);
+                } else if (ptype === 4) {
+                    // Bool
+                    const bool_val = val === 'true' || val === '1' ? '1' : '0';
+                    const re = new RegExp(`(  - m_Name: ${escaped}\\n[\\s\\S]*?m_DefaultBool:\\s*)(\\d+)`);
+                    content = content.replace(re, `$1${bool_val}`);
+                    changes.push(`${param_name} default -> ${bool_val} (bool)`);
+                } else {
+                    changes.push(`${param_name}: trigger parameters have no default value (skipped)`);
+                }
+            }
+
+            if (changes.length === 0) {
+                console.log(JSON.stringify({ success: false, error: 'No changes specified. Use --add-parameter, --remove-parameter, or --set-default' }, null, 2));
+                process.exit(1);
+            }
+
+            // Restore original line endings
+            if (had_crlf) content = content.replace(/\n/g, '\r\n');
+            writeFileSync(file, content, 'utf-8');
+            console.log(JSON.stringify({ success: true, file, changes }, null, 2));
+        });
+
     cmd.addCommand(prefab_cmd);
 
     return cmd;
