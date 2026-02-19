@@ -520,8 +520,11 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             }
 
             // --keyword-add / --keyword-remove
+            // NOTE: Use [ \t]* (not \s*) to avoid matching across line boundaries.
+            // \s* includes \n, which causes the regex to eat the next YAML line when
+            // m_ShaderKeywords has an empty value.
             for (const kw of (options.keywordAdd as string[])) {
-                const kw_re = /m_ShaderKeywords:\s*(.*)/;
+                const kw_re = /m_ShaderKeywords:[ \t]*(.*)/;
                 const m = kw_re.exec(content);
                 if (m) {
                     const existing = m[1].trim();
@@ -532,7 +535,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 }
             }
             for (const kw of (options.keywordRemove as string[])) {
-                const kw_re = /m_ShaderKeywords:\s*(.*)/;
+                const kw_re = /m_ShaderKeywords:[ \t]*(.*)/;
                 const m = kw_re.exec(content);
                 if (m) {
                     const existing = m[1].trim();
