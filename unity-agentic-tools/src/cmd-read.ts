@@ -48,7 +48,10 @@ interface ParsedMaterial {
 
 /** Parse a Unity .mat file from raw YAML content. */
 function parse_material_yaml(content: string): ParsedMaterial {
-    const lines = content.split(/\r?\n/);
+    // Strip all \r characters before splitting on \n. This handles \r\n (Windows),
+    // \r\r\n (double-converted), and any stray \r. Safe for Unity YAML where \r
+    // never appears as meaningful content — only as line-ending artifacts.
+    const lines = content.replace(/\r/g, '').split('\n');
     const result: ParsedMaterial = {
         name: '',
         shader: { guid: null, fileID: null },
@@ -125,8 +128,9 @@ function parse_material_yaml(content: string): ParsedMaterial {
             while (i < lines.length) {
                 const tline = lines[i];
                 const ttrimmed = tline.trimStart();
+                if (ttrimmed.length === 0) { i++; continue; } // skip blank lines
                 // Each texture entry starts with "- _TexName:"
-                const tex_name_match = ttrimmed.match(/^-\s+(\S+):$/);
+                const tex_name_match = ttrimmed.match(/^-\s+(\S+):\s*$/);
                 if (!tex_name_match) break;
                 const tex_name = tex_name_match[1];
                 const tex: MaterialTexture = {
@@ -138,6 +142,7 @@ function parse_material_yaml(content: string): ParsedMaterial {
                 // Read indented sub-properties (m_Texture, m_Scale, m_Offset)
                 while (i < lines.length) {
                     const sub = lines[i].trimStart();
+                    if (sub.length === 0) { i++; continue; } // skip blank lines
                     if (sub.startsWith('m_Texture:')) {
                         const m = inline_ref_re.exec(sub);
                         if (m) { tex.texture_fileID = m[1]; tex.texture_guid = m[2]; }
@@ -166,8 +171,9 @@ function parse_material_yaml(content: string): ParsedMaterial {
             i++;
             while (i < lines.length) {
                 const fline = lines[i].trimStart();
+                if (fline.length === 0) { i++; continue; } // skip blank lines
                 // "- _FloatName: 0.5"
-                const float_match = fline.match(/^-\s+(\S+):\s+([\d.e+-]+)$/);
+                const float_match = fline.match(/^-\s+(\S+):\s+([\d.e+-]+)\s*$/);
                 if (!float_match) break;
                 result.floats.push({ name: float_match[1], value: parseFloat(float_match[2]) });
                 i++;
@@ -182,6 +188,7 @@ function parse_material_yaml(content: string): ParsedMaterial {
             i++;
             while (i < lines.length) {
                 const cline = lines[i].trimStart();
+                if (cline.length === 0) { i++; continue; } // skip blank lines
                 // "- _Color: {r: 1, g: 1, b: 1, a: 1}"
                 const name_match = cline.match(/^-\s+(\S+):/);
                 if (!name_match) break;
@@ -257,6 +264,20 @@ interface LogEntry {
     level: 'error' | 'warning' | 'info';
     message: string;
     stack_trace?: string[];
+}
+
+/** Try to extract a timestamp from a Unity Editor.log line.
+ *  Common formats: "2024/01/15 10:30:45", "2024-01-15T10:30:45", "[HH:MM:SS]" */
+function parse_log_line_timestamp(line: string): Date | null {
+    // ISO-ish: 2024-01-15T10:30:45 or 2024/01/15 10:30:45 or 2024-01-15 10:30:45
+    const iso_re = /(\d{4}[-/]\d{2}[-/]\d{2})[T ](\d{2}:\d{2}:\d{2})/;
+    const m = iso_re.exec(line);
+    if (m) {
+        const dateStr = m[1].replace(/\//g, '-');
+        const d = new Date(`${dateStr}T${m[2]}`);
+        if (!isNaN(d.getTime())) return d;
+    }
+    return null;
 }
 
 /** Parse Unity Editor.log lines into structured entries. */
@@ -685,6 +706,18 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify(output, null, 2));
         });
 
+    // Deprecated alias: renamed to "read asset" in 0.2.1
+    cmd.command('scriptable-object')
+        .description('(Deprecated: renamed to "read asset")')
+        .argument('[file]')
+        .allowUnknownOption()
+        .action(() => {
+            console.log(JSON.stringify({
+                error: 'Command "read scriptable-object" has been renamed to "read asset". Use: unity-agentic-tools read asset <file>',
+            }, null, 2));
+            process.exit(1);
+        });
+
     cmd.command('material <file>')
         .description('Read a Unity Material file (.mat) with structured property output')
         .option('--summary', 'Show shader name, property count, texture count only')
@@ -697,6 +730,13 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             const content = readFileSync(file, 'utf-8');
+
+            // Validate the file actually contains a Material block (class_id 21)
+            if (!content.includes('Material:')) {
+                console.log(JSON.stringify({ error: `File "${file}" does not contain a Material block. Use 'read asset' for generic Unity YAML files.` }, null, 2));
+                process.exit(1);
+            }
+
             const mat = parse_material_yaml(content);
 
             if (!mat.name) {
@@ -1088,8 +1128,46 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             // Apply --since filter
             if (options.since) {
                 const since = options.since as string;
+                // First try: literal substring match (e.g., session marker text)
                 const sinceIdx = lines.findIndex(l => l.includes(since));
-                if (sinceIdx >= 0) lines = lines.slice(sinceIdx);
+                if (sinceIdx >= 0) {
+                    lines = lines.slice(sinceIdx);
+                } else {
+                    // Second try: date-based comparison against timestamps in log lines
+                    const sinceDate = new Date(since);
+                    if (!isNaN(sinceDate.getTime())) {
+                        let foundIdx = -1;
+                        for (let li = 0; li < lines.length; li++) {
+                            const ts = parse_log_line_timestamp(lines[li]);
+                            if (ts && ts >= sinceDate) {
+                                foundIdx = li;
+                                break;
+                            }
+                        }
+                        if (foundIdx >= 0) {
+                            lines = lines.slice(foundIdx);
+                        } else {
+                            // Check if ANY timestamps exist in the log
+                            const hasTimestamps = lines.some(l => parse_log_line_timestamp(l) !== null);
+                            if (hasTimestamps) {
+                                // Timestamps found but all before --since date: return empty
+                                lines = [];
+                            } else {
+                                console.log(JSON.stringify({
+                                    error: `--since "${since}" did not match: no timestamps found in log. Unity Editor.log may not contain parseable timestamps.`,
+                                    log_path: logPath,
+                                }, null, 2));
+                                process.exit(1);
+                            }
+                        }
+                    } else {
+                        console.log(JSON.stringify({
+                            error: `--since "${since}" is not a valid date and was not found as text in the log`,
+                            log_path: logPath,
+                        }, null, 2));
+                        process.exit(1);
+                    }
+                }
             }
 
             // Apply --search filter
@@ -1603,6 +1681,8 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 if (asset_path.includes('/Editor/') || asset_path.includes('\\Editor\\')) continue;
                 // Apply ignore filter
                 if (ignore_pattern && ignore_pattern.test(asset_path)) continue;
+                // Skip bare directories (no file extension)
+                if (extname(asset_path) === '') continue;
 
                 const asset_type = categorize_asset(asset_path);
                 if (options.type && asset_type !== options.type) continue;
@@ -1614,13 +1694,20 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             unused.sort((a, b) => a.type.localeCompare(b.type) || a.path.localeCompare(b.path));
 
             const maxResults = parseInt(options.max as string, 10) || 200;
-            const truncated = unused.length > maxResults;
 
-            // Group by type
+            // Group by type, then apply --max as per-type limit so small values
+            // don't cause later categories to disappear entirely
             const by_type: Record<string, string[]> = {};
-            for (const u of unused.slice(0, maxResults)) {
+            for (const u of unused) {
                 if (!by_type[u.type]) by_type[u.type] = [];
                 by_type[u.type].push(u.path);
+            }
+            let truncated = false;
+            for (const type of Object.keys(by_type)) {
+                if (by_type[type].length > maxResults) {
+                    by_type[type] = by_type[type].slice(0, maxResults);
+                    truncated = true;
+                }
             }
 
             console.log(JSON.stringify({
