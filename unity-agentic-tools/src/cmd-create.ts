@@ -21,6 +21,13 @@ export function build_create_command(): Command {
         .option('-p, --parent <name|id>', 'Parent GameObject name or Transform fileID')
         .option('-j, --json', 'Output as JSON')
         .action((file, name, options) => {
+            const ext = file.toLowerCase().split('.').pop();
+            if (!ext || !['unity', 'prefab', 'asset'].includes(ext)) {
+                console.log(JSON.stringify({ success: false, error: `Invalid file type ".${ext}". create gameobject only works with .unity, .prefab, or .asset files` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
             let parent: string | number | undefined;
             if (options.parent) {
                 const asNumber = parseInt(options.parent, 10);
@@ -34,6 +41,7 @@ export function build_create_command(): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('scene <output_path>')
@@ -47,6 +55,7 @@ export function build_create_command(): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('prefab-variant <source_prefab> <output_path>')
@@ -61,6 +70,7 @@ export function build_create_command(): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('scriptable-object <output_path> <script>')
@@ -75,6 +85,7 @@ export function build_create_command(): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('meta <script_path>')
@@ -86,6 +97,7 @@ export function build_create_command(): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('component <file> <object_name> <component>')
@@ -101,6 +113,7 @@ export function build_create_command(): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('component-copy <file> <source_file_id> <target_object_name>')
@@ -114,6 +127,7 @@ export function build_create_command(): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('build <project_path> <scene_path>')
@@ -125,8 +139,10 @@ export function build_create_command(): Command {
                 const position = options.index !== undefined ? parseInt(options.index, 10) : undefined;
                 const result = add_scene(project_path, scene_path, { position });
                 console.log(JSON.stringify(result, null, 2));
+                if (!result.success) process.exitCode = 1;
             } catch (err) {
                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+                process.exitCode = 1;
             }
         });
 
@@ -151,6 +167,10 @@ export function build_create_command(): Command {
 
             const name = (options.name as string) || output_path.replace(/.*[/\\]/, '').replace(/\.mat$/, '');
             const shader_guid = options.shader as string;
+            if (!/^[a-f0-9]{32}$/.test(shader_guid)) {
+                console.log(JSON.stringify({ success: false, error: `Invalid shader GUID "${shader_guid}". Must be a 32-character hex string (e.g., "0000000000000000f000000000000000")` }, null, 2));
+                process.exit(1);
+            }
             const shader_fid = options.shaderFileid as string;
 
             // Parse optional initial properties

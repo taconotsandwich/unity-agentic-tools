@@ -34,15 +34,19 @@ function parseVector(str: string): { x: number; y: number; z: number } {
 /** Resolve a GameObject name or numeric fileID to a Transform fileID. */
 function resolve_transform_id(scanner: UnityScanner, file: string, identifier: string): { transform_id: number } | { error: string } {
     // Check for duplicate names before inspect
+    let resolved_id = identifier;
     if (!/^\d+$/.test(identifier)) {
         const matches = scanner.find_by_name(file, identifier, false);
         if (matches.length > 1) {
             const ids = matches.map((m: FindResult) => m.fileId).join(', ');
             return { error: `Multiple GameObjects named "${identifier}" found (fileIDs: ${ids}). Use numeric fileID.` };
         }
+        if (matches.length === 1) {
+            resolved_id = matches[0].fileId;
+        }
     }
     // Look up by name or fileID via the scanner (verbose needed for class_id/file_id on components)
-    const result = scanner.inspect({ file, identifier, verbose: true });
+    const result = scanner.inspect({ file, identifier: resolved_id, verbose: true });
 
     if (result && !result.is_error) {
         // Found a GameObject — resolve to its Transform component
@@ -79,6 +83,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('component <file> <file_id> <property> <value>')
@@ -93,6 +98,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('transform <file> <identifier>')
@@ -102,6 +108,16 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .option('-s, --scale <x,y,z>', 'Set local scale')
         .option('-j, --json', 'Output as JSON')
         .action((file, identifier, options) => {
+            if (!options.position && !options.rotation && !options.scale) {
+                console.log(JSON.stringify({
+                    success: false,
+                    file_path: file,
+                    error: 'No transform flags specified. Use --position, --rotation, or --scale',
+                }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
             const resolved = resolve_transform_id(getScanner(), file, identifier);
 
             if ('error' in resolved) {
@@ -110,6 +126,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                     file_path: file,
                     error: resolved.error,
                 }, null, 2));
+                process.exitCode = 1;
                 return;
             }
 
@@ -122,6 +139,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('scriptable-object <file> <property> <value>')
@@ -148,7 +166,13 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 new_value: value,
             });
 
+            // Rewrite generic "Component not found" to contextually appropriate message
+            if (!result.success && result.error?.includes('Component not found')) {
+                result.error = result.error.replace('Component not found', 'ScriptableObject not found');
+            }
+
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('settings <project_path>')
@@ -171,6 +195,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('tag <project_path> <action> <tag>')
@@ -189,6 +214,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('layer <project_path> <index> <name>')
@@ -202,6 +228,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('sorting-layer <project_path> <action> <name>')
@@ -220,6 +247,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('parent <file> <object_name> <new_parent>')
@@ -235,6 +263,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     // Prefab command group — consolidates all prefab operations
@@ -253,6 +282,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     prefab_cmd.command('override <file> <prefab_instance> <property_path> <value>')
@@ -271,6 +301,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('build <project_path> <scene_path>')
@@ -284,43 +315,85 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 if (options.move !== undefined) {
                     const result = move_scene(project_path, scene_path, parseInt(options.move, 10));
                     console.log(JSON.stringify(result, null, 2));
+                    if (!result.success) process.exitCode = 1;
                 } else if (options.enable) {
                     const result = enable_scene(project_path, scene_path);
                     console.log(JSON.stringify(result, null, 2));
+                    if (!result.success) process.exitCode = 1;
                 } else if (options.disable) {
                     const result = disable_scene(project_path, scene_path);
                     console.log(JSON.stringify(result, null, 2));
+                    if (!result.success) process.exitCode = 1;
                 } else {
                     console.log(JSON.stringify({ success: false, error: 'Specify --enable, --disable, or --move <index>' }, null, 2));
                     process.exit(1);
                 }
             } catch (err) {
                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+                process.exitCode = 1;
             }
         });
 
-    cmd.command('array <file> <file_id> <array_property> <action> [value]')
-        .description('Insert, append, or remove array elements in a component')
+    cmd.command('array <file> <file_id> <array_property> <action> [args...]')
+        .description('Insert, append, or remove array elements in a component. Insert: <index> <value> or <value> --index <n>. Append: <value>. Remove: <index> or --index <n>.')
         .option('--index <n>', 'Index for insert/remove')
         .option('-j, --json', 'Output as JSON')
-        .action((file, file_id, array_property, action, value, options) => {
+        .action((file, file_id, array_property, action, args: string[], options) => {
             if (action !== 'insert' && action !== 'append' && action !== 'remove') {
                 console.log(JSON.stringify({ success: false, error: 'Action must be "insert", "append", or "remove"' }, null, 2));
                 process.exit(1);
             }
-            if ((action === 'insert' || action === 'append') && !value) {
-                console.log(JSON.stringify({ success: false, error: `Value is required for "${action}" action` }, null, 2));
-                process.exit(1);
+
+            let value: string | undefined;
+            let index: number | undefined = options.index !== undefined ? parseInt(options.index, 10) : undefined;
+
+            if (action === 'insert') {
+                if (args.length >= 2 && index === undefined) {
+                    // Positional: <index> <value>
+                    index = parseInt(args[0], 10);
+                    value = args[1];
+                    if (isNaN(index)) {
+                        console.log(JSON.stringify({ success: false, error: `Invalid index "${args[0]}". Must be a non-negative integer.` }, null, 2));
+                        process.exit(1);
+                    }
+                } else if (args.length >= 1) {
+                    // Value only — index from --index or append position
+                    value = args[0];
+                } else {
+                    console.log(JSON.stringify({ success: false, error: 'Value is required for "insert" action. Usage: insert <index> <value> or insert <value> --index <n>' }, null, 2));
+                    process.exit(1);
+                }
+            } else if (action === 'append') {
+                if (args.length < 1) {
+                    console.log(JSON.stringify({ success: false, error: 'Value is required for "append" action' }, null, 2));
+                    process.exit(1);
+                }
+                value = args[0];
+            } else if (action === 'remove') {
+                if (index === undefined) {
+                    if (args.length >= 1) {
+                        index = parseInt(args[0], 10);
+                        if (isNaN(index)) {
+                            console.log(JSON.stringify({ success: false, error: `Invalid index "${args[0]}". Must be a non-negative integer.` }, null, 2));
+                            process.exit(1);
+                        }
+                    } else {
+                        console.log(JSON.stringify({ success: false, error: 'Index is required for "remove" action. Usage: remove <index> or remove --index <n>' }, null, 2));
+                        process.exit(1);
+                    }
+                }
             }
+
             const result = editArray({
                 file_path: file,
                 file_id,
                 array_property,
                 action: action as 'insert' | 'append' | 'remove',
                 value,
-                index: options.index !== undefined ? parseInt(options.index, 10) : undefined,
+                index,
             });
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('batch <file> <edits_json>')
@@ -340,8 +413,20 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 property: e.property,
                 new_value: e.new_value ?? e.value ?? '',
             }));
-            // Validate no missing values (allow falsy values like false, 0, "")
+            // Validate required fields
+            if (edits.length === 0) {
+                console.log(JSON.stringify({ success: false, error: 'Empty edits array. Provide at least one edit: [{"object_name":"...","property":"...","value":"..."}]' }, null, 2));
+                process.exit(1);
+            }
             for (const edit of edits) {
+                if (!edit.object_name) {
+                    console.log(JSON.stringify({ success: false, error: 'Missing "object_name" in edit entry. JSON format: [{"object_name":"...","property":"...","value":"..."}]' }, null, 2));
+                    process.exit(1);
+                }
+                if (!edit.property) {
+                    console.log(JSON.stringify({ success: false, error: `Missing "property" for ${edit.object_name}. JSON format: [{"object_name":"...","property":"...","value":"..."}]` }, null, 2));
+                    process.exit(1);
+                }
                 if (edit.new_value === undefined || edit.new_value === null) {
                     console.log(JSON.stringify({ success: false, error: `Missing "value" for ${edit.object_name}.${edit.property}. JSON format: [{"object_name":"...","property":"...","value":"..."}]` }, null, 2));
                     process.exit(1);
@@ -349,6 +434,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             }
             const result = batchEditProperties(file, edits);
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('batch-components <file> <edits_json>')
@@ -368,8 +454,20 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 property: e.property,
                 new_value: e.new_value ?? e.value ?? '',
             }));
-            // Validate no missing values (allow falsy values like false, 0, "")
+            // Validate required fields
+            if (edits.length === 0) {
+                console.log(JSON.stringify({ success: false, error: 'Empty edits array. Provide at least one edit: [{"file_id":"...","property":"...","value":"..."}]' }, null, 2));
+                process.exit(1);
+            }
             for (const edit of edits) {
+                if (!edit.file_id) {
+                    console.log(JSON.stringify({ success: false, error: 'Missing "file_id" in edit entry. JSON format: [{"file_id":"...","property":"...","value":"..."}]' }, null, 2));
+                    process.exit(1);
+                }
+                if (!edit.property) {
+                    console.log(JSON.stringify({ success: false, error: `Missing "property" for component ${edit.file_id}. JSON format: [{"file_id":"...","property":"...","value":"..."}]` }, null, 2));
+                    process.exit(1);
+                }
                 if (edit.new_value === undefined || edit.new_value === null) {
                     console.log(JSON.stringify({ success: false, error: `Missing "value" for component ${edit.file_id}.${edit.property}. JSON format: [{"file_id":"...","property":"...","value":"..."}]` }, null, 2));
                     process.exit(1);
@@ -377,6 +475,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             }
             const result = batchEditComponentProperties(file, edits);
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     prefab_cmd.command('remove-override <file> <prefab_instance> <property_path>')
@@ -391,6 +490,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 target: options.target,
             });
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     prefab_cmd.command('remove-component <file> <prefab_instance> <component_ref>')
@@ -403,6 +503,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 component_ref,
             });
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     prefab_cmd.command('restore-component <file> <prefab_instance> <component_ref>')
@@ -415,6 +516,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 component_ref,
             });
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     prefab_cmd.command('remove-gameobject <file> <prefab_instance> <gameobject_ref>')
@@ -427,6 +529,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 component_ref: gameobject_ref,
             });
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     prefab_cmd.command('restore-gameobject <file> <prefab_instance> <gameobject_ref>')
@@ -439,6 +542,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 component_ref: gameobject_ref,
             });
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     // ========== P2.2: Material editing ==========
@@ -462,6 +566,10 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             // --shader: replace m_Shader GUID
             if (options.shader) {
                 const guid = options.shader as string;
+                if (!/^[a-f0-9]{32}$/.test(guid)) {
+                    console.log(JSON.stringify({ success: false, error: `Invalid shader GUID "${guid}". Must be a 32-character hex string` }, null, 2));
+                    process.exit(1);
+                }
                 content = content.replace(
                     /(m_Shader:\s*\{[^}]*guid:\s*)[a-f0-9]+/,
                     `$1${guid}`
@@ -469,15 +577,23 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 changes.push(`shader -> ${guid}`);
             }
 
-            // --set: float properties in m_Floats section
+            // --set: float/object properties in m_Floats or m_Colors sections
             for (const entry of (options.set as string[])) {
                 const eq = entry.indexOf('=');
                 if (eq < 0) { console.log(JSON.stringify({ success: false, error: `Invalid --set format: "${entry}". Use property=value` }, null, 2)); process.exit(1); }
                 const prop = entry.slice(0, eq);
                 const val = entry.slice(eq + 1);
-                const re = new RegExp(`(- ${prop.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*)[\\d.e+-]+`);
-                if (re.test(content)) {
-                    content = content.replace(re, `$1${val}`);
+                // Check for undefined (no = found) rather than empty string — empty is valid (reset/clear)
+                if (val === undefined) { console.log(JSON.stringify({ success: false, error: `Invalid --set format: "${entry}". Use property=value` }, null, 2)); process.exit(1); }
+                const escaped_prop = prop.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                // Try matching numeric value first, then object value {…}
+                const float_re = new RegExp(`(- ${escaped_prop}:\\s*)[\\d.e+-]+`);
+                const obj_re = new RegExp(`(- ${escaped_prop}:\\s*)\\{[^}]*\\}`);
+                if (float_re.test(content)) {
+                    content = content.replace(float_re, `$1${val}`);
+                    changes.push(`${prop} -> ${val}`);
+                } else if (obj_re.test(content)) {
+                    content = content.replace(obj_re, `$1${val}`);
                     changes.push(`${prop} -> ${val}`);
                 } else {
                     changes.push(`${prop}: not found (skipped)`);
@@ -520,34 +636,84 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             }
 
             // --keyword-add / --keyword-remove
-            // NOTE: Use [ \t]* (not \s*) to avoid matching across line boundaries.
-            // \s* includes \n, which causes the regex to eat the next YAML line when
-            // m_ShaderKeywords has an empty value.
+            // Supports both legacy m_ShaderKeywords (space-separated string) and
+            // newer m_ValidKeywords/m_InvalidKeywords (YAML array) formats.
             for (const kw of (options.keywordAdd as string[])) {
+                // Try legacy m_ShaderKeywords first (space-separated string)
                 const kw_re = /m_ShaderKeywords:[ \t]*(.*)/;
                 const m = kw_re.exec(content);
                 if (m) {
                     const existing = m[1].trim();
                     const keywords = existing.length > 0 ? existing.split(' ') : [];
-                    if (!keywords.includes(kw)) keywords.push(kw);
-                    content = content.replace(kw_re, `m_ShaderKeywords: ${keywords.join(' ')}`);
-                    changes.push(`keyword added: ${kw}`);
+                    if (!keywords.includes(kw)) {
+                        keywords.push(kw);
+                        content = content.replace(kw_re, `m_ShaderKeywords: ${keywords.join(' ')}`);
+                        changes.push(`keyword added: ${kw}`);
+                    } else {
+                        changes.push(`keyword "${kw}": already exists (skipped)`);
+                    }
+                } else {
+                    // Try newer m_ValidKeywords (YAML array) format
+                    const empty_valid_re = /m_ValidKeywords: \[\]/;
+                    const list_valid_re = /m_ValidKeywords:\n((?:  - [^\n]+\n)*)/;
+                    if (empty_valid_re.test(content)) {
+                        content = content.replace(empty_valid_re, `m_ValidKeywords:\n  - ${kw}`);
+                        changes.push(`keyword added: ${kw}`);
+                    } else if (list_valid_re.test(content)) {
+                        const lm = list_valid_re.exec(content);
+                        if (lm) {
+                            const entries = lm[1].trim().split('\n').map(l => l.replace(/^\s*-\s*/, '').trim());
+                            if (!entries.includes(kw)) {
+                                content = content.replace(list_valid_re, `m_ValidKeywords:\n${lm[1]}  - ${kw}\n`);
+                                changes.push(`keyword added: ${kw}`);
+                            } else {
+                                changes.push(`keyword "${kw}" already present (skipped)`);
+                            }
+                        }
+                    }
                 }
             }
             for (const kw of (options.keywordRemove as string[])) {
+                // Try legacy m_ShaderKeywords first
                 const kw_re = /m_ShaderKeywords:[ \t]*(.*)/;
                 const m = kw_re.exec(content);
                 if (m) {
                     const existing = m[1].trim();
                     const keywords = existing.split(' ').filter(k => k !== kw);
-                    content = content.replace(kw_re, `m_ShaderKeywords: ${keywords.join(' ')}`);
-                    changes.push(`keyword removed: ${kw}`);
+                    if (keywords.length === existing.split(' ').filter(k => k.length > 0).length) {
+                        // Keyword was not in the list
+                        changes.push(`keyword "${kw}": not found (skipped)`);
+                    } else {
+                        content = content.replace(kw_re, `m_ShaderKeywords: ${keywords.join(' ')}`);
+                        changes.push(`keyword removed: ${kw}`);
+                    }
+                } else {
+                    // Try newer m_ValidKeywords (YAML array) format
+                    const entry_re = new RegExp(`  - ${kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n`);
+                    if (entry_re.test(content)) {
+                        content = content.replace(entry_re, '');
+                        // If all keywords removed, restore empty array notation
+                        if (/m_ValidKeywords:\n\s*m_/.test(content) || /m_ValidKeywords:\n$/.test(content)) {
+                            content = content.replace(/m_ValidKeywords:\n/, 'm_ValidKeywords: []\n');
+                        }
+                        changes.push(`keyword removed: ${kw}`);
+                    } else {
+                        changes.push(`keyword "${kw}": not found (skipped)`);
+                    }
                 }
             }
 
             if (changes.length === 0) {
                 console.log(JSON.stringify({ success: false, error: 'No changes specified. Use --set, --set-color, --set-texture, --shader, --keyword-add, or --keyword-remove' }, null, 2));
                 process.exit(1);
+            }
+
+            // Check if any real modifications were made (vs all skipped)
+            const has_real_changes = changes.some(c => !c.includes('(skipped)'));
+            if (!has_real_changes) {
+                console.log(JSON.stringify({ success: false, file, changes, error: 'No properties were modified (all targets not found)' }, null, 2));
+                process.exitCode = 1;
+                return;
             }
 
             writeFileSync(file, content, 'utf-8');
@@ -580,9 +746,32 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 if (eq < 0) { console.log(JSON.stringify({ success: false, error: `Invalid --set format: "${entry}". Use key=value` }, null, 2)); process.exit(1); }
                 edits.push({ key: entry.slice(0, eq), value: entry.slice(eq + 1) });
             }
-            if (options.maxSize) edits.push({ key: 'maxTextureSize', value: options.maxSize as string });
-            if (options.compression) edits.push({ key: 'textureCompression', value: options.compression as string });
-            if (options.filterMode) edits.push({ key: 'filterMode', value: options.filterMode as string });
+            if (options.maxSize) {
+                const size = parseInt(options.maxSize as string, 10);
+                if (isNaN(size) || size < 1) {
+                    console.log(JSON.stringify({ success: false, error: `Invalid --max-size value "${options.maxSize}". Must be a positive integer (e.g., 512, 1024, 2048)` }, null, 2));
+                    process.exit(1);
+                }
+                edits.push({ key: 'maxTextureSize', value: String(size) });
+            }
+            if (options.compression !== undefined && options.compression !== false) {
+                const valid_compression = ['0', '1', '2', '3'];
+                const cv = String(options.compression);
+                if (!valid_compression.includes(cv)) {
+                    console.log(JSON.stringify({ success: false, error: `Invalid --compression value "${options.compression}". Valid values: 0 (None), 1 (LowQuality), 2 (Normal), 3 (HighQuality)` }, null, 2));
+                    process.exit(1);
+                }
+                edits.push({ key: 'textureCompression', value: cv });
+            }
+            if (options.filterMode !== undefined && options.filterMode !== false) {
+                const valid_filter = ['0', '1', '2'];
+                const fv = String(options.filterMode);
+                if (!valid_filter.includes(fv)) {
+                    console.log(JSON.stringify({ success: false, error: `Invalid --filter-mode value "${options.filterMode}". Valid values: 0 (Point), 1 (Bilinear), 2 (Trilinear)` }, null, 2));
+                    process.exit(1);
+                }
+                edits.push({ key: 'filterMode', value: fv });
+            }
             if (options.readWrite === true) edits.push({ key: 'isReadable', value: '1' });
             if (options.readWrite === false) edits.push({ key: 'isReadable', value: '0' });
 
@@ -622,9 +811,9 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                     let mc = readFileSync(mf, 'utf-8');
                     const file_changes: string[] = [];
                     for (const edit of edits) {
-                        const re = new RegExp(`^(\\s*${edit.key}:\\s*).+$`, 'm');
+                        const re = new RegExp(`^(\\s*${edit.key}:)[ \\t]*.*$`, 'm');
                         if (re.test(mc)) {
-                            mc = mc.replace(re, `$1${edit.value}`);
+                            mc = mc.replace(re, `$1 ${edit.value}`);
                             file_changes.push(`${edit.key} -> ${edit.value}`);
                         }
                     }
@@ -654,9 +843,10 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
 
             for (const edit of edits) {
                 // Match "  key: value" at any indentation level
-                const re = new RegExp(`^(\\s*${edit.key}:\\s*).+$`, 'm');
+                // Use [ \t]* (not \s*) to avoid matching newlines in multiline mode
+                const re = new RegExp(`^(\\s*${edit.key}:)[ \\t]*.*$`, 'm');
                 if (re.test(content)) {
-                    content = content.replace(re, `$1${edit.value}`);
+                    content = content.replace(re, `$1 ${edit.value}`);
                     changes.push(`${edit.key} -> ${edit.value}`);
                 } else {
                     changes.push(`${edit.key}: not found (skipped)`);
@@ -674,8 +864,10 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
 
     // ========== P5.2: Animation event editing ==========
     cmd.command('animation <file>')
-        .description('Edit AnimationClip settings')
+        .description('Edit AnimationClip settings and events')
         .option('--set <property=value>', 'Set a clip property (e.g., wrap-mode=2 for Loop)', (v: string, p: string[]) => [...p, v], [] as string[])
+        .option('--add-event <time,function[,data]>', 'Add an animation event (e.g., 0.5,OnFootstep,left)')
+        .option('--remove-event <index>', 'Remove an animation event by index (0-based)')
         .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             if (!existsSync(file)) {
@@ -706,8 +898,139 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 }
             }
 
+            // --add-event
+            if (options.addEvent) {
+                const parts = (options.addEvent as string).split(',');
+                if (parts.length < 2) {
+                    console.log(JSON.stringify({ success: false, error: 'Invalid --add-event format. Use: time,functionName[,data]' }, null, 2));
+                    process.exit(1);
+                }
+                const time = parseFloat(parts[0]);
+                if (!Number.isFinite(time)) {
+                    console.log(JSON.stringify({ success: false, error: `Invalid event time: "${parts[0]}". Must be a number.` }, null, 2));
+                    process.exit(1);
+                }
+                const functionName = parts[1];
+                const data = parts.slice(2).join(',');
+
+                const event_yaml = [
+                    `  - time: ${time}`,
+                    `    functionName: ${functionName}`,
+                    `    data: ${data}`,
+                    `    objectReferenceParameter: {fileID: 0}`,
+                    `    floatParameter: 0`,
+                    `    intParameter: 0`,
+                    `    messageOptions: 0`,
+                ].join('\n');
+
+                // Check for empty events array
+                const empty_events_re = /m_Events: \[\]/;
+                if (empty_events_re.test(content)) {
+                    content = content.replace(empty_events_re, `m_Events:\n${event_yaml}`);
+                    changes.push(`added event: ${functionName} at ${time}`);
+                } else if (content.includes('m_Events:')) {
+                    // Find the end of the m_Events section and append
+                    const events_lines = content.split('\n');
+                    let in_events = false;
+                    let insert_idx = -1;
+                    for (let ei = 0; ei < events_lines.length; ei++) {
+                        const et = events_lines[ei].trimStart();
+                        if (et.startsWith('m_Events:')) {
+                            in_events = true;
+                            continue;
+                        }
+                        if (in_events) {
+                            // Detect end of events section (next m_ field at same or lower indent)
+                            if (et.startsWith('m_') && et.includes(':') && !et.startsWith('messageOptions') && !et.startsWith('m_Events')) {
+                                insert_idx = ei;
+                                break;
+                            }
+                        }
+                    }
+                    if (insert_idx >= 0) {
+                        events_lines.splice(insert_idx, 0, event_yaml);
+                        content = events_lines.join('\n');
+                        changes.push(`added event: ${functionName} at ${time}`);
+                    } else {
+                        // Append at the very end of the events section
+                        content = content.replace(/(m_Events:[\s\S]*?)(\n\s*m_|\n---|\n$)/, `$1\n${event_yaml}$2`);
+                        changes.push(`added event: ${functionName} at ${time}`);
+                    }
+                } else {
+                    // No m_Events field at all -- add it before m_EditorCurves or at end
+                    const insert_before = /^  m_EditorCurves:/m;
+                    if (insert_before.test(content)) {
+                        content = content.replace(insert_before, `m_Events:\n${event_yaml}\n  m_EditorCurves:`);
+                    } else {
+                        content += `\n  m_Events:\n${event_yaml}\n`;
+                    }
+                    changes.push(`added event: ${functionName} at ${time}`);
+                }
+            }
+
+            // --remove-event
+            if (options.removeEvent !== undefined) {
+                const idx = parseInt(options.removeEvent as string, 10);
+                if (isNaN(idx) || idx < 0) {
+                    console.log(JSON.stringify({ success: false, error: 'Invalid --remove-event index. Must be a non-negative integer.' }, null, 2));
+                    process.exit(1);
+                }
+
+                const event_lines = content.split('\n');
+                let in_events = false;
+                let event_count = 0;
+                let remove_start = -1;
+                let remove_end = -1;
+
+                for (let ei = 0; ei < event_lines.length; ei++) {
+                    const et = event_lines[ei].trimStart();
+                    if (et.startsWith('m_Events:') && !et.endsWith('[]')) {
+                        in_events = true;
+                        continue;
+                    }
+                    if (in_events) {
+                        if (et.startsWith('- time:')) {
+                            if (event_count === idx) {
+                                remove_start = ei;
+                            }
+                            if (event_count === idx + 1 && remove_start >= 0) {
+                                remove_end = ei;
+                                break;
+                            }
+                            event_count++;
+                        }
+                        // Detect end of events section
+                        if (et.startsWith('m_') && et.includes(':') && !et.startsWith('- ') && !et.startsWith('time:') && !et.startsWith('functionName:') && !et.startsWith('data:') && !et.startsWith('objectReferenceParameter:') && !et.startsWith('floatParameter:') && !et.startsWith('intParameter:') && !et.startsWith('messageOptions:')) {
+                            if (remove_start >= 0) {
+                                remove_end = ei;
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                if (remove_start < 0) {
+                    console.log(JSON.stringify({ success: false, file, error: `Event index ${idx} not found (${event_count} events exist)` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                } else {
+                    if (remove_end < 0) remove_end = event_lines.length;
+                    event_lines.splice(remove_start, remove_end - remove_start);
+
+                    // Check if all events removed
+                    const remaining = event_lines.join('\n');
+                    if (event_count === 1) {
+                        // Last event was removed, set to empty array
+                        content = remaining.replace(/m_Events:\s*\n/, 'm_Events: []\n');
+                    } else {
+                        content = remaining;
+                    }
+                    changes.push(`removed event at index ${idx}`);
+                }
+            }
+
             if (changes.length === 0) {
-                console.log(JSON.stringify({ success: false, error: 'No changes specified. Use --set property=value' }, null, 2));
+                console.log(JSON.stringify({ success: false, error: 'No changes specified. Use --set, --add-event, or --remove-event' }, null, 2));
                 process.exit(1);
             }
 
@@ -751,7 +1074,10 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 const type_str = (options.type as string || '').toLowerCase();
                 const type_num = PARAM_TYPE_MAP[type_str];
                 if (type_num === undefined) {
-                    console.log(JSON.stringify({ success: false, error: `--type is required with --add-parameter. Options: float, int, bool, trigger` }, null, 2));
+                    const msg = !options.type
+                        ? '--type is required with --add-parameter. Options: float, int, bool, trigger'
+                        : `Invalid parameter type "${options.type}". Valid types: float, int, bool, trigger`;
+                    console.log(JSON.stringify({ success: false, error: msg }, null, 2));
                     process.exit(1);
                 }
 

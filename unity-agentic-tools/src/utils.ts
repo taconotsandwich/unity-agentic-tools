@@ -11,6 +11,7 @@ export function find_unity_project_root(startDir?: string): string | null {
 
     while (dir !== root) {
         if (existsSync(join(dir, '.unity-agentic'))) return dir;
+        if (existsSync(join(dir, 'Assets')) && existsSync(join(dir, 'ProjectSettings'))) return dir;
         if (existsSync(join(dir, 'Assets'))) return dir;
         const parent = dirname(dir);
         if (parent === dir) break;
@@ -83,6 +84,29 @@ export function glob_match(pattern: string, text: string): boolean {
     const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
     const regex_str = escaped.replace(/\*/g, '.*').replace(/\?/g, '.');
     return new RegExp(`^${regex_str}$`, 'i').test(text);
+}
+
+/**
+ * Convert a glob pattern to a RegExp for matching against file paths.
+ * Handles ** (match across directories), * (match within one segment), ? (single char).
+ * Without wildcards, performs case-insensitive substring match.
+ * Unlike glob_match, this is designed for path filtering (no anchoring, path-aware).
+ */
+export function path_glob_to_regex(pattern: string): RegExp {
+    if (!pattern.includes('*') && !pattern.includes('?')) {
+        // No wildcards: substring match
+        const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(escaped, 'i');
+    }
+    // Escape regex-special chars (not * and ?)
+    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    // Replace ** first (via placeholder to avoid double-replacement), then *
+    const regex_str = escaped
+        .replace(/\*\*/g, '\0GLOBSTAR\0')
+        .replace(/\*/g, '[^/\\\\]*')
+        .replace(/\0GLOBSTAR\0/g, '.*')
+        .replace(/\?/g, '.');
+    return new RegExp(regex_str, 'i');
 }
 
 /**

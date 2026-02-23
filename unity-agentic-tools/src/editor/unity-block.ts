@@ -309,9 +309,11 @@ export class UnityBlock {
      * Or empty: `m_Children: []`
      */
     get_array_length(array_property: string): number {
+        // Strip .Array suffix — Unity API uses "m_Materials.Array" but YAML only has "m_Materials:"
+        const clean_prop = array_property.replace(/\.Array$/, '');
         // Check for empty array syntax: `prop: []`
         const empty_pattern = new RegExp(
-            `^\\s*${escape_regex(array_property)}:\\s*\\[\\]\\s*$`,
+            `^\\s*${escape_regex(clean_prop)}:\\s*\\[\\]\\s*$`,
             'm'
         );
         if (empty_pattern.test(this._raw)) return 0;
@@ -326,7 +328,7 @@ export class UnityBlock {
             if (!in_array) {
                 const header_match = line.match(
                     new RegExp(
-                        `^(\\s*)${escape_regex(array_property)}:\\s*$`
+                        `^(\\s*)${escape_regex(clean_prop)}:\\s*$`
                     )
                 );
                 if (header_match) {
@@ -368,11 +370,13 @@ export class UnityBlock {
         index: number,
         value: string
     ): boolean {
+        // Strip .Array suffix — Unity API uses "m_Materials.Array" but YAML only has "m_Materials:"
+        const clean_prop = array_property.replace(/\.Array$/, '');
         const old_raw = this._raw;
 
         // Handle empty array: `prop: []`
         const empty_pattern = new RegExp(
-            `(^(\\s*)${escape_regex(array_property)}:\\s*)\\[\\]`,
+            `(^(\\s*)${escape_regex(clean_prop)}:\\s*)\\[\\]`,
             'm'
         );
         const empty_match = this._raw.match(empty_pattern);
@@ -396,7 +400,7 @@ export class UnityBlock {
             if (array_header_idx === -1) {
                 const header_match = lines[i].match(
                     new RegExp(
-                        `^(\\s*)${escape_regex(array_property)}:\\s*$`
+                        `^(\\s*)${escape_regex(clean_prop)}:\\s*$`
                     )
                 );
                 if (header_match) {
@@ -460,6 +464,8 @@ export class UnityBlock {
      * @returns true if the block was modified
      */
     remove_array_element(array_property: string, index: number): boolean {
+        // Strip .Array suffix — Unity API uses "m_Materials.Array" but YAML only has "m_Materials:"
+        const clean_prop = array_property.replace(/\.Array$/, '');
         const old_raw = this._raw;
 
         const lines = this._raw.split('\n');
@@ -471,7 +477,7 @@ export class UnityBlock {
             if (array_header_idx === -1) {
                 const header_match = lines[i].match(
                     new RegExp(
-                        `^(\\s*)${escape_regex(array_property)}:\\s*$`
+                        `^(\\s*)${escape_regex(clean_prop)}:\\s*$`
                     )
                 );
                 if (header_match) {
@@ -513,7 +519,7 @@ export class UnityBlock {
             const header_indent = header_indent_match
                 ? header_indent_match[1]
                 : '';
-            lines[array_header_idx] = `${header_indent}${array_property}: []`;
+            lines[array_header_idx] = `${header_indent}${clean_prop}: []`;
         }
 
         this._raw = lines.join('\n');

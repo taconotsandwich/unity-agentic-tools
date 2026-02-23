@@ -7,6 +7,8 @@ import { getNativeExtractCsharpTypes, getNativeExtractDllTypes, getNativeBuildTy
 import { read_settings } from './settings';
 import { get_build_settings } from './build-settings';
 import { UnityDocument } from './editor';
+import { load_guid_cache, load_guid_cache_for_file } from './guid-cache';
+import { path_glob_to_regex } from './utils';
 
 // ========== Material Parsing ==========
 
@@ -62,8 +64,8 @@ function parse_material_yaml(content: string): ParsedMaterial {
         colors: [],
     };
 
-    // Inline reference pattern: {fileID: 123, guid: abc, type: 3}
-    const inline_ref_re = /\{[^}]*fileID:\s*(\d+)[^}]*guid:\s*([a-f0-9]+)[^}]*\}/;
+    // Inline reference pattern: {fileID: 123, guid: abc...(32 hex chars), type: 3}
+    const inline_ref_re = /\{[^}]*fileID:\s*(\d+)[^}]*guid:\s*([a-f0-9]{32})[^}]*\}/;
     const color_re = /\{[^}]*r:\s*([\d.e+-]+)[^}]*g:\s*([\d.e+-]+)[^}]*b:\s*([\d.e+-]+)[^}]*a:\s*([\d.e+-]+)[^}]*\}/;
     const scale_offset_re = /\{[^}]*x:\s*([\d.e+-]+)[^}]*y:\s*([\d.e+-]+)[^}]*\}/;
 
@@ -107,16 +109,44 @@ function parse_material_yaml(content: string): ParsedMaterial {
             continue;
         }
 
-        // m_ValidKeywords (newer format: YAML list)
+        // m_ValidKeywords (newer format: YAML list — inline or multi-line)
         if (trimmed.startsWith('m_ValidKeywords:')) {
             const inline = trimmed.slice('m_ValidKeywords:'.length).trim();
             if (inline.startsWith('[') && inline.endsWith(']')) {
+                // Inline array: m_ValidKeywords: [_KW1, _KW2]
                 const inner = inline.slice(1, -1).trim();
                 if (inner.length > 0) {
                     result.keywords = inner.split(',').map(s => s.trim()).filter(s => s.length > 0);
                 }
+                i++;
+            } else if (!inline || inline === '') {
+                // Multi-line YAML list:
+                //   m_ValidKeywords:
+                //   - _KEYWORD1
+                //   - _KEYWORD2:
+                //       nested: data
+                i++;
+                while (i < lines.length) {
+                    const kwline = lines[i].trimStart();
+                    if (kwline.length === 0) { i++; continue; }
+                    // Each keyword entry starts with "- "
+                    const kw_match = kwline.match(/^-\s+(\S+?)(?::.*)?$/);
+                    if (!kw_match) break;
+                    const kw_indent = lines[i].length - lines[i].trimStart().length;
+                    result.keywords.push(kw_match[1]);
+                    i++;
+                    // Skip any nested lines (deeper indentation than the keyword entry)
+                    while (i < lines.length) {
+                        const nested = lines[i];
+                        if (nested.trimStart().length === 0) { i++; continue; }
+                        const nested_indent = nested.length - nested.trimStart().length;
+                        if (nested_indent <= kw_indent) break;
+                        i++;
+                    }
+                }
+            } else {
+                i++;
             }
-            i++;
             continue;
         }
 
@@ -261,7 +291,7 @@ function get_editor_log_path(): string | null {
 
 interface LogEntry {
     line_number: number;
-    level: 'error' | 'warning' | 'info';
+    level: 'error' | 'warning' | 'info' | 'import_error';
     message: string;
     stack_trace?: string[];
 }
@@ -286,6 +316,7 @@ function parse_log_entries(lines: string[]): LogEntry[] {
     const error_re = /^(error|exception|Error|Exception|ERROR)/i;
     const warning_re = /^(warning|Warning|WARNING)/i;
     const compile_re = /Assets\/.*\.cs\(\d+,\d+\):\s*error\s+CS/;
+    const import_error_re = /Failed to import|Error while importing|Could not create asset|Unable to import|Shader error in|Import of asset .* failed/i;
     const stack_re = /^\s+at\s+|^\s*\(Filename:/;
 
     for (let i = 0; i < lines.length; i++) {
@@ -293,7 +324,8 @@ function parse_log_entries(lines: string[]): LogEntry[] {
         if (line.trim().length === 0) continue;
 
         let level: LogEntry['level'] = 'info';
-        if (error_re.test(line) || compile_re.test(line)) level = 'error';
+        if (import_error_re.test(line)) level = 'import_error';
+        else if (error_re.test(line) || compile_re.test(line)) level = 'error';
         else if (warning_re.test(line)) level = 'warning';
 
         // Collect stack trace lines
@@ -316,6 +348,25 @@ function parse_log_entries(lines: string[]): LogEntry[] {
 
 // ========== Animation Clip Helpers ==========
 
+interface AnimationKeyframe {
+    time: number;
+    value: number;
+    in_slope: number;
+    out_slope: number;
+    tangent_mode?: number;
+    weighted_mode?: number;
+    in_weight?: number;
+    out_weight?: number;
+}
+
+interface AnimationCurve {
+    type: string;
+    path: string;
+    attribute: string;
+    class_id: number;
+    keyframes: AnimationKeyframe[];
+}
+
 interface ParsedAnimationClip {
     name: string;
     legacy: boolean;
@@ -330,10 +381,11 @@ interface ParsedAnimationClip {
     euler_curve_count: number;
     animated_paths: string[];
     events: { time: number; function_name: string; data: string; int_parameter: number; float_parameter: number }[];
+    curves?: AnimationCurve[];
 }
 
 /** Parse an AnimationClip from raw YAML content. */
-function parse_animation_yaml(content: string): ParsedAnimationClip | null {
+function parse_animation_yaml(content: string, include_curves = false): ParsedAnimationClip | null {
     const lines = content.split(/\r?\n/);
     const result: ParsedAnimationClip = {
         name: '', legacy: false, sample_rate: 60, wrap_mode: 0,
@@ -378,10 +430,12 @@ function parse_animation_yaml(content: string): ParsedAnimationClip | null {
             if (p.length > 0) paths.add(p);
         } else if (trimmed.startsWith('functionName:')) {
             const fn_name = trimmed.slice('functionName:'.length).trim();
-            // Read surrounding event fields
+            // Read surrounding event fields (±5 to cover all 7 event fields)
             let time = 0, data = '', int_param = 0, float_param = 0;
-            for (let j = Math.max(0, i - 3); j <= Math.min(lines.length - 1, i + 3); j++) {
-                const et = lines[j].trimStart();
+            for (let j = Math.max(0, i - 5); j <= Math.min(lines.length - 1, i + 5); j++) {
+                let et = lines[j].trimStart();
+                // Strip YAML array indicator for first field in event entry
+                if (et.startsWith('- ')) et = et.slice(2);
                 if (et.startsWith('time:')) time = parseFloat(et.slice('time:'.length).trim()) || 0;
                 if (et.startsWith('data:')) data = et.slice('data:'.length).trim();
                 if (et.startsWith('intParameter:')) int_param = parseInt(et.slice('intParameter:'.length).trim(), 10) || 0;
@@ -418,6 +472,105 @@ function parse_animation_yaml(content: string): ParsedAnimationClip | null {
     result.euler_curve_count = euler_count;
 
     result.animated_paths = Array.from(paths);
+
+    // Parse full curve data if requested
+    if (include_curves) {
+        const curves: AnimationCurve[] = [];
+        const CURVE_SECTIONS: Record<string, string> = {
+            'm_PositionCurves:': 'position',
+            'm_RotationCurves:': 'rotation',
+            'm_ScaleCurves:': 'scale',
+            'm_FloatCurves:': 'float',
+            'm_EulerCurves:': 'euler',
+            'm_PPtrCurves:': 'pptr',
+        };
+
+        let ci = 0;
+        let current_section = '';
+        while (ci < lines.length) {
+            const ct = lines[ci].trimStart();
+
+            // Detect section headers
+            let found_section = false;
+            for (const [header, type] of Object.entries(CURVE_SECTIONS)) {
+                if (ct.startsWith(header)) {
+                    current_section = ct.endsWith('[]') ? '' : type;
+                    found_section = true;
+                    break;
+                }
+            }
+            if (found_section) { ci++; continue; }
+
+            // Reset section on any other m_ field at root indentation
+            if (current_section && ct.startsWith('m_') && ct.includes(':') && !Object.keys(CURVE_SECTIONS).some(h => ct.startsWith(h))) {
+                current_section = '';
+                ci++;
+                continue;
+            }
+
+            // Parse curve entries within a section
+            if (current_section && ct.startsWith('- curve:')) {
+                const curve_entry_indent = lines[ci].length - lines[ci].trimStart().length;
+                let curve_path = '';
+                let attribute = '';
+                let class_id = 0;
+                const keyframes: AnimationKeyframe[] = [];
+
+                // Read the curve's sub-properties
+                ci++;
+                let in_keyframes = false;
+                while (ci < lines.length) {
+                    const raw_indent = lines[ci].length - lines[ci].trimStart().length;
+                    const sub = lines[ci].trimStart();
+                    // Only break on `- curve:` or `m_` at the same or lesser indent (section boundary)
+                    if (sub.startsWith('- curve:') && raw_indent <= curve_entry_indent) break;
+                    if (sub.startsWith('m_') && sub.includes(':') && raw_indent <= curve_entry_indent) break;
+
+                    if (sub.startsWith('path:')) {
+                        curve_path = sub.slice('path:'.length).trim();
+                    } else if (sub.startsWith('attribute:')) {
+                        attribute = sub.slice('attribute:'.length).trim();
+                    } else if (sub.startsWith('classID:')) {
+                        class_id = parseInt(sub.slice('classID:'.length).trim(), 10) || 0;
+                    } else if (sub.startsWith('m_Curve:')) {
+                        in_keyframes = !sub.endsWith('[]');
+                    } else if (in_keyframes && sub.startsWith('- serializedVersion:')) {
+                        // Start of a keyframe entry -- read following lines
+                        // Record indent of `- serializedVersion:` to detect when we leave the keyframe block
+                        const kf_base_indent = raw_indent;
+                        const kf: AnimationKeyframe = { time: 0, value: 0, in_slope: 0, out_slope: 0 };
+                        ci++;
+                        while (ci < lines.length) {
+                            const kl_indent = lines[ci].length - lines[ci].trimStart().length;
+                            // Break when we leave the keyframe block (line at same or lesser indent)
+                            if (kl_indent <= kf_base_indent) break;
+                            const kl = lines[ci].trimStart();
+                            if (kl.startsWith('time:')) kf.time = parseFloat(kl.slice('time:'.length).trim()) || 0;
+                            else if (kl.startsWith('value:')) kf.value = parseFloat(kl.slice('value:'.length).trim()) || 0;
+                            else if (kl.startsWith('inSlope:')) kf.in_slope = parseFloat(kl.slice('inSlope:'.length).trim()) || 0;
+                            else if (kl.startsWith('outSlope:')) kf.out_slope = parseFloat(kl.slice('outSlope:'.length).trim()) || 0;
+                            else if (kl.startsWith('tangentMode:')) kf.tangent_mode = parseInt(kl.slice('tangentMode:'.length).trim(), 10) || 0;
+                            else if (kl.startsWith('weightedMode:')) kf.weighted_mode = parseInt(kl.slice('weightedMode:'.length).trim(), 10) || 0;
+                            else if (kl.startsWith('inWeight:')) kf.in_weight = parseFloat(kl.slice('inWeight:'.length).trim()) || 0;
+                            else if (kl.startsWith('outWeight:')) kf.out_weight = parseFloat(kl.slice('outWeight:'.length).trim()) || 0;
+                            ci++;
+                        }
+                        keyframes.push(kf);
+                        continue;
+                    }
+                    ci++;
+                }
+
+                curves.push({ type: current_section, path: curve_path, attribute, class_id, keyframes });
+                continue;
+            }
+
+            ci++;
+        }
+
+        result.curves = curves;
+    }
+
     return result;
 }
 
@@ -571,7 +724,12 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
             const cursor = rawCursor;
             const rawMaxDepth = parseInt(options.maxDepth, 10);
-            const maxDepth = isNaN(rawMaxDepth) ? 10 : Math.max(0, Math.min(rawMaxDepth, 50));
+            if (isNaN(rawMaxDepth) || rawMaxDepth < 0) {
+                console.log(JSON.stringify({ error: '--max-depth must be a non-negative integer (0-50)' }));
+                process.exit(1);
+            }
+            const maxDepth = Math.min(rawMaxDepth, 50);
+            const maxDepthWarning = rawMaxDepth > 50 ? `--max-depth capped to 50 (requested ${rawMaxDepth})` : undefined;
 
             const result = getScanner().inspect_all_paginated({
                 file,
@@ -593,6 +751,9 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
             if (pageSizeWarning) {
                 result.warning = result.warning ? `${result.warning}; ${pageSizeWarning}` : pageSizeWarning;
+            }
+            if (maxDepthWarning) {
+                result.warning = result.warning ? `${result.warning}; ${maxDepthWarning}` : maxDepthWarning;
             }
 
             if (options.summary) {
@@ -633,6 +794,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 process.exit(1);
             }
             // Check for duplicate names before inspect
+            let resolved_id = object_id;
             if (!/^\d+$/.test(object_id)) {
                 const matches = getScanner().find_by_name(file, object_id, false);
                 if (matches.length > 1) {
@@ -640,10 +802,13 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     console.log(JSON.stringify({ error: `Multiple GameObjects named "${object_id}" found (fileIDs: ${ids}). Use numeric fileID.` }, null, 2));
                     process.exit(1);
                 }
+                if (matches.length === 1) {
+                    resolved_id = matches[0].fileId;
+                }
             }
             const result = getScanner().inspect({
                 file,
-                identifier: object_id,
+                identifier: resolved_id,
                 include_properties: options.properties === true,
                 verbose: options.verbose,
             });
@@ -720,9 +885,15 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
     cmd.command('material <file>')
         .description('Read a Unity Material file (.mat) with structured property output')
+        .option('--project <path>', 'Unity project root (for GUID resolution)')
         .option('--summary', 'Show shader name, property count, texture count only')
         .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
+            if (!file.toLowerCase().endsWith('.mat')) {
+                console.log(JSON.stringify({ error: `File must be a .mat file: ${file}` }, null, 2));
+                process.exit(1);
+            }
+
             const matValidationError = validate_unity_yaml(file);
             if (matValidationError) {
                 console.log(JSON.stringify({ error: matValidationError }, null, 2));
@@ -744,11 +915,20 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 process.exit(1);
             }
 
+            // Resolve GUIDs to asset paths if cache available
+            const cache = load_guid_cache_for_file(file, options.project);
+            const shader_path = mat.shader.guid ? cache?.resolve(mat.shader.guid) ?? null : null;
+            const textures_with_paths = mat.textures.map(t => ({
+                ...t,
+                path: t.texture_guid ? cache?.resolve(t.texture_guid) ?? null : null,
+            }));
+
             if (options.summary) {
                 console.log(JSON.stringify({
                     file,
                     name: mat.name,
                     shader_guid: mat.shader.guid || 'unknown',
+                    shader_path,
                     render_queue: mat.render_queue,
                     keyword_count: mat.keywords.length,
                     texture_count: mat.textures.length,
@@ -761,10 +941,10 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify({
                 file,
                 name: mat.name,
-                shader: mat.shader,
+                shader: { ...mat.shader, path: shader_path },
                 render_queue: mat.render_queue,
                 keywords: mat.keywords,
-                textures: mat.textures,
+                textures: textures_with_paths,
                 floats: mat.floats,
                 colors: mat.colors,
             }, null, 2));
@@ -774,6 +954,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .description('List asset dependencies (GUIDs referenced by this file)')
         .option('--project <path>', 'Unity project root (for GUID resolution)')
         .option('--unresolved', 'Show only GUIDs that could not be resolved')
+        .option('--recursive [depth]', 'Follow dependency chain N levels deep (default: 3)')
         .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             if (!existsSync(file)) {
@@ -799,18 +980,8 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             // Load GUID cache for resolution
-            let guidCache: Record<string, string> = {};
-            const projectPath = options.project || find_project_root_from_file(file);
-            if (projectPath) {
-                const cachePath = join(projectPath, '.unity-agentic', 'guid-cache.json');
-                if (existsSync(cachePath)) {
-                    try {
-                        guidCache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
-                    } catch {
-                        // Ignore parse errors
-                    }
-                }
-            }
+            const cache = load_guid_cache_for_file(file, options.project);
+            const projectPath = cache?.project_path || options.project || find_project_root_from_file(file);
 
             // Build dependency list
             interface Dependency {
@@ -821,7 +992,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             const dependencies: Dependency[] = [];
             for (const guid of guids) {
-                const resolvedPath = guidCache[guid] || null;
+                const resolvedPath = cache?.resolve(guid) ?? null;
                 const assetType = resolvedPath ? categorize_asset(resolvedPath) : 'unknown';
                 dependencies.push({ guid, path: resolvedPath, type: assetType });
             }
@@ -841,6 +1012,94 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             for (const dep of filtered) {
                 if (!byType[dep.type]) byType[dep.type] = [];
                 byType[dep.type].push(dep);
+            }
+
+            // Handle --recursive traversal
+            if (options.recursive !== undefined) {
+                if (!cache) {
+                    console.log(JSON.stringify({ error: 'GUID cache required for --recursive. Run "setup" first or provide --project.' }, null, 2));
+                    process.exit(1);
+                }
+
+                const raw_depth = typeof options.recursive === 'string' ? parseInt(options.recursive, 10) : 3;
+                if (isNaN(raw_depth) || raw_depth < 1) {
+                    console.log(JSON.stringify({ error: '--recursive depth must be a positive integer (default: 3)' }, null, 2));
+                    process.exit(1);
+                }
+                const max_depth = Math.min(raw_depth, 20);
+                const visited = new Set<string>();
+                const depGuidRegex = /guid:\s*([a-f0-9]{32})/g;
+
+                interface RecursiveDep {
+                    guid: string;
+                    path: string | null;
+                    type: string;
+                    depth: number;
+                    sub_dependencies?: RecursiveDep[];
+                }
+
+                function traverse_file(filePath: string, depth: number): RecursiveDep[] {
+                    if (depth > max_depth) return [];
+                    const result: RecursiveDep[] = [];
+                    let fileContent: string;
+                    try {
+                        fileContent = readFileSync(filePath, 'utf-8');
+                    } catch {
+                        return [];
+                    }
+
+                    const fileGuids = new Set<string>();
+                    let fm: RegExpExecArray | null;
+                    while ((fm = depGuidRegex.exec(fileContent)) !== null) {
+                        fileGuids.add(fm[1]);
+                    }
+
+                    for (const g of fileGuids) {
+                        if (visited.has(g)) continue;
+                        visited.add(g);
+
+                        const rPath = cache!.resolve(g);
+                        const rAbsPath = cache!.resolve_absolute(g);
+                        const rType = rPath ? categorize_asset(rPath) : 'unknown';
+
+                        const dep: RecursiveDep = { guid: g, path: rPath, type: rType, depth };
+
+                        if (rAbsPath && depth < max_depth && existsSync(rAbsPath)) {
+                            const subs = traverse_file(rAbsPath, depth + 1);
+                            if (subs.length > 0) dep.sub_dependencies = subs;
+                        }
+
+                        result.push(dep);
+                    }
+                    return result;
+                }
+
+                // Start traversal with direct dependencies at depth 1
+                for (const guid of guids) {
+                    visited.add(guid);
+                }
+                const tree: RecursiveDep[] = [];
+                for (const dep of dependencies) {
+                    const rDep: RecursiveDep = { guid: dep.guid, path: dep.path, type: dep.type, depth: 0 };
+                    if (dep.path) {
+                        const absPath = cache.resolve_absolute(dep.guid);
+                        if (absPath && existsSync(absPath)) {
+                            const subs = traverse_file(absPath, 1);
+                            if (subs.length > 0) rDep.sub_dependencies = subs;
+                        }
+                    }
+                    tree.push(rDep);
+                }
+
+                console.log(JSON.stringify({
+                    file,
+                    project_path: projectPath || null,
+                    max_depth,
+                    total_direct_references: guids.size,
+                    total_unique_dependencies: visited.size,
+                    dependencies: tree,
+                }, null, 2));
+                return;
             }
 
             console.log(JSON.stringify({
@@ -877,6 +1136,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 console.log(JSON.stringify(result, null, 2));
             } catch (err) {
                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+                process.exitCode = 1;
             }
         });
 
@@ -1085,14 +1345,19 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 types = types.filter(t => t.kind.toLowerCase() === kindLower);
             }
             if (options.source === 'assets') {
-                types = types.filter(t => t.file_path.startsWith('Assets/') || t.file_path.startsWith('Assets\\'));
+                types = types.filter(t => t.filePath?.startsWith('Assets/') || t.filePath?.startsWith('Assets\\'));
             } else if (options.source === 'packages') {
-                types = types.filter(t => t.file_path.includes('PackageCache'));
+                types = types.filter(t => t.filePath?.includes('PackageCache'));
             } else if (options.source === 'dlls') {
-                types = types.filter(t => t.file_path.endsWith('.dll'));
+                types = types.filter(t => t.filePath?.endsWith('.dll'));
             }
 
-            const maxResults = parseInt(options.max, 10) || 100;
+            const maxResults = parseInt(options.max, 10);
+            if (isNaN(maxResults) || maxResults < 1) {
+                console.log(JSON.stringify({ error: `Invalid --max value "${options.max}". Must be a positive integer.` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
             const truncated = types.length > maxResults;
             const displayed = types.slice(0, maxResults);
 
@@ -1108,10 +1373,12 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
     cmd.command('log')
         .description('Read and filter the Unity Editor.log')
         .option('--path <file>', 'Path to Editor.log (auto-detected if omitted)')
+        .option('--project <path>', 'Filter to log entries from a specific Unity project session')
         .option('--tail <n>', 'Show last N lines (default 50)', '50')
         .option('--errors', 'Show only error entries')
         .option('--warnings', 'Show only warning entries')
         .option('--compile-errors', 'Show only C# compilation errors')
+        .option('--import-errors', 'Show only asset import errors')
         .option('--since <timestamp>', 'Filter entries after this timestamp (YYYY-MM-DD or HH:MM:SS)')
         .option('--search <pattern>', 'Regex filter on log content')
         .option('-j, --json', 'Output as JSON')
@@ -1124,6 +1391,46 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             const content = readFileSync(logPath, 'utf-8');
             let lines = content.split(/\r?\n/);
+
+            // Apply --project filter: find last session matching the project path
+            if (options.project) {
+                const projectPath = resolve(options.project as string);
+                const projectName = basename(projectPath);
+                const escapedPath = projectPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const escapedName = projectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                // Unity session markers for the target project
+                // Anchor project name to path separator to avoid partial matches (e.g. "my-echo" matching "echo")
+                const session_markers = [
+                    new RegExp(`Loading project at '${escapedPath}'`),
+                    new RegExp(`Loading from Project at ${escapedPath}\\b`),
+                    new RegExp(`Loading project at '.*[/\\\\]${escapedName}'`),
+                    new RegExp(`Loading from Project at .*[/\\\\]${escapedName}\\b`),
+                ];
+                // Generic session marker: any project loading (for boundary detection)
+                const any_session_re = /(?:Loading project at '|Loading from Project at )/;
+                // Scan backwards for the last session marker for THIS project
+                let session_start = -1;
+                for (let si = lines.length - 1; si >= 0; si--) {
+                    if (session_markers.some(re => re.test(lines[si]))) {
+                        session_start = si;
+                        break;
+                    }
+                }
+                if (session_start >= 0) {
+                    // Find the next session boundary (any project loading after our marker)
+                    let session_end = lines.length;
+                    for (let si = session_start + 1; si < lines.length; si++) {
+                        if (any_session_re.test(lines[si]) && !session_markers.some(re => re.test(lines[si]))) {
+                            session_end = si;
+                            break;
+                        }
+                    }
+                    lines = lines.slice(session_start, session_end);
+                } else {
+                    // No session found for this project — return empty rather than all lines
+                    lines = [];
+                }
+            }
 
             // Apply --since filter
             if (options.since) {
@@ -1177,19 +1484,26 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             // Parse structured entries for error/warning/compile-errors modes
-            if (options.errors || options.warnings || options.compileErrors) {
+            if (options.errors || options.warnings || options.compileErrors || options.importErrors) {
                 const entries = parse_log_entries(lines);
                 let filtered = entries;
                 if (options.compileErrors) {
                     const compileRe = /Assets\/.*\.cs\(\d+,\d+\):\s*error\s+CS/;
                     filtered = entries.filter(e => compileRe.test(e.message));
+                } else if (options.importErrors) {
+                    filtered = entries.filter(e => e.level === 'import_error');
                 } else if (options.errors) {
-                    filtered = entries.filter(e => e.level === 'error');
+                    filtered = entries.filter(e => e.level === 'error' || e.level === 'import_error');
                 } else if (options.warnings) {
                     filtered = entries.filter(e => e.level === 'warning');
                 }
-                const tail = parseInt(options.tail as string, 10) || 50;
-                const shown = filtered.slice(-tail);
+                const tail_filtered = parseInt(options.tail as string, 10);
+                if (isNaN(tail_filtered) || tail_filtered < 1) {
+                    console.log(JSON.stringify({ error: `Invalid --tail value "${options.tail}". Must be a positive integer.` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+                const shown = filtered.slice(-tail_filtered);
                 console.log(JSON.stringify({
                     log_path: logPath,
                     total_entries: filtered.length,
@@ -1200,7 +1514,12 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             // Default: show last N lines
-            const tail = parseInt(options.tail as string, 10) || 50;
+            const tail = parseInt(options.tail as string, 10);
+            if (isNaN(tail) || tail < 1) {
+                console.log(JSON.stringify({ error: `Invalid --tail value "${options.tail}". Must be a positive integer.` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
             const tailLines = lines.slice(-tail);
             console.log(JSON.stringify({
                 log_path: logPath,
@@ -1228,6 +1547,9 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             // Extract top-level fields
             let guid = '';
             let importer_type = 'Unknown';
+            let assetBundleName = '';
+            let assetBundleVariant = '';
+            let userData = '';
             const settings: Record<string, string> = {};
             let in_importer = false;
             let importer_indent = 0;
@@ -1238,6 +1560,20 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
                 if (trimmed.startsWith('guid:')) {
                     guid = trimmed.slice('guid:'.length).trim();
+                    continue;
+                }
+
+                // Extract top-level fields that appear outside the importer block
+                if (trimmed.startsWith('assetBundleName:')) {
+                    assetBundleName = trimmed.slice('assetBundleName:'.length).trim();
+                    continue;
+                }
+                if (trimmed.startsWith('assetBundleVariant:')) {
+                    assetBundleVariant = trimmed.slice('assetBundleVariant:'.length).trim();
+                    continue;
+                }
+                if (trimmed.startsWith('userData:')) {
+                    userData = trimmed.slice('userData:'.length).trim();
                     continue;
                 }
 
@@ -1252,7 +1588,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 if (in_importer && indent > importer_indent) {
                     // Capture key-value pairs (skip deeply nested ones for summary)
                     // Use first occurrence only — platform overrides can repeat keys like maxTextureSize
-                    const kv_match = trimmed.match(/^(\w+):\s*(.+)$/);
+                    const kv_match = trimmed.match(/^(\w+):\s*(.*)$/);
                     if (kv_match && indent <= 4 && !(kv_match[1] in settings)) {
                         settings[kv_match[1]] = kv_match[2];
                     }
@@ -1274,6 +1610,9 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     guid,
                     importer_type,
                     settings: key_settings,
+                    ...(assetBundleName ? { assetBundleName } : {}),
+                    ...(assetBundleVariant ? { assetBundleVariant } : {}),
+                    ...(userData ? { userData } : {}),
                 }, null, 2));
                 return;
             }
@@ -1282,6 +1621,9 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 file: metaPath,
                 guid,
                 importer_type,
+                assetBundleName,
+                assetBundleVariant,
+                userData,
                 settings,
             }, null, 2));
         });
@@ -1291,6 +1633,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .description('Read a Unity AnimationClip file (.anim)')
         .option('--summary', 'Show name, duration, curve count, event count only')
         .option('--paths', 'List only animated property paths')
+        .option('--curves', 'Show full keyframe data per curve')
         .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             const animValidationError = validate_unity_yaml(file);
@@ -1300,7 +1643,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             const content = readFileSync(file, 'utf-8');
-            const clip = parse_animation_yaml(content);
+            const clip = parse_animation_yaml(content, options.curves === true);
             if (!clip) {
                 console.log(JSON.stringify({ error: `No AnimationClip found in "${file}". Is this an .anim file?` }, null, 2));
                 process.exit(1);
@@ -1335,7 +1678,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 return;
             }
 
-            console.log(JSON.stringify({
+            const output: Record<string, unknown> = {
                 file,
                 name: clip.name,
                 duration: clip.duration,
@@ -1353,12 +1696,17 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 },
                 animated_paths: clip.animated_paths,
                 events: clip.events,
-            }, null, 2));
+            };
+            if (clip.curves) {
+                output.curve_data = clip.curves;
+            }
+            console.log(JSON.stringify(output, null, 2));
         });
 
     // ========== P7.1: AnimatorController reading ==========
     cmd.command('animator <file>')
         .description('Read a Unity AnimatorController file (.controller)')
+        .option('--project <path>', 'Unity project root (for GUID resolution of motion clips)')
         .option('--summary', 'Show parameter count, layer count, state count, transition count')
         .option('--parameters', 'List parameters only')
         .option('--states', 'List states only (per layer)')
@@ -1455,6 +1803,8 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 }
             }
 
+            const animCache = load_guid_cache_for_file(file, options.project);
+
             const states: State[] = state_blocks.map(sb => {
                 const name = yaml_field(sb.raw, 'm_Name') || '';
                 const speed = parseFloat(yaml_field(sb.raw, 'm_Speed') || '1');
@@ -1514,10 +1864,13 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 return;
             }
             if (options.states) {
-                const by_layer: Record<string, { name: string; speed: number; motion_guid: string | null }[]> = {};
+                const by_layer: Record<string, { name: string; speed: number; motion_guid: string | null; motion_path: string | null }[]> = {};
                 for (const s of states) {
                     if (!by_layer[s.layer]) by_layer[s.layer] = [];
-                    by_layer[s.layer].push({ name: s.name, speed: s.speed, motion_guid: s.motion_ref });
+                    by_layer[s.layer].push({
+                        name: s.name, speed: s.speed, motion_guid: s.motion_ref,
+                        motion_path: s.motion_ref ? animCache?.resolve(s.motion_ref) ?? null : null,
+                    });
                 }
                 console.log(JSON.stringify({ file, states_by_layer: by_layer }, null, 2));
                 return;
@@ -1550,7 +1903,11 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 name: yaml_field(controller_block.raw, 'm_Name') || basename(file),
                 parameters: params,
                 layers: layers.map(l => l.name),
-                states: states.map(s => ({ name: s.name, layer: s.layer, speed: s.speed, motion_guid: s.motion_ref })),
+                states: states.map(s => ({
+                    name: s.name, layer: s.layer, speed: s.speed,
+                    motion_guid: s.motion_ref,
+                    motion_path: s.motion_ref ? animCache?.resolve(s.motion_ref) ?? null : null,
+                })),
                 transitions: transitions.length,
             }, null, 2));
         });
@@ -1626,12 +1983,12 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             // Load GUID cache
-            const cachePath = join(resolvedProject, '.unity-agentic', 'guid-cache.json');
-            if (!existsSync(cachePath)) {
+            const guidCacheObj = load_guid_cache(resolvedProject);
+            if (!guidCacheObj) {
                 console.log(JSON.stringify({ error: 'GUID cache not found. Run "setup" first.' }, null, 2));
                 process.exit(1);
             }
-            const guidCache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
+            const guidCache = guidCacheObj.cache;
 
             // Build set of all GUIDs referenced in project files
             const scan_extensions = new Set([
@@ -1666,7 +2023,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             // Find unreferenced assets
             interface UnusedAsset { guid: string; path: string; type: string }
             const unused: UnusedAsset[] = [];
-            const ignore_pattern = options.ignore ? new RegExp(options.ignore as string) : null;
+            const ignore_pattern = options.ignore ? path_glob_to_regex(options.ignore as string) : null;
 
             for (const [guid_val, asset_path] of Object.entries(guidCache)) {
                 // Skip if referenced

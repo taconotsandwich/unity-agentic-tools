@@ -5,7 +5,7 @@ use super::parser::BlockIndex;
 
 // Cached regexes — compiled once, reused across all calls
 static TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"m_TagString:\s*([^\n]+)").unwrap()
+    Regex::new(r"m_TagString:[ \t]*([^\n]*)").unwrap()
 });
 static LAYER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"m_Layer:\s*(\d+)").unwrap()
@@ -61,6 +61,7 @@ pub fn extract_tag(block: &str) -> String {
     TAG_RE.captures(block)
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().trim().to_string())
+        .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "Untagged".to_string())
 }
 
@@ -174,6 +175,20 @@ mod tests {
     fn test_extract_tag() {
         let block = "m_TagString: MainCamera\nm_Layer: 5";
         assert_eq!(extract_tag(block), "MainCamera");
+    }
+
+    #[test]
+    fn test_extract_tag_empty_value() {
+        // Empty tag should return "Untagged", not bleed into next line
+        let block = "m_TagString:\nm_Layer: 5";
+        assert_eq!(extract_tag(block), "Untagged");
+    }
+
+    #[test]
+    fn test_extract_tag_empty_with_space() {
+        // Tag with trailing space but no value
+        let block = "m_TagString: \nm_Layer: 5";
+        assert_eq!(extract_tag(block), "Untagged");
     }
 
     #[test]

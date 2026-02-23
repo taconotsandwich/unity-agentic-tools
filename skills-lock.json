@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "unity-agentic-tools": {
+      "source": "/Users/taco/Documents/Projects/unity-agentic-tools",
+      "sourceType": "local",
+      "computedHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'fs';
+import { existsSync } from 'fs';
 import * as path from 'path';
 import type {
     DuplicateGameObjectOptions, DuplicateGameObjectResult,
@@ -8,6 +8,7 @@ import { find_unity_project_root } from '../utils';
 import { getNativeBuildGuidCache } from '../scanner';
 import { UnityDocument } from './unity-document';
 import type { UnityBlock } from './unity-block';
+import { load_guid_cache_for_file } from '../guid-cache';
 
 // ========== Private Helpers ==========
 
@@ -260,17 +261,10 @@ export function unpackPrefab(options: UnpackPrefabOptions): UnpackPrefabResult {
   let sourcePrefabPath: string | null = null;
 
   if (project_path) {
-    const cachePath = path.join(project_path, '.unity-agentic', 'guid-cache.json');
-    if (existsSync(cachePath)) {
-      try {
-        const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
-        if (cache[sourcePrefabGuid]) {
-          const cachedPath = cache[sourcePrefabGuid];
-          sourcePrefabPath = path.isAbsolute(cachedPath)
-            ? cachedPath
-            : path.join(project_path, cachedPath);
-        }
-      } catch { /* ignore */ }
+    const guidCache = load_guid_cache_for_file(file_path, project_path);
+    if (guidCache) {
+      const resolvedPath = guidCache.resolve_absolute(sourcePrefabGuid);
+      if (resolvedPath) sourcePrefabPath = resolvedPath;
     }
   }
 

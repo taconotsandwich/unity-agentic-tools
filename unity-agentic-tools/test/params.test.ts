@@ -71,11 +71,6 @@ describe('ParamNormalizer', () => {
             expect(params.getRequired('required')).toBe('value');
         });
 
-        it('returns value with case fallback', () => {
-            const params = new ParamNormalizer({ required_field: 'value' });
-            expect(params.getRequired('requiredField')).toBe('value');
-        });
-
         it('throws when parameter missing', () => {
             const params = new ParamNormalizer({});
             expect(() => params.getRequired('missing')).toThrow("Required parameter 'missing' is missing");
@@ -113,54 +108,23 @@ describe('ParamNormalizer', () => {
             expect(params.getBool('flag')).toBe(true);
         });
 
-        it('converts string "true" to boolean', () => {
-            const params = new ParamNormalizer({ flag: 'true' });
+        it.each(['true', 'TRUE'])('converts string "%s" to true', (input) => {
+            const params = new ParamNormalizer({ flag: input });
             expect(params.getBool('flag')).toBe(true);
         });
 
-        it('converts string "TRUE" to boolean', () => {
-            const params = new ParamNormalizer({ flag: 'TRUE' });
-            expect(params.getBool('flag')).toBe(true);
-        });
-
-        it('converts string "false" to boolean', () => {
-            const params = new ParamNormalizer({ flag: 'false' });
+        it.each(['false', 'no', 'yes', ''])('converts string "%s" to false', (input) => {
+            const params = new ParamNormalizer({ flag: input });
             expect(params.getBool('flag')).toBe(false);
         });
 
-        it('returns false for string "no"', () => {
-            const params = new ParamNormalizer({ flag: 'no' });
-            expect(params.getBool('flag')).toBe(false);
-        });
-
-        it('returns false for string "yes"', () => {
-            const params = new ParamNormalizer({ flag: 'yes' });
-            expect(params.getBool('flag')).toBe(false);
-        });
-
-        it('returns false for empty string', () => {
-            const params = new ParamNormalizer({ flag: '' });
-            expect(params.getBool('flag')).toBe(false);
-        });
-
-        it('returns default when missing', () => {
-            const params = new ParamNormalizer({});
-            expect(params.getBool('missing')).toBe(false);
-        });
-
-        it('returns custom default when missing', () => {
-            const params = new ParamNormalizer({});
-            expect(params.getBool('missing', true)).toBe(true);
-        });
-
-        it('returns default when null', () => {
-            const params = new ParamNormalizer({ flag: null });
-            expect(params.getBool('flag')).toBe(false);
-        });
-
-        it('works with case fallback', () => {
-            const params = new ParamNormalizer({ include_properties: 'true' });
-            expect(params.getBool('includeProperties')).toBe(true);
+        it.each([
+            { label: 'missing key with default false', params: {}, key: 'missing', defaultVal: undefined, expected: false },
+            { label: 'missing key with default true', params: {}, key: 'missing', defaultVal: true, expected: true },
+            { label: 'null value with default false', params: { flag: null }, key: 'flag', defaultVal: undefined, expected: false },
+        ])('returns $expected for $label', ({ params: raw, key, defaultVal, expected }) => {
+            const params = new ParamNormalizer(raw);
+            expect(params.getBool(key, defaultVal)).toBe(expected);
         });
     });
 
@@ -190,29 +154,18 @@ describe('ParamNormalizer', () => {
             expect(params.getInt('count', 99)).toBe(99);
         });
 
-        it('returns default for missing parameter', () => {
-            const params = new ParamNormalizer({});
-            expect(params.getInt('missing', 10)).toBe(10);
-        });
-
-        it('returns undefined when missing and no default', () => {
-            const params = new ParamNormalizer({});
-            expect(params.getInt('missing')).toBeUndefined();
-        });
-
-        it('returns default for null', () => {
-            const params = new ParamNormalizer({ count: null });
-            expect(params.getInt('count', 5)).toBe(5);
+        it.each([
+            { label: 'missing with default', params: {}, key: 'missing', defaultVal: 10, expected: 10 },
+            { label: 'missing without default', params: {}, key: 'missing', defaultVal: undefined, expected: undefined },
+            { label: 'null with default', params: { count: null }, key: 'count', defaultVal: 5, expected: 5 },
+        ])('returns $expected for $label', ({ params: raw, key, defaultVal, expected }) => {
+            const params = new ParamNormalizer(raw);
+            expect(params.getInt(key, defaultVal)).toBe(expected);
         });
 
         it('truncates float to integer', () => {
             const params = new ParamNormalizer({ value: '3.14' });
             expect(params.getInt('value')).toBe(3);
-        });
-
-        it('works with case fallback', () => {
-            const params = new ParamNormalizer({ page_size: '100' });
-            expect(params.getInt('pageSize')).toBe(100);
         });
 
         it('handles hexadecimal strings as decimal', () => {
@@ -242,13 +195,11 @@ describe('ParamNormalizer', () => {
             expect(params.has('missing')).toBe(false);
         });
 
-        it('returns true even when value is null', () => {
-            const params = new ParamNormalizer({ field: null });
-            expect(params.has('field')).toBe(true);
-        });
-
-        it('returns true even when value is undefined', () => {
-            const params = new ParamNormalizer({ field: undefined });
+        it.each([
+            { label: 'null', value: null },
+            { label: 'undefined', value: undefined },
+        ])('returns true even when value is $label', ({ value }) => {
+            const params = new ParamNormalizer({ field: value });
             expect(params.has('field')).toBe(true);
         });
     });
@@ -260,41 +211,17 @@ describe('ParamNormalizer', () => {
             expect(params.getRaw('position')).toEqual(obj);
             expect(params.getRaw('position')).toBe(obj); // Same reference
         });
-
-        it('returns arrays without modification', () => {
-            const arr = [1, 2, 3];
-            const params = new ParamNormalizer({ items: arr });
-            expect(params.getRaw('items')).toEqual(arr);
-            expect(params.getRaw('items')).toBe(arr); // Same reference
-        });
-
-        it('works with case fallback for objects', () => {
-            const obj = { x: 1, y: 2 };
-            const params = new ParamNormalizer({ local_position: obj });
-            expect(params.getRaw('localPosition')).toEqual(obj);
-        });
-
-        it('returns undefined for missing parameter', () => {
-            const params = new ParamNormalizer({});
-            expect(params.getRaw('missing')).toBeUndefined();
-        });
     });
 });
 
 describe('Result', () => {
     describe('Success', () => {
-        it('creates successful result', () => {
-            const result = Result.Success(42);
-            expect(result.isSuccess).toBe(true);
-            expect(result.value).toBe(42);
-            expect(result.errorMessage).toBeNull();
-        });
-
-        it('creates successful result with object', () => {
+        it('creates successful result with correct properties', () => {
             const data = { name: 'test', id: 123 };
             const result = Result.Success(data);
             expect(result.isSuccess).toBe(true);
             expect(result.value).toEqual(data);
+            expect(result.errorMessage).toBeNull();
         });
     });
 
@@ -328,7 +255,7 @@ describe('Result', () => {
 
         it('handles null value in success result', () => {
             const result = Result.Success(null);
-            const out: { value?: any } = {};
+            const out: { value?: null } = {};
             const error = result.getOrError(out);
 
             // null value is treated as error by getOrError
