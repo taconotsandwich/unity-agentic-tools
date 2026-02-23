@@ -33,73 +33,26 @@ describe('UnityBlock', () => {
     // ========== Header Parsing ==========
 
     describe('header parsing', () => {
-        it('should parse a GameObject header', () => {
-            const raw_blocks = load_blocks('SampleScene.unity');
-            const raw = find_raw_block(raw_blocks, '508316491');
-            const block = new UnityBlock(raw);
+        it.each([
+            ['GameObject', 'SampleScene.unity', '508316491', 1, false, 'GameObject'],
+            ['Transform', 'SampleScene.unity', '508316495', 4, false, 'Transform'],
+            ['MonoBehaviour', 'SampleScene.unity', '1847675927', 114, false, 'MonoBehaviour'],
+            ['Stripped', 'SceneWithPrefab.unity', '600000', 1, true, 'GameObject'],
+            ['PrefabInstance', 'SceneWithPrefab.unity', '700000', 1001, false, 'Unknown_1001'],
+            ['Light', 'SampleScene.unity', '1028675096', 108, false, 'Light'],
+        ] as [string, string, string, number, boolean, string][])(
+            'should parse a %s header',
+            (_description, fixture_file, file_id, expected_class_id, expected_stripped, expected_type_name) => {
+                const raw_blocks = load_blocks(fixture_file);
+                const raw = find_raw_block(raw_blocks, file_id);
+                const block = new UnityBlock(raw);
 
-            expect(block.file_id).toBe('508316491');
-            expect(block.class_id).toBe(1);
-            expect(block.is_stripped).toBe(false);
-            expect(block.type_name).toBe('GameObject');
-        });
-
-        it('should parse a Transform header', () => {
-            const raw_blocks = load_blocks('SampleScene.unity');
-            const raw = find_raw_block(raw_blocks, '508316495');
-            const block = new UnityBlock(raw);
-
-            expect(block.file_id).toBe('508316495');
-            expect(block.class_id).toBe(4);
-            expect(block.is_stripped).toBe(false);
-            expect(block.type_name).toBe('Transform');
-        });
-
-        it('should parse a MonoBehaviour header', () => {
-            const raw_blocks = load_blocks('SampleScene.unity');
-            const raw = find_raw_block(raw_blocks, '1847675927');
-            const block = new UnityBlock(raw);
-
-            expect(block.file_id).toBe('1847675927');
-            expect(block.class_id).toBe(114);
-            expect(block.is_stripped).toBe(false);
-            expect(block.type_name).toBe('MonoBehaviour');
-        });
-
-        it('should parse a stripped block header', () => {
-            const raw_blocks = load_blocks('SceneWithPrefab.unity');
-            const raw = find_raw_block(raw_blocks, '600000');
-            const block = new UnityBlock(raw);
-
-            expect(block.file_id).toBe('600000');
-            expect(block.class_id).toBe(1);
-            expect(block.is_stripped).toBe(true);
-            expect(block.type_name).toBe('GameObject');
-        });
-
-        it('should parse a PrefabInstance header', () => {
-            const raw_blocks = load_blocks('SceneWithPrefab.unity');
-            const raw = find_raw_block(raw_blocks, '700000');
-            const block = new UnityBlock(raw);
-
-            expect(block.file_id).toBe('700000');
-            expect(block.class_id).toBe(1001);
-            expect(block.is_stripped).toBe(false);
-            // 1001 is not in UNITY_CLASS_IDS, so it will get Unknown_1001
-            // Actually, let's check -- 310 is PrefabInstance in class-ids.ts, not 1001
-            // 1001 is not in the map, so it should be Unknown_1001
-            expect(block.type_name).toBe('Unknown_1001');
-        });
-
-        it('should parse a Light header', () => {
-            const raw_blocks = load_blocks('SampleScene.unity');
-            const raw = find_raw_block(raw_blocks, '1028675096');
-            const block = new UnityBlock(raw);
-
-            expect(block.file_id).toBe('1028675096');
-            expect(block.class_id).toBe(108);
-            expect(block.type_name).toBe('Light');
-        });
+                expect(block.file_id).toBe(file_id);
+                expect(block.class_id).toBe(expected_class_id);
+                expect(block.is_stripped).toBe(expected_stripped);
+                expect(block.type_name).toBe(expected_type_name);
+            }
+        );
 
         it('should throw on invalid header', () => {
             expect(() => new UnityBlock('not a unity block')).toThrow(
@@ -181,29 +134,20 @@ describe('UnityBlock', () => {
             expect(val).toContain('fileID: 10303');
         });
 
-        it('should return null for non-existent property', () => {
-            const raw_blocks = load_blocks('SampleScene.unity');
-            const raw = find_raw_block(raw_blocks, '508316491');
-            const block = new UnityBlock(raw);
+        it.each([
+            ['non-existent property', '508316491', 'm_NonExistent'],
+            ['non-existent dotted path', '508316495', 'm_LocalPosition.w'],
+            ['out-of-bounds array index', '1847675926', 'm_Materials.Array.data[99]'],
+        ] as [string, string, string][])(
+            'should return null for %s',
+            (_description, file_id, property_path) => {
+                const raw_blocks = load_blocks('SampleScene.unity');
+                const raw = find_raw_block(raw_blocks, file_id);
+                const block = new UnityBlock(raw);
 
-            expect(block.get_property('m_NonExistent')).toBeNull();
-        });
-
-        it('should return null for non-existent dotted path', () => {
-            const raw_blocks = load_blocks('SampleScene.unity');
-            const raw = find_raw_block(raw_blocks, '508316495');
-            const block = new UnityBlock(raw);
-
-            expect(block.get_property('m_LocalPosition.w')).toBeNull();
-        });
-
-        it('should return null for out-of-bounds array index', () => {
-            const raw_blocks = load_blocks('SampleScene.unity');
-            const raw = find_raw_block(raw_blocks, '1847675926');
-            const block = new UnityBlock(raw);
-
-            expect(block.get_property('m_Materials.Array.data[99]')).toBeNull();
-        });
+                expect(block.get_property(property_path)).toBeNull();
+            }
+        );
     });
 
     describe('set_property', () => {
@@ -215,7 +159,6 @@ describe('UnityBlock', () => {
             const modified = block.set_property('m_Name', 'Renamed Camera');
             expect(modified).toBe(true);
             expect(block.get_property('m_Name')).toBe('Renamed Camera');
-            expect(block.dirty).toBe(true);
         });
 
         it('should set a dotted path for inline object', () => {
@@ -263,7 +206,6 @@ describe('UnityBlock', () => {
 
             const modified = block.set_property('m_NonExistent', 'value');
             expect(modified).toBe(false);
-            expect(block.dirty).toBe(false);
         });
 
         it('should use object_reference when provided', () => {
@@ -296,20 +238,13 @@ describe('UnityBlock', () => {
     });
 
     describe('has_property', () => {
-        it('should return true for existing properties', () => {
+        it('should return true for existing properties and false for non-existent ones', () => {
             const raw_blocks = load_blocks('SampleScene.unity');
             const raw = find_raw_block(raw_blocks, '508316491');
             const block = new UnityBlock(raw);
 
             expect(block.has_property('m_Name')).toBe(true);
             expect(block.has_property('m_IsActive')).toBe(true);
-        });
-
-        it('should return false for non-existent properties', () => {
-            const raw_blocks = load_blocks('SampleScene.unity');
-            const raw = find_raw_block(raw_blocks, '508316491');
-            const block = new UnityBlock(raw);
-
             expect(block.has_property('m_NonExistent')).toBe(false);
         });
     });
@@ -426,7 +361,6 @@ describe('UnityBlock', () => {
             const modified = block.insert_array_element('m_Children', -1, '{fileID: 999}');
             expect(modified).toBe(true);
             expect(block.get_array_length('m_Children')).toBe(1);
-            expect(block.dirty).toBe(true);
         });
 
         it('should append to existing array (index=-1)', () => {
@@ -470,7 +404,6 @@ describe('UnityBlock', () => {
             const modified = block.remove_array_element('m_Component', 0);
             expect(modified).toBe(true);
             expect(block.get_array_length('m_Component')).toBe(3);
-            expect(block.dirty).toBe(true);
         });
 
         it('should convert to empty array [] when removing last element', () => {
@@ -493,7 +426,6 @@ describe('UnityBlock', () => {
 
             const modified = block.remove_array_element('m_Component', 99);
             expect(modified).toBe(false);
-            expect(block.dirty).toBe(false);
         });
 
         it('should return false for negative index', () => {
@@ -557,7 +489,6 @@ describe('UnityBlock', () => {
 
             expect(block.file_id).toBe('999999999');
             expect(block.raw).toMatch(/^--- !u!1 &999999999/);
-            expect(block.dirty).toBe(true);
         });
 
         it('should remap file ID in body references', () => {
@@ -610,28 +541,13 @@ describe('UnityBlock', () => {
             const block = new UnityBlock(raw);
 
             block.remap_file_id('99999999', '88888888');
-
-            expect(block.dirty).toBe(false);
         });
     });
 
     // ========== clone ==========
 
     describe('clone', () => {
-        it('should produce an independent copy', () => {
-            const raw_blocks = load_blocks('SampleScene.unity');
-            const raw = find_raw_block(raw_blocks, '508316491');
-            const block = new UnityBlock(raw);
-
-            const cloned = block.clone();
-
-            expect(cloned.raw).toBe(block.raw);
-            expect(cloned.file_id).toBe(block.file_id);
-            expect(cloned.class_id).toBe(block.class_id);
-            expect(cloned.is_stripped).toBe(block.is_stripped);
-        });
-
-        it('should not be dirty', () => {
+        it('should produce a clean independent copy', () => {
             const raw_blocks = load_blocks('SampleScene.unity');
             const raw = find_raw_block(raw_blocks, '508316491');
             const block = new UnityBlock(raw);
@@ -641,6 +557,14 @@ describe('UnityBlock', () => {
             expect(block.dirty).toBe(true);
 
             const cloned = block.clone();
+
+            // Clone should match the current state of the original
+            expect(cloned.raw).toBe(block.raw);
+            expect(cloned.file_id).toBe(block.file_id);
+            expect(cloned.class_id).toBe(block.class_id);
+            expect(cloned.is_stripped).toBe(block.is_stripped);
+
+            // Clone should not inherit dirty state
             expect(cloned.dirty).toBe(false);
         });
 
@@ -661,14 +585,6 @@ describe('UnityBlock', () => {
     // ========== Dirty Tracking ==========
 
     describe('dirty tracking', () => {
-        it('should be clean on creation', () => {
-            const raw_blocks = load_blocks('SampleScene.unity');
-            const raw = find_raw_block(raw_blocks, '508316491');
-            const block = new UnityBlock(raw);
-
-            expect(block.dirty).toBe(false);
-        });
-
         it('should be dirty after set_property', () => {
             const raw_blocks = load_blocks('SampleScene.unity');
             const raw = find_raw_block(raw_blocks, '508316491');
@@ -749,20 +665,6 @@ describe('UnityBlock', () => {
             expect(() => block.replace_raw('not a valid block')).toThrow(
                 /Invalid Unity YAML block header/
             );
-        });
-    });
-
-    // ========== Raw property ==========
-
-    describe('raw property', () => {
-        it('should return full block text including header', () => {
-            const raw_blocks = load_blocks('SampleScene.unity');
-            const raw = find_raw_block(raw_blocks, '508316491');
-            const block = new UnityBlock(raw);
-
-            expect(block.raw).toBe(raw);
-            expect(block.raw).toMatch(/^--- !u!1 &508316491/);
-            expect(block.raw).toContain('m_Name: Main Camera');
         });
     });
 

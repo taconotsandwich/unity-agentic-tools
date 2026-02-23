@@ -16,6 +16,7 @@ export function build_delete_command(): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('component <file> <file_id>')
@@ -28,6 +29,7 @@ export function build_delete_command(): Command {
             });
 
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('build <project_path> <scene_path>')
@@ -37,8 +39,10 @@ export function build_delete_command(): Command {
             try {
                 const result = remove_scene(project_path, scene_path);
                 console.log(JSON.stringify(result, null, 2));
+                if (!result.success) process.exitCode = 1;
             } catch (err) {
                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+                process.exitCode = 1;
             }
         });
 
@@ -51,6 +55,7 @@ export function build_delete_command(): Command {
                 prefab_instance,
             });
             console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
         });
 
     return cmd;

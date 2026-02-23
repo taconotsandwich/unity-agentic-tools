@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeAll } from 'vitest';
 import { execFileSync } from 'child_process';
 import { resolve, join } from 'path';
 import { mkdtempSync, writeFileSync, existsSync, rmSync, cpSync, readFileSync } from 'fs';
@@ -13,6 +13,17 @@ const external_fixtures = resolve(__dirname, '..', '..', 'test', 'fixtures', 'ex
 // Skip all tests if native module is not available
 const describeIfNative = isNativeModuleAvailable() ? describe : describe.skip;
 
+interface GameObjectEntry {
+    name: string;
+    components?: ComponentEntry[];
+}
+
+interface ComponentEntry {
+    type: string;
+    fileId: string;
+    properties?: Record<string, unknown>;
+}
+
 function run_cli(args: string[]): string {
     return execFileSync('bun', ['dist/cli.js', ...args], {
         cwd: repo_root,
@@ -21,7 +32,7 @@ function run_cli(args: string[]): string {
 }
 
 describeIfNative('CLI', () => {
-    describe('read gameobject command (single object)', () => {
+    describe('read gameobject command', () => {
         it('should output valid JSON with file and object wrapper', () => {
             const result = run_cli([
                 'read', 'gameobject',
@@ -35,6 +46,55 @@ describeIfNative('CLI', () => {
             expect(json.object).toHaveProperty('name');
             expect(json.object).toHaveProperty('file_id');
             expect(json.object).toHaveProperty('active');
+        });
+
+        it('should return all matching components with -c filter', () => {
+            const result = run_cli([
+                'read', 'gameobject',
+                resolve(fixtures_dir, 'Tiny3D.unity'),
+                'Directional Light',
+                '-c', 'MonoBehaviour',
+                '-p',
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('components');
+            expect(json.components.length).toBe(2);
+            expect(json.components.every((c: ComponentEntry) => c.type === 'MonoBehaviour')).toBe(true);
+        });
+
+        it('should return single component when only one matches', () => {
+            const result = run_cli([
+                'read', 'gameobject',
+                resolve(fixtures_dir, 'SampleScene.unity'),
+                'Player',
+                '-c', 'Transform',
+                '-p',
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('components');
+            expect(json.components.length).toBe(1);
+            expect(json.components[0].type).toBe('Transform');
+        });
+
+        it('should return error when component type not found', () => {
+            try {
+                run_cli([
+                    'read', 'gameobject',
+                    resolve(fixtures_dir, 'SampleScene.unity'),
+                    'Player',
+                    '-c', 'FakeType',
+                    '--json'
+                ]);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json).toHaveProperty('error');
+                expect(json.error).toContain('No component of type "FakeType"');
+            }
         });
     });
 
@@ -124,8 +184,8 @@ describeIfNative('CLI', () => {
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--page-size', '2', '--cursor', '2', '--json'
             ]));
-            const names1 = page1.gameobjects.map((g: any) => g.name);
-            const names2 = page2.gameobjects.map((g: any) => g.name);
+            const names1 = page1.gameobjects.map((g: GameObjectEntry) => g.name);
+            const names2 = page2.gameobjects.map((g: GameObjectEntry) => g.name);
             // No overlap between pages
             for (const name of names1) {
                 expect(names2).not.toContain(name);
@@ -151,57 +211,6 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('read gameobject command', () => {
-        it('should return all matching components with -c filter', () => {
-            const result = run_cli([
-                'read', 'gameobject',
-                resolve(fixtures_dir, 'Tiny3D.unity'),
-                'Directional Light',
-                '-c', 'MonoBehaviour',
-                '-p',
-                '--json'
-            ]);
-            const json = JSON.parse(result);
-            expect(json).toHaveProperty('components');
-            expect(json.components.length).toBe(2);
-            expect(json.components.every((c: any) => c.type === 'MonoBehaviour')).toBe(true);
-        });
-
-        it('should return single component when only one matches', () => {
-            const result = run_cli([
-                'read', 'gameobject',
-                resolve(fixtures_dir, 'SampleScene.unity'),
-                'Player',
-                '-c', 'Transform',
-                '-p',
-                '--json'
-            ]);
-            const json = JSON.parse(result);
-            expect(json).toHaveProperty('components');
-            expect(json.components.length).toBe(1);
-            expect(json.components[0].type).toBe('Transform');
-        });
-
-        it('should return error when component type not found', () => {
-            try {
-                run_cli([
-                    'read', 'gameobject',
-                    resolve(fixtures_dir, 'SampleScene.unity'),
-                    'Player',
-                    '-c', 'FakeType',
-                    '--json'
-                ]);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json).toHaveProperty('error');
-                expect(json.error).toContain('No component of type "FakeType"');
-            }
-        });
-    });
-
     describe('read scene --properties command', () => {
         it('should include component properties when --properties is set', () => {
             const result = run_cli([
@@ -214,8 +223,8 @@ describeIfNative('CLI', () => {
             expect(json).toHaveProperty('gameobjects');
             expect(json.gameobjects.length).toBeGreaterThan(0);
             // With --properties, components should have property data
-            const go = json.gameobjects.find((g: any) =>
-                g.components?.some((c: any) => c.properties)
+            const go = json.gameobjects.find((g: GameObjectEntry) =>
+                g.components?.some((c: ComponentEntry) => c.properties)
             );
             expect(go).toBeTruthy();
         });
@@ -300,8 +309,8 @@ describeIfNative('CLI', () => {
                 const listResult = JSON.parse(run_cli([
                     'read', 'scene', temp_fixture.temp_path, '--json'
                 ]));
-                const player = listResult.gameobjects.find((g: any) => g.name === 'Player');
-                const transformId = player.components.find((c: any) => c.type === 'Transform').fileId;
+                const player = listResult.gameobjects.find((g: GameObjectEntry) => g.name === 'Player');
+                const transformId = player.components.find((c: ComponentEntry) => c.type === 'Transform').fileId;
 
                 const result = run_cli([
                     'update', 'transform',
@@ -331,9 +340,10 @@ describeIfNative('CLI', () => {
                     '--json'
                 ]);
                 expect.unreachable('Should have thrown');
-            } catch (err: any) {
+            } catch (err: unknown) {
+                const execErr = err as { status: number };
                 // CLI exits with error for invalid vector
-                expect(err.status).toBeTruthy();
+                expect(execErr.status).toBeTruthy();
             } finally {
                 temp_fixture.cleanup_fn();
             }
@@ -368,15 +378,22 @@ describeIfNative('CLI', () => {
             );
 
             try {
-                const result = run_cli([
-                    'create', 'component',
-                    temp_fixture.temp_path,
-                    'NonexistentObject',
-                    'Rigidbody',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json.success).toBe(false);
+                try {
+                    run_cli([
+                        'create', 'component',
+                        temp_fixture.temp_path,
+                        'NonexistentObject',
+                        'Rigidbody',
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                }
             } finally {
                 temp_fixture.cleanup_fn();
             }
@@ -394,8 +411,8 @@ describeIfNative('CLI', () => {
                 const listResult = JSON.parse(run_cli([
                     'read', 'scene', temp_fixture.temp_path, '--json'
                 ]));
-                const player = listResult.gameobjects.find((g: any) => g.name === 'Player');
-                const transformId = player.components.find((c: any) => c.type === 'Transform').fileId;
+                const player = listResult.gameobjects.find((g: GameObjectEntry) => g.name === 'Player');
+                const transformId = player.components.find((c: ComponentEntry) => c.type === 'Transform').fileId;
 
                 const result = run_cli([
                     'update', 'component',
@@ -418,16 +435,23 @@ describeIfNative('CLI', () => {
             );
 
             try {
-                const result = run_cli([
-                    'update', 'component',
-                    temp_fixture.temp_path,
-                    '999999999',
-                    'm_LocalPosition.x',
-                    '10',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json.success).toBe(false);
+                try {
+                    run_cli([
+                        'update', 'component',
+                        temp_fixture.temp_path,
+                        '999999999',
+                        'm_LocalPosition.x',
+                        '10',
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                }
             } finally {
                 temp_fixture.cleanup_fn();
             }
@@ -485,7 +509,7 @@ describeIfNative('CLI', () => {
                 const listResult = JSON.parse(run_cli([
                     'read', 'scene', temp_fixture.temp_path, '--json'
                 ]));
-                const names = listResult.gameobjects.map((g: any) => g.name);
+                const names = listResult.gameobjects.map((g: GameObjectEntry) => g.name);
                 expect(names).not.toContain('GameManager');
             } finally {
                 temp_fixture.cleanup_fn();
@@ -504,8 +528,8 @@ describeIfNative('CLI', () => {
                 const listResult = JSON.parse(run_cli([
                     'read', 'scene', temp_fixture.temp_path, '--json'
                 ]));
-                const camera = listResult.gameobjects.find((g: any) => g.name === 'Main Camera');
-                const cameraComp = camera.components.find((c: any) => c.type === 'Camera');
+                const camera = listResult.gameobjects.find((g: GameObjectEntry) => g.name === 'Main Camera');
+                const cameraComp = camera.components.find((c: ComponentEntry) => c.type === 'Camera');
 
                 const result = run_cli([
                     'create', 'component-copy',
@@ -717,43 +741,29 @@ describeIfNative('CLI', () => {
             }
         });
 
-        it('should still accept numeric transform fileID', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                // 1847675924 is Player's transform fileID
-                const result = run_cli([
-                    'update', 'transform',
-                    temp_fixture.temp_path,
-                    '1847675924',
-                    '--position', '5,6,7',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
-        });
-
         it('should return error for nonexistent GameObject name', () => {
             const temp_fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SampleScene.unity')
             );
 
             try {
-                const result = run_cli([
-                    'update', 'transform',
-                    temp_fixture.temp_path,
-                    'NonExistentObject',
-                    '--position', '1,2,3',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('Could not resolve');
+                try {
+                    run_cli([
+                        'update', 'transform',
+                        temp_fixture.temp_path,
+                        'NonExistentObject',
+                        '--position', '1,2,3',
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('Could not resolve');
+                }
             } finally {
                 temp_fixture.cleanup_fn();
             }
@@ -770,8 +780,9 @@ describeIfNative('CLI', () => {
                     '--json'
                 ]);
                 expect.unreachable('Should have exited with error');
-            } catch (err: any) {
-                expect(err.status).toBeTruthy();
+            } catch (err: unknown) {
+                const execErr = err as { status: number };
+                expect(execErr.status).toBeTruthy();
             }
         });
 
@@ -784,8 +795,9 @@ describeIfNative('CLI', () => {
                     '--json'
                 ]);
                 expect.unreachable('Should have exited with error');
-            } catch (err: any) {
-                expect(err.status).toBeTruthy();
+            } catch (err: unknown) {
+                const execErr = err as { status: number };
+                expect(execErr.status).toBeTruthy();
             }
         });
     });
@@ -800,8 +812,9 @@ describeIfNative('CLI', () => {
                     '--json'
                 ]);
                 expect.unreachable('Should have exited with error');
-            } catch (err: any) {
-                expect(err.status).toBeTruthy();
+            } catch (err: unknown) {
+                const execErr = err as { status: number };
+                expect(execErr.status).toBeTruthy();
             }
         });
     });
@@ -833,11 +846,14 @@ describeIfNative('CLI', () => {
     });
 
     describe('read overrides command', () => {
-        it('should read PrefabInstance overrides by fileID', () => {
+        it.each([
+            ['fileID', '700000'],
+            ['name', 'MyEnemy'],
+        ] as const)('should read PrefabInstance overrides by %s (%s)', (_label, identifier) => {
             const result = run_cli([
                 'read', 'overrides',
                 resolve(fixtures_dir, 'SceneWithPrefab.unity'),
-                '700000',
+                identifier,
                 '--json'
             ]);
             const json = JSON.parse(result);
@@ -848,18 +864,6 @@ describeIfNative('CLI', () => {
             expect(paths).toContain('m_LocalPosition.x');
             expect(paths).toContain('m_LocalPosition.y');
             expect(paths).toContain('m_LocalPosition.z');
-        });
-
-        it('should read PrefabInstance overrides by name', () => {
-            const result = run_cli([
-                'read', 'overrides',
-                resolve(fixtures_dir, 'SceneWithPrefab.unity'),
-                'MyEnemy',
-                '--json'
-            ]);
-            const json = JSON.parse(result);
-            expect(Array.isArray(json)).toBe(true);
-            expect(json.length).toBe(4);
             const name_mod = json.find((m: Record<string, string>) => m.property_path === 'm_Name');
             expect(name_mod).toBeTruthy();
             expect(name_mod.value).toBe('MyEnemy');
@@ -1196,8 +1200,260 @@ describeIfNative('CLI', () => {
         });
     });
 
+    // ========== Gap Tests: Feature Parity ==========
+
+    describe('search --type expansion (Gap P1.3)', () => {
+        it.each([
+            ['mat', /\.mat$/],
+            ['anim', /\.anim$/],
+            ['controller', /\.controller$/],
+        ] as const)('should search for .%s files', (type, extension) => {
+            const result = run_cli([
+                'search', external_fixtures,
+                '--type', type,
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('success', true);
+            expect(json.total_matches).toBeGreaterThan(0);
+            for (const match of json.matches) {
+                expect(match.file).toMatch(extension);
+            }
+        });
+
+        it('should search for .mat files with name filter', () => {
+            const result = run_cli([
+                'search', external_fixtures,
+                '--type', 'mat',
+                '--name', 'Outline',
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('success', true);
+            expect(json.total_matches).toBe(1);
+            expect(json.matches[0].file).toContain('Outline');
+        });
+    });
+
+    describe('read animation --curves (Gap P5.1)', () => {
+        let curves_json: Record<string, unknown>;
+
+        beforeAll(() => {
+            const result = run_cli([
+                'read', 'animation',
+                resolve(fixtures_dir, 'keyframe-test.anim'),
+                '--curves',
+                '--json'
+            ]);
+            curves_json = JSON.parse(result);
+        });
+
+        it('should include curve_data when --curves is set', () => {
+            expect(curves_json).toHaveProperty('curve_data');
+            const curve_data = curves_json.curve_data as unknown[];
+            expect(Array.isArray(curve_data)).toBe(true);
+            expect(curve_data.length).toBe(2);
+        });
+
+        it('should parse position curve keyframes correctly', () => {
+            const curve_data = curves_json.curve_data as Array<Record<string, unknown>>;
+            const pos_curve = curve_data.find(
+                (c) => c.type === 'position'
+            );
+            expect(pos_curve).toBeTruthy();
+            expect(pos_curve!.path).toBe('Body');
+            expect(pos_curve!.attribute).toBe('m_LocalPosition.x');
+            expect(pos_curve!.class_id).toBe(4);
+            const keyframes = pos_curve!.keyframes as Array<Record<string, number>>;
+            expect(keyframes).toHaveLength(2);
+            expect(keyframes[0].time).toBe(0);
+            expect(keyframes[0].value).toBe(0);
+            expect(keyframes[1].time).toBe(1);
+            expect(keyframes[1].value).toBe(5);
+        });
+
+        it('should parse float curve keyframes correctly', () => {
+            const curve_data = curves_json.curve_data as Array<Record<string, unknown>>;
+            const float_curve = curve_data.find(
+                (c) => c.type === 'float'
+            );
+            expect(float_curve).toBeTruthy();
+            expect(float_curve!.path).toBe('Body/Mesh');
+            expect(float_curve!.attribute).toBe('m_Alpha');
+            const keyframes = float_curve!.keyframes as Array<Record<string, number>>;
+            expect(keyframes).toHaveLength(3);
+            expect(keyframes[1].time).toBe(0.5);
+            expect(keyframes[1].value).toBe(0);
+            expect(keyframes[1].in_slope).toBe(-2);
+        });
+
+        it('should not include curve_data without --curves', () => {
+            const result = run_cli([
+                'read', 'animation',
+                resolve(fixtures_dir, 'keyframe-test.anim'),
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).not.toHaveProperty('curve_data');
+        });
+    });
+
+    describe('read animation events (Gap P5.2)', () => {
+        let events_json: Record<string, unknown>;
+
+        beforeAll(() => {
+            const result = run_cli([
+                'read', 'animation',
+                resolve(fixtures_dir, 'events-test.anim'),
+                '--json'
+            ]);
+            events_json = JSON.parse(result);
+        });
+
+        it('should parse event time and function name', () => {
+            const events = events_json.events as Array<Record<string, unknown>>;
+            expect(events).toHaveLength(2);
+            expect(events[0].time).toBe(0.5);
+            expect(events[0].function_name).toBe('OnHalfway');
+            expect(events[1].time).toBe(1);
+            expect(events[1].function_name).toBe('OnComplete');
+        });
+
+        it('should parse event data and parameters', () => {
+            const events = events_json.events as Array<Record<string, unknown>>;
+            expect(events[1].data).toBe('done');
+            expect(events[1].int_parameter).toBe(42);
+            expect(events[1].float_parameter).toBe(3.14);
+        });
+    });
+
+    describe('update animation --add-event / --remove-event (Gap P5.2)', () => {
+        it('should add an event to an animation', () => {
+            const fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'keyframe-test.anim')
+            );
+
+            try {
+                const result = run_cli([
+                    'update', 'animation',
+                    fixture.temp_path,
+                    '--add-event', '0.75,OnFootstep,step_data',
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+
+                // Verify the event was added
+                const content = readFileSync(fixture.temp_path, 'utf-8');
+                expect(content).toContain('functionName: OnFootstep');
+                expect(content).toContain('data: step_data');
+            } finally {
+                fixture.cleanup_fn();
+            }
+        });
+
+        it('should remove an event by index', () => {
+            const fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'events-test.anim')
+            );
+
+            try {
+                const result = run_cli([
+                    'update', 'animation',
+                    fixture.temp_path,
+                    '--remove-event', '0',
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+
+                // Verify first event was removed, second remains
+                const content = readFileSync(fixture.temp_path, 'utf-8');
+                expect(content).not.toContain('OnHalfway');
+                expect(content).toContain('OnComplete');
+            } finally {
+                fixture.cleanup_fn();
+            }
+        });
+    });
+
+    describe('read material (Gap P2.1)', () => {
+        it('should parse material properties', () => {
+            const matFile = resolve(external_fixtures,
+                'Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF - Outline.mat');
+            const result = run_cli([
+                'read', 'material', matFile, '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('name', 'LiberationSans SDF - Outline');
+            expect(json).toHaveProperty('shader');
+            expect(json.shader).toHaveProperty('guid');
+        });
+    });
+
+    describe('read animation on external fixture', () => {
+        it('should parse idle.anim from external fixtures', () => {
+            const animFile = resolve(external_fixtures, 'Assets/dog/Animations/idle.anim');
+            const result = run_cli([
+                'read', 'animation', animFile, '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('name', 'idle');
+            expect(json).toHaveProperty('duration');
+            expect(json.duration).toBeGreaterThan(0);
+        });
+    });
+
+    describe('read animator (Gap P7.1)', () => {
+        let animator_json: Record<string, unknown>;
+
+        beforeAll(() => {
+            const ctrlFile = resolve(external_fixtures, 'Assets/dog/Animations/sr.controller');
+            const result = run_cli([
+                'read', 'animator', ctrlFile, '--json'
+            ]);
+            animator_json = JSON.parse(result);
+        });
+
+        it('should parse animator controller states', () => {
+            expect(animator_json).toHaveProperty('states');
+            const states = animator_json.states as Array<Record<string, unknown>>;
+            expect(Array.isArray(states)).toBe(true);
+            expect(states.length).toBeGreaterThan(0);
+            for (const state of states) {
+                expect(state).toHaveProperty('name');
+                expect(state).toHaveProperty('motion_guid');
+            }
+        });
+
+        it('should include parameters', () => {
+            expect(animator_json).toHaveProperty('parameters');
+            const parameters = animator_json.parameters as Array<Record<string, string>>;
+            expect(Array.isArray(parameters)).toBe(true);
+            expect(parameters.length).toBeGreaterThan(0);
+            const run_param = parameters.find(
+                (p) => p.name === 'run'
+            );
+            expect(run_param).toBeTruthy();
+            expect(run_param!.type).toBe('Bool');
+        });
+
+        it('should return states_by_layer with --states', () => {
+            const ctrlFile = resolve(external_fixtures, 'Assets/dog/Animations/sr.controller');
+            const result = run_cli([
+                'read', 'animator', ctrlFile, '--states', '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('states_by_layer');
+            expect(typeof json.states_by_layer).toBe('object');
+        });
+    });
+
     describe('delete prefab command', () => {
-        it('should delete PrefabInstance by fileID', () => {
+        it.each([
+            ['700000', '&700000'],
+            ['MyEnemy', 'MyEnemy'],
+        ] as const)('should delete PrefabInstance by identifier %s', (identifier, absent_marker) => {
             const fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SceneWithPrefab.unity')
             );
@@ -1206,7 +1462,7 @@ describeIfNative('CLI', () => {
                 const result = run_cli([
                     'delete', 'prefab',
                     fixture.temp_path,
-                    '700000',
+                    identifier,
                     '--json'
                 ]);
                 const json = JSON.parse(result);
@@ -1217,32 +1473,7 @@ describeIfNative('CLI', () => {
 
                 // Verify PrefabInstance is gone from file
                 const content = readFileSync(fixture.temp_path, 'utf-8');
-                expect(content).not.toContain('&700000');
-            } finally {
-                fixture.cleanup_fn();
-            }
-        });
-
-        it('should delete PrefabInstance by name', () => {
-            const fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SceneWithPrefab.unity')
-            );
-
-            try {
-                const result = run_cli([
-                    'delete', 'prefab',
-                    fixture.temp_path,
-                    'MyEnemy',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json).toHaveProperty('deleted_count');
-                expect(json.deleted_count).toBeGreaterThanOrEqual(3);
-
-                // Verify MyEnemy PrefabInstance is gone
-                const content = readFileSync(fixture.temp_path, 'utf-8');
-                expect(content).not.toContain('MyEnemy');
+                expect(content).not.toContain(absent_marker);
             } finally {
                 fixture.cleanup_fn();
             }

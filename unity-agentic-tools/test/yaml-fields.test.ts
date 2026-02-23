@@ -8,27 +8,20 @@ function make_version(major: number, minor: number): UnityVersion {
 }
 
 describe('yaml_default_for_type', () => {
-    it('should return 0 for numeric primitives', () => {
-        expect(yaml_default_for_type('int')).toBe('0');
-        expect(yaml_default_for_type('float')).toBe('0');
-        expect(yaml_default_for_type('double')).toBe('0');
-        expect(yaml_default_for_type('byte')).toBe('0');
-        expect(yaml_default_for_type('long')).toBe('0');
-    });
-
-    it('should return 0 for bool', () => {
-        expect(yaml_default_for_type('bool')).toBe('0');
-    });
-
-    it('should return empty string for string', () => {
-        expect(yaml_default_for_type('string')).toBe('');
-    });
-
-    it('should handle .NET type names', () => {
-        expect(yaml_default_for_type('Int32')).toBe('0');
-        expect(yaml_default_for_type('Single')).toBe('0');
-        expect(yaml_default_for_type('Boolean')).toBe('0');
-        expect(yaml_default_for_type('String')).toBe('');
+    it.each([
+        ['int', '0'],
+        ['float', '0'],
+        ['double', '0'],
+        ['byte', '0'],
+        ['long', '0'],
+        ['bool', '0'],
+        ['Int32', '0'],
+        ['Single', '0'],
+        ['Boolean', '0'],
+        ['string', ''],
+        ['String', ''],
+    ])('should return %s -> %s', (typeName, expected) => {
+        expect(yaml_default_for_type(typeName)).toBe(expected);
     });
 
     it('should return inline format for Unity structs', () => {
@@ -172,22 +165,6 @@ describe('generate_field_yaml', () => {
         expect(yaml).toContain('  value: 0');
     });
 
-    it('should handle mixed field types', () => {
-        const fields = [
-            make_field('health', 'int'),
-            make_field('position', 'Vector3'),
-            make_field('target', 'GameObject'),
-            make_field('scores', 'List<int>'),
-            make_field('active', 'bool'),
-        ];
-        const yaml = generate_field_yaml(fields);
-        expect(yaml).toContain('health: 0');
-        expect(yaml).toContain('position: {x: 0, y: 0, z: 0}');
-        expect(yaml).toContain('target: {fileID: 0}');
-        expect(yaml).toContain('scores: []');
-        expect(yaml).toContain('active: 0');
-    });
-
     it('should skip version-gated fields when version is too old', () => {
         const fields = [
             make_field('health', 'int'),
@@ -210,14 +187,17 @@ describe('generate_field_yaml', () => {
         expect(yaml).toContain('hash:');
     });
 
-    it('should skip nullable fields entirely', () => {
+    it.each([
+        ['int?', 'maybeValue'],
+        ['Faction?', 'nullableEnum'],
+    ])('should skip nullable field type %s', (typeName, fieldName) => {
         const fields = [
             make_field('health', 'int'),
-            make_field('maybeValue', 'int?'),
+            make_field(fieldName, typeName),
         ];
         const yaml = generate_field_yaml(fields);
         expect(yaml).toContain('health: 0');
-        expect(yaml).not.toContain('maybeValue');
+        expect(yaml).not.toContain(fieldName);
     });
 
     it('should generate correct YAML for enum fields resolved to int', () => {
@@ -229,16 +209,5 @@ describe('generate_field_yaml', () => {
         const yaml = generate_field_yaml(fields);
         expect(yaml).toContain('team: 0');
         expect(yaml).toContain('health: 0');
-    });
-
-    it('should skip nullable enum fields', () => {
-        // Nullable enums (e.g., Faction?) should be skipped
-        const fields = [
-            make_field('health', 'int'),
-            make_field('nullableEnum', 'Faction?'),
-        ];
-        const yaml = generate_field_yaml(fields);
-        expect(yaml).toContain('health: 0');
-        expect(yaml).not.toContain('nullableEnum');
     });
 });

@@ -523,7 +523,7 @@ export interface ProjectSearchOptions {
   component?: string;
   tag?: string;
   layer?: number;
-  file_type?: 'scene' | 'prefab' | 'all';
+  file_type?: 'scene' | 'prefab' | 'mat' | 'anim' | 'controller' | 'asset' | 'all';
   max_matches?: number;
 }
 

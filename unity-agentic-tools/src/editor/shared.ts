@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from 'fs';
 import * as path from 'path';
+import { load_guid_cache } from '../guid-cache';
 
 /**
  * Extract all existing file IDs from a Unity YAML file.
@@ -686,36 +687,10 @@ export function resolveScriptGuid(
 
   // Try to find in GUID cache by name
   if (projectPath) {
-    const cachePath = path.join(projectPath, '.unity-agentic', 'guid-cache.json');
-    if (existsSync(cachePath)) {
-      try {
-        const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
-        const scriptNameLower = script.toLowerCase().replace(/\.cs$/, '');
-
-        // Two-pass search: exact filename first, then substring fallback
-        let substringMatch: { guid: string; path: string } | null = null;
-
-        for (const [guid, assetPath] of Object.entries(cache)) {
-          if (!assetPath.endsWith('.cs')) continue;
-
-          const fileName = path.basename(assetPath, '.cs').toLowerCase();
-
-          // Exact filename match -- return immediately
-          if (fileName === scriptNameLower) {
-            return { guid, path: assetPath };
-          }
-          // Track first substring match as fallback
-          if (!substringMatch && assetPath.toLowerCase().includes(scriptNameLower)) {
-            substringMatch = { guid, path: assetPath };
-          }
-        }
-
-        if (substringMatch) {
-          return substringMatch;
-        }
-      } catch {
-        // Cache read failed
-      }
+    const guidCache = load_guid_cache(projectPath);
+    if (guidCache) {
+      const result = guidCache.find_by_name(script, '.cs');
+      if (result) return result;
     }
 
     // Strategy 4: Type registry lookup by class name
@@ -726,7 +701,7 @@ export function resolveScriptGuid(
           name: string;
           kind: string;
           namespace: string | null;
-          file_path: string;
+          filePath: string;
           guid: string | null;
         }>;
 
@@ -747,13 +722,13 @@ export function resolveScriptGuid(
         });
 
         if (matches.length === 1 && matches[0].guid) {
-          return { guid: matches[0].guid, path: matches[0].file_path };
+          return { guid: matches[0].guid, path: matches[0].filePath };
         }
         if (matches.length > 1) {
           // Multiple matches: prefer the one with a GUID
           const withGuid = matches.filter(m => m.guid);
           if (withGuid.length === 1) {
-            return { guid: withGuid[0].guid!, path: withGuid[0].file_path };
+            return { guid: withGuid[0].guid!, path: withGuid[0].filePath };
           }
         }
       } catch {

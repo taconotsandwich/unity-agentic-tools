@@ -117,10 +117,13 @@ function walk_project_files_js(
         }
     }
 
-    // Walk from Assets/ if it exists, otherwise from project root
+    // Walk from Assets/ if it exists, otherwise walk project_path directly
+    // (handles both project-root paths and subdirectory paths like Assets/Subdir/)
     const assetsDir = path.join(project_path, 'Assets');
     if (existsSync(assetsDir)) {
         walk(assetsDir);
+    } else {
+        walk(project_path);
     }
 
     // Also check ProjectSettings/ for .asset files
@@ -188,6 +191,67 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
         };
     }
 
+    // Extension map for asset file types (non-scene/prefab)
+    const ASSET_TYPE_EXTENSIONS: Record<string, string[]> = {
+        mat: ['.mat'],
+        anim: ['.anim'],
+        controller: ['.controller'],
+        asset: ['.asset'],
+    };
+
+    // For asset types (mat, anim, controller, asset), use simple file walk + name matching
+    const isAssetType = file_type in ASSET_TYPE_EXTENSIONS;
+    if (isAssetType) {
+        const extensions = ASSET_TYPE_EXTENSIONS[file_type];
+        const files = walk_project_files(project_path, extensions);
+        const matches: ProjectSearchMatch[] = [];
+
+        for (const file of files) {
+            const relPath = path.relative(project_path, file);
+            const fileName = path.basename(file, path.extname(file));
+
+            // Apply name filter if specified
+            if (name) {
+                const nameLower = name.toLowerCase();
+                const hasWildcard = name.includes('*') || name.includes('?');
+                if (hasWildcard) {
+                    if (!glob_match(name, fileName)) continue;
+                } else if (exact) {
+                    if (fileName !== name) continue;
+                } else {
+                    if (!fileName.toLowerCase().includes(nameLower)) continue;
+                }
+            }
+
+            // Try to extract m_Name from the first ~20 lines for display
+            let display_name = fileName;
+            try {
+                const content = readFileSync(file, 'utf-8');
+                const nameMatch = /^\s*m_Name:\s*(.+)$/m.exec(content.slice(0, 2000));
+                if (nameMatch) display_name = nameMatch[1].trim();
+            } catch { /* use filename */ }
+
+            matches.push({
+                file: relPath,
+                game_object: display_name,
+                file_id: '0',
+            });
+
+            if (max_matches !== undefined && matches.length >= max_matches) break;
+        }
+
+        return {
+            success: true,
+            project_path,
+            total_files_scanned: files.length,
+            total_matches: matches.length,
+            cursor: 0,
+            truncated: max_matches !== undefined && matches.length >= max_matches,
+            matches,
+        };
+    }
+
+    // Scene/prefab types require the native scanner
     if (!isNativeModuleAvailable()) {
         return {
             success: false,
@@ -201,7 +265,7 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
         };
     }
 
-    // Determine extensions to scan
+    // Determine extensions to scan (scene/prefab types use the scanner)
     const extensions: string[] = [];
     if (file_type === 'scene' || file_type === 'all') extensions.push('.unity');
     if (file_type === 'prefab' || file_type === 'all') extensions.push('.prefab');

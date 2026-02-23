@@ -1,5 +1,6 @@
 import { writeFileSync, existsSync } from 'fs';
 import * as path from 'path';
+import { load_guid_cache } from '../guid-cache';
 import type {
     CreateGameObjectOptions, CreateGameObjectResult,
     AddComponentOptions, AddComponentResult,
@@ -1004,7 +1005,7 @@ export function createScriptableObject(options: CreateScriptableObjectOptions): 
   if (!resolved) {
     const hints: string[] = [];
     if (project_path) {
-      const cacheExists = existsSync(path.join(project_path, '.unity-agentic', 'guid-cache.json'));
+      const cacheExists = load_guid_cache(project_path) !== null;
       const registryExists = existsSync(path.join(project_path, '.unity-agentic', 'type-registry.json'));
       if (!cacheExists && !registryExists) {
         hints.push(`No GUID cache or type registry found at ${path.join(project_path, '.unity-agentic/')}. Run "unity-agentic-tools setup" first.`);
@@ -1227,7 +1228,7 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
     if (!resolved) {
       const hints: string[] = [];
       if (project_path) {
-        const cacheExists = existsSync(path.join(project_path, '.unity-agentic', 'guid-cache.json'));
+        const cacheExists = load_guid_cache(project_path) !== null;
         const registryExists = existsSync(path.join(project_path, '.unity-agentic', 'type-registry.json'));
         if (!cacheExists && !registryExists) {
           hints.push(`No GUID cache or type registry found at ${path.join(project_path, '.unity-agentic/')}. Run "unity-agentic-tools setup" first.`);

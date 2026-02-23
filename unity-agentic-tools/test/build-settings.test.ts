@@ -10,15 +10,12 @@ const FIXTURE_PATH = path.resolve(__dirname, '../../test/fixtures/external');
 const BUILD_SETTINGS_PATH = path.join(FIXTURE_PATH, 'ProjectSettings', 'EditorBuildSettings.asset');
 
 describe('parse_editor_build_settings', () => {
-    it('should parse scenes from EditorBuildSettings.asset', () => {
+    it('should parse scenes with correct properties', () => {
         const settings = parse_editor_build_settings(BUILD_SETTINGS_PATH);
 
         expect(settings.scenes).toBeDefined();
         expect(settings.scenes.length).toBe(2);
-    });
 
-    it('should parse scene properties correctly', () => {
-        const settings = parse_editor_build_settings(BUILD_SETTINGS_PATH);
         const [menu, level] = settings.scenes;
 
         // First scene: Menu
@@ -50,7 +47,7 @@ describe('list_build_profiles', () => {
 });
 
 describe('get_build_settings', () => {
-    it('should return complete build settings', () => {
+    it('should return complete build settings with correct scene order', () => {
         const result = get_build_settings(FIXTURE_PATH);
 
         // Project info
@@ -59,18 +56,13 @@ describe('get_build_settings', () => {
 
         // Scenes
         expect(result.editorBuildSettings.scenes.length).toBe(2);
-
-        // Build profiles (empty for Unity 2022)
-        expect(result.buildProfiles).toEqual([]);
-    });
-
-    it('should have correct scene order', () => {
-        const result = get_build_settings(FIXTURE_PATH);
         const scenePaths = result.editorBuildSettings.scenes.map(s => s.path);
-
         expect(scenePaths).toEqual([
             'Assets/Scenes/Menu.unity',
             'Assets/Scenes/Level.unity',
         ]);
+
+        // Build profiles (empty for Unity 2022)
+        expect(result.buildProfiles).toEqual([]);
     });
 });

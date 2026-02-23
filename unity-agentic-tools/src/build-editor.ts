@@ -16,6 +16,28 @@ function get_build_settings_path(projectPath: string): string {
 }
 
 /**
+ * Bootstrap a default EditorBuildSettings.asset with an empty scene list.
+ * Creates the ProjectSettings directory if it doesn't exist.
+ */
+function bootstrap_build_settings(projectPath: string): void {
+    const filePath = get_build_settings_path(projectPath);
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    const content = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1045 &1
+EditorBuildSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Scenes: []
+  m_configObjects: {}
+`;
+    fs.writeFileSync(filePath, content, 'utf-8');
+}
+
+/**
  * Read the raw content of EditorBuildSettings.asset
  */
 function read_build_settings_content(projectPath: string): string {
@@ -47,10 +69,10 @@ function write_scenes(projectPath: string, scenes: Array<{ enabled: boolean; pat
     const scenesYaml = scenes.map(scene_to_yaml).join('\n');
 
     // Replace the m_Scenes section
-    // Match from "m_Scenes:" to the next top-level key (m_configObjects or end)
+    // Match from "m_Scenes:" to right before "\n  m_configObjects:" or trailing whitespace at EOF
     const newContent = content.replace(
-        /m_Scenes:[\s\S]*?(?=\s+m_configObjects:|$)/,
-        `m_Scenes:\n${scenesYaml}\n  `
+        /m_Scenes:[\s\S]*?(?=\n  m_configObjects:|\s*$)/,
+        `m_Scenes:\n${scenesYaml}`
     );
 
     // Write atomically using temp file
@@ -98,8 +120,13 @@ export function add_scene(
         return { success: false, message: `Could not find GUID for scene: ${scenePath}. Missing .meta file?` };
     }
 
-    // Parse current scenes
+    // Bootstrap EditorBuildSettings.asset if it doesn't exist yet
     const buildSettingsPath = get_build_settings_path(projectPath);
+    if (!fs.existsSync(buildSettingsPath)) {
+        bootstrap_build_settings(projectPath);
+    }
+
+    // Parse current scenes
     const current = parse_editor_build_settings(buildSettingsPath);
 
     // Check if already exists

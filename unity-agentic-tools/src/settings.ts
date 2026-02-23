@@ -46,6 +46,9 @@ const SETTING_ALIASES: Record<string, string> = {
     projectsettings: 'ProjectSettings',
     navmesh: 'NavMeshAreas',
     navmeshareas: 'NavMeshAreas',
+    build: 'EditorBuildSettings',
+    editorbuild: 'EditorBuildSettings',
+    editorbuildsettings: 'EditorBuildSettings',
 };
 
 /**
@@ -289,6 +292,17 @@ export function read_settings(options: ReadSettingsOptions): ReadSettingsResult 
  */
 export function edit_settings(options: EditSettingsOptions): EditSettingsResult {
     const { project_path, setting, property, value } = options;
+
+    // Basic validation on --set value
+    if (value === undefined || value === null) {
+        return {
+            success: false,
+            project_path,
+            setting,
+            error: 'Value cannot be empty. Provide a valid value with --value.',
+        };
+    }
+
     const file_path = resolve_setting_path(project_path, setting);
 
     if (!existsSync(file_path)) {
@@ -649,7 +663,8 @@ export function edit_sorting_layer(options: SortingLayerEditOptions): EditSettin
         // Find end of m_SortingLayers section and append before the next top-level key
         const sortingEnd = content.match(/(m_SortingLayers:\s*\n(?:\s+-\s+name:[\s\S]*?(?=\n[^\s]|\n*$)))/);
         if (sortingEnd) {
-            content = content.replace(sortingEnd[1], sortingEnd[1] + newEntry);
+            // The lookahead stops before the trailing newline, so we must add one
+            content = content.replace(sortingEnd[1], sortingEnd[1] + '\n' + newEntry);
         } else {
             // Fallback: append before end of file
             content = content.trimEnd() + '\n' + newEntry;

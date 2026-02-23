@@ -279,7 +279,7 @@ impl Scanner {
         let target_file_id = if identifier.chars().all(|c| c.is_ascii_digit()) {
             identifier.clone()
         } else {
-            let matches = self.find_by_name(options.file.clone(), identifier.clone(), true);
+            let matches = self.find_by_name(options.file.clone(), identifier.clone(), false);
             if matches.len() > 1 {
                 let ids: Vec<String> = matches.iter().map(|m| m.file_id.clone()).collect();
                 return Some(serde_json::json!({
@@ -647,7 +647,7 @@ impl Scanner {
 
         for (class_id, file_id, block_content) in &blocks {
             // Extract m_Name from block
-            let name = regex::Regex::new(r"m_Name:\s*(.+)")
+            let name = regex::Regex::new(r"m_Name:[ \t]*([^\n]*)")
                 .ok()
                 .and_then(|re| re.captures(block_content))
                 .and_then(|caps| caps.get(1))
