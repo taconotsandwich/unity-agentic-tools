@@ -4,75 +4,118 @@ This document provides essential guidelines for agentic coding tools working in 
 
 ## Project Overview
 
-TypeScript CLI providing token-efficient Unity file manipulation utilities for Claude Code.
+TypeScript CLI + native Rust backend providing token-efficient Unity file manipulation utilities.
 
 **Core Structure:**
 - `unity-agentic-tools/src/` - TypeScript source code
-- `unity-agentic-tools/dist/` - Compiled JavaScript output (built by Bun)
-- `unity-agentic-tools/test/` - TypeScript tests
+- `unity-agentic-tools/test/` - Vitest tests (891 tests)
+- `rust-core/` - Native Rust module via napi-rs (162 tests)
 - `doc-indexer/` - Documentation indexing module
 
 ## Quick Setup
 
 **Install CLI globally:**
 ```bash
-npm install -g unity-agentic-tools
+bun add -g unity-agentic-tools
+```
+
+**From source:**
+```bash
+bun install && bun run build:rust && bun run build
 ```
 
 ## Build/Test Commands
 
-### Building
 ```bash
-bun run build
-```
-
-### Running Tests
-```bash
-bun run test
-```
-
-### Watch Mode
-```bash
-bun run dev
+bun run build:rust     # Rebuild Rust native module (after .rs changes)
+bun run build          # Build TypeScript
+bun run test           # Unit tests (891 TS + 162 Rust)
+bun run test:integration  # CLI integration tests
 ```
 
 ## Code Style Guidelines
 
 ### TypeScript Style
 - Use 4 spaces for indentation
-- Maximum line length: 100 characters
-- Use `interface` for object shapes
-- Use `type` for unions/primitives
+- Use `interface` for object shapes, `type` for unions/primitives
 - Explicit return types for public methods
+- Never use `any` — use proper types, generics, or `unknown`
 
 ### Naming Conventions
 - Classes/Interfaces: PascalCase (`UnityScanner`, `GameObject`)
 - Functions/Methods: snake_case (`scan_scene`, `find_by_name`)
 - Constants: UPPER_SNAKE_CASE (`MAX_CHUNK_SIZE`)
-- Private methods: single underscore prefix (`_parse_object`)
 
-### File Organization
-- One class per file
-- Export primary class
-- Keep utilities separate
+## CLI Commands Reference (69 commands)
 
-## CLI Commands Reference
+All commands: `unity-agentic-tools <command> [args]`
 
-All commands use `bun unity-agentic-tools/dist/cli.js <command>`:
-- `read scene <file>` - List GameObject hierarchy (`--properties` for values, `--summary` for counts)
-- `read gameobject <file> <id>` - Get single object by name or file ID (`-c <type>` for component filter)
-- `read scriptable-object <file>` - Read .asset file
-- `read settings <project> -s <name>` - Read project settings
-- `read build <project>` - Read build settings
-- `create gameobject|scene|component|build|...` - Create Unity objects
-- `update gameobject|transform|component|build|prefab|...` - Modify properties
-- `delete gameobject|component|build|prefab` - Remove objects
-- `search <file> <pattern>` - Find GameObjects by name in a file
-- `search <project> -n <pattern>` - Search across scenes/prefabs
-- `grep <project> <regex>` - Regex search across project files
+### Top-Level Utilities
+- `search <path> [pattern]` - Find GameObjects (file or project-wide, supports `--tag`, `--layer`, `--component`, `--exact`)
+- `grep <project> <regex>` - Regex search across project files (`--type`, `--max`, `--context`)
 - `clone <file> <name>` - Duplicate a GameObject and its hierarchy
 - `version <project>` - Read Unity project version
 - `docs <query>` - Search Unity documentation (auto-indexes)
+- `setup -p <project>` - Initialize GUID cache and project data
+- `cleanup -p <project>` - Remove cached data
+- `status -p <project>` - Show current configuration
+
+### Create (9 subcommands)
+- `create gameobject <file> <name>` - New GameObject (`-p` for parent)
+- `create scene <path>` - New .unity file (`-d` for defaults)
+- `create prefab-variant <source> <output>` - Prefab Variant
+- `create scriptable-object <output> <script>` - ScriptableObject .asset
+- `create meta <script_path>` - Generate .meta file
+- `create component <file> <name> <type>` - Add component to GameObject
+- `create component-copy <file> <src_fid> <target>` - Copy component
+- `create build <project> <scene>` - Add scene to build settings
+- `create material <output>` - New Material (`--shader`, `--properties`)
+
+### Read (18 subcommands)
+- `read scene <file>` - GameObject hierarchy (`--properties`, `--summary`, `--page-size`, `--filter-component`)
+- `read gameobject <file> <id>` - Single object by name/fileID (`-c` component filter, `-p` properties)
+- `read asset <file>` - Any Unity YAML asset file
+- `read material <file>` - Structured material properties (`--summary`, `--project`)
+- `read dependencies <file>` - Asset GUID dependencies (`--recursive`, `--unresolved`)
+- `read dependents <project> <guid>` - Reverse dependency lookup
+- `read unused <project>` - Detect unused assets
+- `read settings <project> -s <name>` - Project settings (aliases: tags, physics, quality, time, build, etc.)
+- `read build <project>` - Build scene list
+- `read overrides <file> <instance>` - PrefabInstance overrides (`--flat`)
+- `read component <file> <file_id>` - Single component by fileID
+- `read reference <file> <file_id>` - Trace fileID references (`--direction`, `--depth`)
+- `read script <file>` - C# types from .cs file or DLL
+- `read scripts` - List types from registry (`--name`, `--namespace`, `--kind`, `--source`)
+- `read log` - Unity Editor.log (`--errors`, `--warnings`, `--compile-errors`, `--since`, `--search`)
+- `read meta <file>` - .meta importer settings
+- `read animation <file>` - AnimationClip (`--summary`, `--paths`, `--curves`)
+- `read animator <file>` - AnimatorController (`--summary`, `--parameters`, `--states`, `--transitions`)
+
+### Update (24 subcommands)
+- `update gameobject <file> <name> <prop> <value>` - Edit GameObject property
+- `update component <file> <fid> <prop> <value>` - Edit component (dotted paths, array paths)
+- `update transform <file> <id>` - Position/rotation/scale (`-p`, `-r`, `-s`)
+- `update scriptable-object <file> <prop> <value>` - Edit .asset property
+- `update settings <project> -s <name> --property <p> --value <v>` - Edit project settings
+- `update tag <project> add|remove <tag>` - Manage tags
+- `update layer <project> <index> <name>` - Set named layer (3-31)
+- `update sorting-layer <project> add|remove <name>` - Manage sorting layers
+- `update parent <file> <child> <parent>` - Reparent GameObject
+- `update build <project> <scene>` - Enable/disable/move scene (`--enable`, `--disable`, `--move`)
+- `update array <file> <fid> <prop> <action> [args...]` - Array insert/append/remove
+- `update batch <file> <json>` - Batch edit GameObjects
+- `update batch-components <file> <json>` - Batch edit components
+- `update material <file>` - Edit material (`--set`, `--set-color`, `--set-texture`, `--shader`, `--keyword-add/remove`)
+- `update meta [file]` - Edit .meta (`--set`, `--max-size`, `--compression`, `--batch`, `--dry-run`)
+- `update animation <file>` - Edit AnimationClip (`--set`, `--add-event`, `--remove-event`)
+- `update animator <file>` - Edit parameters (`--add-parameter`, `--type`, `--remove-parameter`, `--set-default`)
+- `update prefab unpack|override|remove-override|remove-component|restore-component|remove-gameobject|restore-gameobject`
+
+### Delete (4 subcommands)
+- `delete gameobject <file> <name>` - Delete GameObject and hierarchy
+- `delete component <file> <file_id>` - Remove component
+- `delete build <project> <scene>` - Remove scene from build settings
+- `delete prefab <file> <instance>` - Delete PrefabInstance
 
 ## Claude Code Integration
 
