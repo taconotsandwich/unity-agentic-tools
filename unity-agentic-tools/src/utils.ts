@@ -1,4 +1,4 @@
-import { writeFileSync, renameSync, existsSync, unlinkSync } from 'fs';
+import { writeFileSync, renameSync, existsSync, unlinkSync, accessSync, constants as fsConstants } from 'fs';
 import { resolve, dirname, join } from 'path';
 
 /**
@@ -32,6 +32,19 @@ export interface AtomicWriteResult {
  * Atomic write: write to temp file, then rename to prevent partial writes.
  */
 export function atomicWrite(filePath: string, content: string): AtomicWriteResult {
+    // Check file write permission if the file already exists
+    if (existsSync(filePath)) {
+        try {
+            accessSync(filePath, fsConstants.W_OK);
+        } catch {
+            return {
+                success: false,
+                file_path: filePath,
+                error: `Permission denied: ${filePath} is not writable`
+            };
+        }
+    }
+
     const tmpPath = `${filePath}.tmp`;
 
     try {
@@ -71,6 +84,14 @@ export function atomicWrite(filePath: string, content: string): AtomicWriteResul
             error: error instanceof Error ? error.message : String(error)
         };
     }
+}
+
+/**
+ * Check if a pattern matches everything (wildcard-all).
+ * Patterns like "*", ".", "**" mean "all objects" — not a real filter.
+ */
+export function is_match_all(pattern: string): boolean {
+    return pattern === '*' || pattern === '.' || pattern === '**';
 }
 
 /**

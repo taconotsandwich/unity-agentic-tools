@@ -3,6 +3,7 @@ pub mod gameobject;
 pub mod component;
 pub mod config;
 pub mod prefab;
+pub mod mesh;
 
 use napi_derive::napi;
 use std::collections::HashMap;
@@ -627,9 +628,11 @@ impl Scanner {
         }
     }
 
-    /// Read a .asset file and return its root objects with properties
+    /// Read a .asset file and return its root objects with properties.
+    /// When `decode_mesh` is true (default), Mesh assets (class 43) get their
+    /// hex vertex/index data decoded into structured arrays.
     #[napi]
-    pub fn read_asset(&mut self, file: String) -> serde_json::Value {
+    pub fn read_asset(&mut self, file: String, decode_mesh: Option<bool>) -> serde_json::Value {
         let path = Path::new(&file);
         if !path.exists() {
             return serde_json::json!([]);
@@ -682,7 +685,12 @@ impl Scanner {
             // Extract properties using existing infrastructure
             // We need the full content with header for extract_properties
             let full_block = format!("--- !u!{} &{}\n{}", class_id, file_id, block_content);
-            let properties = component::extract_properties(&full_block, file_id, *class_id, &self.guid_cache);
+            let mut properties = component::extract_properties(&full_block, file_id, *class_id, &self.guid_cache);
+
+            // Auto-decode Mesh binary data (class 43) unless opted out
+            if decode_mesh.unwrap_or(true) && *class_id == 43 {
+                mesh::decode_mesh_data(&mut properties);
+            }
 
             let mut obj = serde_json::json!({
                 "class_id": class_id,

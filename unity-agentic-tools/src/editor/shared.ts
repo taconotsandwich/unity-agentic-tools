@@ -7,7 +7,7 @@ import { load_guid_cache } from '../guid-cache';
  */
 export function extractExistingFileIds(content: string): Set<number> {
   const ids = new Set<number>();
-  const matches = content.matchAll(/--- !u!\d+ &(\d+)/g);
+  const matches = content.matchAll(/--- !u!\d+ &(-?\d+)/g);
   for (const match of matches) {
     ids.add(parseInt(match[1], 10));
   }

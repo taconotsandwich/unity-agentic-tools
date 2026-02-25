@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Unity Agentic Tools plugin provides token-efficient file operations and documentation search for Unity projects. 69 CLI commands across CRUD groups + utilities.
+The Unity Agentic Tools plugin provides token-efficient file operations and documentation search for Unity projects. 76 CLI commands across CRUD groups + utilities.
 
 ## Usage
 
@@ -16,7 +16,7 @@ Always use `bun` to run the CLI:
 ### Read
 - **read scene** `<file>` - List GameObject hierarchy (`--properties` for values, `--summary` for counts, `--filter-component`)
 - **read gameobject** `<file> <id>` - Get single object by name or file ID (`-c <type>` for component filter)
-- **read asset** `<file>` - Read any Unity YAML asset file
+- **read asset** `<file>` - Read any Unity YAML asset file (`--raw` to skip mesh auto-decode)
 - **read material** `<file>` - Structured material properties (`--summary`)
 - **read settings** `<project> -s <name>` - Project settings (aliases: tags, physics, quality, time, build, etc.)
 - **read build** `<project>` - Build scene list
@@ -32,19 +32,22 @@ Always use `bun` to run the CLI:
 - **read meta** `<file>` - .meta importer settings
 - **read animation** `<file>` - AnimationClip data (`--summary`, `--paths`, `--curves`)
 - **read animator** `<file>` - AnimatorController data (`--summary`, `--parameters`, `--states`)
+- **read manifest** `<project>` - List packages from manifest.json (`--search`)
+- **read input-actions** `<file>` - Input Actions file (`--summary`, `--maps`, `--actions`, `--bindings`)
 
 ### Create
-- **create gameobject/scene/component/component-copy/prefab-variant/scriptable-object/meta/material/build**
+- **create gameobject/scene/component/component-copy/prefab-variant/scriptable-object/meta/material/build/package/input-actions/animation/animator/prefab**
 
 ### Update
 - **update gameobject/component/transform/scriptable-object** - Modify properties
 - **update settings/tag/layer/sorting-layer** - Project settings
 - **update parent/build/array/batch/batch-components** - Hierarchy and bulk ops
 - **update material/meta/animation/animator** - Asset-specific editing
+- **update sibling-index/input-actions/animation-curves/animator-state** - Additional editing
 - **update prefab** unpack/override/remove-override/remove-component/restore-component/remove-gameobject/restore-gameobject
 
 ### Delete
-- **delete gameobject/component/build/prefab** - Remove objects
+- **delete gameobject/component/build/prefab/package** - Remove objects
 
 ### Utilities
 - **search** `<path> [pattern]` - Find GameObjects (file or project-wide)
@@ -65,5 +68,5 @@ Always use `bun` to run the CLI:
 ```bash
 bun run build:rust     # Rebuild Rust native module
 bun run build          # Build TypeScript
-bun run test           # Unit tests (891 TS + 162 Rust)
+bun run test           # Unit tests (871 TS + 173 Rust)
 ```

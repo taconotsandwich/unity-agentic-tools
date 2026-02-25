@@ -7,7 +7,7 @@ description: "Parse, inspect, create, edit, and search Unity YAML files (.unity,
 
 CLI: `unity-agentic-tools <command>`
 
-69 commands across 4 CRUD groups + top-level utilities. Always inspect before editing, verify after.
+76 commands across 4 CRUD groups + top-level utilities. Always inspect before editing, verify after.
 
 ## read -- Read Unity files, settings, and build data
 
@@ -15,7 +15,7 @@ CLI: `unity-agentic-tools <command>`
 |---------|-------|
 | `read scene <file>` | GameObject hierarchy (paginated: `--page-size`, `--cursor`, `--max-depth`, `--summary`, `--properties`) |
 | `read gameobject <file> <id>` | Single object by name or file ID (`-c <type>` filters components, `--properties` for values) |
-| `read asset <file>` | Read any Unity YAML asset file (.asset, .mat, .anim, etc.) |
+| `read asset <file>` | Read any Unity YAML asset file (.asset, .mat, .anim, etc.). Mesh assets auto-decode vertex/index hex data (`--raw` to skip) |
 | `read material <file>` | Read a Material file (.mat) with structured property output |
 | `read component <file> <file_id>` | Read a single component by fileID |
 | `read reference <file> <file_id>` | Trace fileID references |
@@ -31,6 +31,8 @@ CLI: `unity-agentic-tools <command>`
 | `read meta <file>` | Read a .meta file and show importer settings |
 | `read animation <file>` | Read an AnimationClip file (.anim) |
 | `read animator <file>` | Read an AnimatorController file (.controller) |
+| `read manifest <project>` | List packages from Packages/manifest.json (`--search <pattern>`) |
+| `read input-actions <file>` | Read a Unity Input Actions file (`--summary`, `--maps`, `--actions`, `--bindings`) |
 
 ## create -- Create Unity objects
 
@@ -44,7 +46,12 @@ CLI: `unity-agentic-tools <command>`
 | `create component <file> <name> <component>` | Add component (built-in or script with `-p <project>`) |
 | `create component-copy <file> <src_id> <target>` | Copy component to another object |
 | `create build <project> <scene>` | Add scene to build settings |
-| `create material <path>` | New Material file (.mat) |
+| `create material <path> --shader <guid>` | New Material file (.mat) (`--shader` required; `--name`, `--properties` optional) |
+| `create package <project> <name> <version>` | Add a package to Packages/manifest.json |
+| `create input-actions <path> <name>` | Create a blank .inputactions file |
+| `create animation <path> [name]` | Create a blank .anim file (name defaults to filename, `--sample-rate`, `--loop`) |
+| `create animator <path> [name]` | Create a blank .controller file |
+| `create prefab <file> <name>` | Create prefab from GameObject |
 
 ## update -- Modify properties, transforms, settings
 
@@ -61,12 +68,16 @@ CLI: `unity-agentic-tools <command>`
 | `update parent <file> <name> <new_parent>` | Move under new parent ("root" for scene root) |
 | `update build <project> <scene>` | Enable (`--enable`), disable (`--disable`), or move (`--move <idx>`) scene |
 | `update array <file> <file_id> <array_prop> <action> [args]` | Insert, append, or remove array elements in a component |
-| `update batch <file> <edits_json>` | Batch edit multiple GameObject properties in one operation |
+| `update batch <file> <edits_json>` | Batch edit multiple GameObject properties. JSON: `[{"object_name":"...","property":"...","value":"..."}]` |
 | `update batch-components <file> <edits_json>` | Batch edit multiple component properties by fileID |
 | `update material <file>` | Edit Material properties (.mat file) |
 | `update meta <file>` | Edit .meta file importer settings |
 | `update animation <file>` | Edit AnimationClip settings and events |
 | `update animator <file>` | Edit AnimatorController parameters |
+| `update sibling-index <file> <name> <index>` | Set sibling index of a GameObject, renumbering siblings |
+| `update input-actions <file>` | Edit Input Actions (add/remove maps, actions, bindings, control schemes) |
+| `update animation-curves <file>` | Add, remove, or modify animation curves (`--add-curve`, `--remove-curve`, `--set-keyframes`) |
+| `update animator-state <file>` | Add/remove states and transitions (`--add-state`, `--remove-state`, `--add-transition`, `--remove-transition`) |
 | `update prefab unpack <file> <instance>` | Unpack PrefabInstance to standalone objects |
 | `update prefab override <file> <instance> <path> <value>` | Edit/add property override |
 | `update prefab remove-override <file> <instance> <path>` | Remove property override |
@@ -83,17 +94,18 @@ CLI: `unity-agentic-tools <command>`
 | `delete component <file> <file_id>` | Remove component by file ID |
 | `delete build <project> <scene>` | Remove scene from build settings |
 | `delete prefab <file> <instance>` | Delete PrefabInstance and stripped/added blocks |
+| `delete package <project> <name>` | Remove a package from Packages/manifest.json |
 
 ## Top-level utilities
 
 | Command | Usage |
 |---------|-------|
 | `search <file> <pattern>` | Find GameObjects by name in a file (`--exact` for exact match) |
-| `search <project> -n <pattern>` | Search across scenes/prefabs (`-c`, `-t`, `-l` filters, `-m <n>` max matches) |
-| `grep <project> <regex>` | Regex search across project files (`--type cs\|yaml\|all`) |
+| `search <project> -n <pattern>` | Search across scenes/prefabs (`-c`, `-t`, `-l` filters, `-T <type>` file type, `-m <n>` max matches) |
+| `grep <project> <regex>` | Regex search across project files (`--type cs\|yaml\|unity\|prefab\|asset\|mat\|anim\|controller\|all`, `-m <n>` overrides default 100-result cap) |
 | `clone <file> <name>` | Duplicate a GameObject and its hierarchy (`-n <new_name>`) |
 | `version <project>` | Read Unity project version |
-| `docs <query>` | Search Unity docs (auto-indexes, `-s` summarize, `-c` compress) |
+| `docs <query>` | Search Unity docs (auto-indexes on first use) |
 | `setup` | Initialize tools for Unity project (`-p <path>`, `--index-docs`) |
 | `cleanup` | Remove .unity-agentic files (`--all` for full removal) |
 | `status` | Show config, GUID cache count, native module status |

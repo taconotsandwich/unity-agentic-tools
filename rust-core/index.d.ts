@@ -291,8 +291,12 @@ export declare class Scanner {
   inspectAll(file: string, includeProperties: boolean, verbose: boolean): SceneInspection
   /** Inspect entire file with pagination support */
   inspectAllPaginated(options: PaginationOptions): PaginatedInspection
-  /** Read a .asset file and return its root objects with properties */
-  readAsset(file: string): any
+  /**
+   * Read a .asset file and return its root objects with properties.
+   * When `decode_mesh` is true (default), Mesh assets (class 43) get their
+   * hex vertex/index data decoded into structured arrays.
+   */
+  readAsset(file: string, decodeMesh?: boolean | undefined | null): any
 }
 /** High-performance documentation indexer */
 export declare class Indexer {

@@ -18,7 +18,8 @@ For Claude Code integration, see the [Claude Code plugin](https://github.com/tac
 - **C# Type Extraction** - Parse .cs files and .NET DLLs for type/field information
 - **Project Search** - Find GameObjects across all scenes/prefabs, regex grep across project files
 - **Documentation** - Auto-indexing local Unity docs with semantic search
-- **Fast Parsing** - Rust-powered backend (162 native tests) with parallel I/O for large projects
+- **Mesh Decoding** - Auto-decode Mesh hex vertex/index buffers into structured arrays (multi-stream support)
+- **Fast Parsing** - Rust-powered backend (173 native tests) with parallel I/O for large projects
 
 ## Installation
 
@@ -45,7 +46,7 @@ bun run build            # build TypeScript
 ```bash
 unity-agentic-tools read scene <file>                        # GameObject hierarchy (paginated)
 unity-agentic-tools read gameobject <file> <id>               # Single object by name or file ID
-unity-agentic-tools read asset <file>                         # Any Unity YAML asset file
+unity-agentic-tools read asset <file>                         # Any Unity YAML asset file (--raw to skip mesh decode)
 unity-agentic-tools read material <file>                      # Structured material properties
 unity-agentic-tools read settings <project> -s tags           # Project settings (tags/physics/quality/time/etc.)
 unity-agentic-tools read build <project>                      # Build scene list
@@ -61,6 +62,8 @@ unity-agentic-tools read log                                  # Unity Editor.log
 unity-agentic-tools read meta <file>                          # .meta importer settings
 unity-agentic-tools read animation <file>                     # AnimationClip data
 unity-agentic-tools read animator <file>                      # AnimatorController data
+unity-agentic-tools read manifest <project>                   # Packages from manifest.json
+unity-agentic-tools read input-actions <file>                 # Input Actions file
 ```
 
 ### Create Commands
@@ -75,6 +78,11 @@ unity-agentic-tools create scriptable-object <output> <script># ScriptableObject
 unity-agentic-tools create meta <script_path>                 # Generate .meta file
 unity-agentic-tools create material <output>                  # New Material .mat
 unity-agentic-tools create build <project> <scene>            # Add scene to build settings
+unity-agentic-tools create package <project> <name> <version> # Add package to manifest.json
+unity-agentic-tools create input-actions <path> <name>        # Blank .inputactions file
+unity-agentic-tools create animation <path> [name]            # Blank .anim file
+unity-agentic-tools create animator <path> [name]             # Blank .controller file
+unity-agentic-tools create prefab <file> <name>               # Create prefab from GameObject
 ```
 
 ### Update Commands
@@ -97,6 +105,10 @@ unity-agentic-tools update material <file> --set _Metallic=0.8 --keyword-add _EM
 unity-agentic-tools update meta <file> --set isReadable=1 --max-size 2048
 unity-agentic-tools update animation <file> --set wrap-mode=2 --add-event 0.5,OnStep
 unity-agentic-tools update animator <file> --add-parameter Speed --type float
+unity-agentic-tools update sibling-index <file> <name> <index>
+unity-agentic-tools update input-actions <file> --add-map MyMap
+unity-agentic-tools update animation-curves <file> --add-curve <path> <property>
+unity-agentic-tools update animator-state <file> --add-state <name>
 unity-agentic-tools update prefab unpack|override|remove-override|...
 ```
 
@@ -107,6 +119,7 @@ unity-agentic-tools delete gameobject <file> <name>
 unity-agentic-tools delete component <file> <file_id>
 unity-agentic-tools delete build <project> <scene>
 unity-agentic-tools delete prefab <file> <prefab_instance>
+unity-agentic-tools delete package <project> <name>
 ```
 
 ### Search & Utilities
@@ -125,8 +138,8 @@ unity-agentic-tools cleanup -p <project>                      # Remove cached da
 ## Project Structure
 
 ```
-unity-agentic-tools/     TypeScript CLI + tests (891 unit tests)
-rust-core/               Native Rust module via napi-rs (162 tests)
+unity-agentic-tools/     TypeScript CLI + tests (871 unit tests)
+rust-core/               Native Rust module via napi-rs (173 tests)
 doc-indexer/             Documentation indexing module
 ```
 
@@ -137,7 +150,7 @@ Requires: Rust toolchain, Bun runtime.
 ```bash
 bun run build:rust         # after Rust code changes
 bun run build              # after TypeScript changes
-bun run test               # unit tests (891)
+bun run test               # unit tests (871 TS + 173 Rust)
 bun run test:integration   # CLI integration tests
 bun run type-check         # tsc --noEmit
 ```

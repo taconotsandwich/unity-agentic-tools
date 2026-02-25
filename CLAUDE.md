@@ -16,7 +16,7 @@ The Claude Code plugin (hooks, skills, manifest) lives in a separate repo: [unit
 bun install           # Install all deps (workspaces resolve native module)
 bun run build:rust    # Build Rust native module
 bun run build         # Build TypeScript
-bun run test          # Unit tests (891 TS + 162 Rust)
+bun run test          # Unit tests (871 TS + 173 Rust)
 bun run test:integration  # CLI integration tests (bash)
 ```
 
@@ -47,6 +47,7 @@ doc-indexer/        Documentation indexing module
 - **Rust inspect API**: `inspect_all` returns NAPI struct (`SceneInspection`) — can't filter fields dynamically, must set to None before returning. `inspect` (single) returns `serde_json::Value` — flexible field filtering via `build_detail_output`. Properties always extracted in Rust (`extract_single_component_with_config`), stripped later if not needed.
 - **Unity YAML regex safety**: Always use `[ \t]*` (not `\s*`) between YAML keys and values — `\s` matches `\n` and causes cross-line capture bleed. Similarly, use `[^\n]*` (not `.*`) for value capture groups.
 - **`.Array` suffix handling**: Unity's API exposes arrays as `m_Foo.Array` but YAML contains `m_Foo:`. Strip `.Array` suffix before searching YAML content (see `unity-block.ts` array methods).
+- **Mesh binary decode**: `read_asset` with `decode_mesh=true` (default) auto-decodes Mesh assets (class 43). Replaces hex `_typelessdata` with structured `vertices` array and `IndexBuffer` with integer array. Supports multi-stream vertex layouts. Graceful fallback: sets `_mesh_decode_skipped` with reason if decode fails (e.g., external `.resource` storage). Use `--raw` flag to preserve hex.
 
 ## CLI Structure
 
@@ -57,13 +58,13 @@ doc-indexer/        Documentation indexing module
 - Non-CRUD utilities stay top-level: `search`, `grep`, `clone`, `docs`, `version`, `setup`, `cleanup`, `status`
 - `update prefab` is a nested command group with 6 subcommands: `unpack`, `override`, `remove-override`, `remove-component`, `restore-component`, `remove-gameobject`, `restore-gameobject`
 
-### Command Counts (69 total)
+### Command Counts (76 total)
 
 - **Top-level**: clone, search, grep, version, docs, setup, cleanup, status (8)
-- **create**: gameobject, scene, prefab-variant, scriptable-object, meta, component, component-copy, build, material (9)
-- **read**: scene, gameobject, asset, material, dependencies, dependents, unused, settings, build, overrides, component, reference, script, scripts, log, meta, animation, animator (18)
-- **update**: gameobject, component, transform, scriptable-object, settings, tag, layer, sorting-layer, parent, build, array, batch, batch-components, material, meta, animation, animator + prefab subgroup (7) (24)
-- **delete**: gameobject, component, build, prefab (4)
+- **create**: gameobject, scene, prefab-variant, scriptable-object, meta, component, component-copy, build, material, package, input-actions, animation, animator, prefab (14)
+- **read**: scene, gameobject, asset, scriptable-object, material, dependencies, dependents, unused, settings, build, overrides, component, reference, script, scripts, log, meta, animation, animator, manifest, input-actions (21)
+- **update**: gameobject, component, transform, scriptable-object, settings, tag, layer, sorting-layer, parent, build, array, batch, batch-components, material, meta, animation, animator, sibling-index, input-actions, animation-curves, animator-state + prefab subgroup (7) (28)
+- **delete**: gameobject, component, build, prefab, package (5)
 
 ### Setting Aliases
 

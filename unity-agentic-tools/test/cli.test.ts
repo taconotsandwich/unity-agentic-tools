@@ -1352,6 +1352,32 @@ describeIfNative('CLI', () => {
             }
         });
 
+        it('should add multiple events with repeated --add-event flags', () => {
+            const fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'keyframe-test.anim')
+            );
+
+            try {
+                const result = run_cli([
+                    'update', 'animation',
+                    fixture.temp_path,
+                    '--add-event', '0.1,EventA',
+                    '--add-event', '0.5,EventB,extra',
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+                expect(json.changes.length).toBeGreaterThanOrEqual(2);
+
+                const content = readFileSync(fixture.temp_path, 'utf-8');
+                expect(content).toContain('functionName: EventA');
+                expect(content).toContain('functionName: EventB');
+                expect(content).toContain('data: extra');
+            } finally {
+                fixture.cleanup_fn();
+            }
+        });
+
         it('should remove an event by index', () => {
             const fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'events-test.anim')
@@ -1449,6 +1475,203 @@ describeIfNative('CLI', () => {
         });
     });
 
+    describe('read animator transition details', () => {
+        it('should include transition source/dest in default output', () => {
+            const ctrlFile = resolve(fixtures_dir, 'test-animator.controller');
+            const result = run_cli(['read', 'animator', ctrlFile, '--json']);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('transitions');
+            expect(Array.isArray(json.transitions)).toBe(true);
+            expect(json.transitions.length).toBe(1);
+            expect(json.transitions[0].from).toBe('Idle');
+            expect(json.transitions[0].to).toBe('Walk');
+            expect(json.transitions[0].has_exit_time).toBe(true);
+        });
+
+        it('should include exit_time and source_state in --transitions output', () => {
+            const ctrlFile = resolve(fixtures_dir, 'test-animator.controller');
+            const result = run_cli(['read', 'animator', ctrlFile, '--transitions', '--json']);
+            const json = JSON.parse(result);
+            expect(json.transitions.length).toBe(1);
+            const t = json.transitions[0];
+            expect(t.source_state).toBe('Idle');
+            expect(t.destination_state).toBe('Walk');
+            expect(t.exit_time).toBe(0.9);
+            expect(t.has_exit_time).toBe(true);
+            expect(t.duration).toBe(0.25);
+        });
+    });
+
+    describe('create animator', () => {
+        it('should create a valid .controller file', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'unity-create-animator-'));
+            const file = join(tmp, 'New.controller');
+            try {
+                const result = run_cli(['create', 'animator', file, '--json']);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+                expect(json.name).toBe('New');
+                expect(json.layer).toBe('Base Layer');
+                expect(existsSync(file)).toBe(true);
+                expect(existsSync(`${file}.meta`)).toBe(true);
+
+                const content = readFileSync(file, 'utf-8');
+                expect(content).toContain('AnimatorController:');
+                expect(content).toContain('AnimatorStateMachine:');
+
+                const readResult = run_cli(['read', 'animator', file, '--json']);
+                const readJson = JSON.parse(readResult);
+                expect(readJson.name).toBe('New');
+                expect(readJson.layers).toEqual(['Base Layer']);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('should reject non-.controller extension', () => {
+            try {
+                run_cli(['create', 'animator', '/tmp/bad.anim', '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { stdout: string };
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('.controller');
+            }
+        });
+    });
+
+    describe('create prefab', () => {
+        it('should create a valid .prefab file', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'unity-create-prefab-'));
+            const file = join(tmp, 'Enemy.prefab');
+            try {
+                const result = run_cli(['create', 'prefab', file, '--json']);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+                expect(json.name).toBe('Enemy');
+                expect(existsSync(file)).toBe(true);
+                expect(existsSync(`${file}.meta`)).toBe(true);
+
+                const content = readFileSync(file, 'utf-8');
+                expect(content).toContain('GameObject:');
+                expect(content).toContain('Transform:');
+                expect(content).toContain('m_Name: Enemy');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('should reject non-.prefab extension', () => {
+            try {
+                run_cli(['create', 'prefab', '/tmp/bad.unity', '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { stdout: string };
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('.prefab');
+            }
+        });
+    });
+
+    describe('read animator binary detection', () => {
+        it('should show binary serialization error for binary files', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'unity-binary-'));
+            const binFile = join(tmp, 'binary.asset');
+            const buf = Buffer.alloc(64, 0);
+            buf.write('UnityFS', 0);
+            writeFileSync(binFile, buf);
+            try {
+                run_cli(['read', 'asset', binFile, '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { stdout: string };
+                const json = JSON.parse(execErr.stdout);
+                expect(json.error).toContain('binary serialization');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+    });
+
+    describe('read asset --properties YAML arrays', () => {
+        it('should parse YAML arrays as arrays not flat objects', () => {
+            const file = resolve(external_fixtures, 'ProjectSettings/InputManager.asset');
+            const result = run_cli(['read', 'asset', file, '--properties', '--json']);
+            const json = JSON.parse(result);
+            const obj = json.objects[0];
+            expect(obj.properties.Axes).toBeDefined();
+            expect(Array.isArray(obj.properties.Axes)).toBe(true);
+            expect(obj.properties.Axes.length).toBeGreaterThanOrEqual(18);
+            expect(obj.properties.Axes[0].Name).toBe('Horizontal');
+            expect(obj.properties.Axes[1].Name).toBe('Vertical');
+        });
+    });
+
+    describe('read asset --properties recursive nested structures', () => {
+        it('should parse nested sequences (anim PPtrCurves-like pattern)', () => {
+            const file = resolve(fixtures_dir, 'events-test.anim');
+            const result = run_cli(['read', 'asset', file, '--properties', '--json']);
+            const json = JSON.parse(result);
+            const obj = json.objects[0];
+            const events = obj.properties.Events;
+            expect(Array.isArray(events)).toBe(true);
+            expect(events.length).toBe(2);
+            expect(events[0].functionName).toBe('OnHalfway');
+            expect(events[0].time).toBe('0.5');
+            expect(events[1].functionName).toBe('OnComplete');
+            expect(events[1].data).toBe('done');
+        });
+
+        it('should parse nested maps under empty keys', () => {
+            const file = resolve(fixtures_dir, 'events-test.anim');
+            const result = run_cli(['read', 'asset', file, '--properties', '--json']);
+            const json = JSON.parse(result);
+            const obj = json.objects[0];
+            const bounds = obj.properties.Bounds;
+            expect(bounds).toBeDefined();
+            expect(typeof bounds).toBe('object');
+            expect(bounds.Center).toBe('{x: 0, y: 0, z: 0}');
+            expect(bounds.Extent).toBe('{x: 0, y: 0, z: 0}');
+        });
+    });
+
+    describe('read asset mesh decode', () => {
+        it('should decode mesh vertex data by default', () => {
+            const file = resolve(fixtures_dir, 'test-mesh.asset');
+            const result = run_cli(['read', 'asset', file, '--properties', '--json']);
+            const json = JSON.parse(result);
+            const obj = json.objects[0];
+            expect(obj.type_name).toBe('Mesh');
+            expect(obj.name).toBe('TestTriangle');
+            const vd = obj.properties.VertexData;
+            expect(vd.vertices).toBeDefined();
+            expect(Array.isArray(vd.vertices)).toBe(true);
+            expect(vd.vertices.length).toBe(3);
+            expect(vd.vertices[0].position).toEqual([0, 0, 0]);
+            expect(vd.vertices[1].position).toEqual([1, 0, 0]);
+            expect(vd.vertices[2].position).toEqual([0, 1, 0]);
+            expect(vd._typelessdata).toBeUndefined();
+            expect(Array.isArray(obj.properties.IndexBuffer)).toBe(true);
+            expect(obj.properties.IndexBuffer).toEqual([0, 1, 2]);
+        });
+
+        it('should preserve raw hex with --raw flag', () => {
+            const file = resolve(fixtures_dir, 'test-mesh.asset');
+            const result = run_cli(['read', 'asset', file, '--properties', '--raw', '--json']);
+            const json = JSON.parse(result);
+            const obj = json.objects[0];
+            const vd = obj.properties.VertexData;
+            expect(typeof vd._typelessdata).toBe('string');
+            expect(vd.vertices).toBeUndefined();
+            expect(typeof obj.properties.IndexBuffer).toBe('string');
+        });
+    });
+
     describe('delete prefab command', () => {
         it.each([
             ['700000', '&700000'],
@@ -1476,6 +1699,676 @@ describeIfNative('CLI', () => {
                 expect(content).not.toContain(absent_marker);
             } finally {
                 fixture.cleanup_fn();
+            }
+        });
+    });
+});
+
+// ========== New feature CLI tests (no native module required) ==========
+describe('CLI - New Features', () => {
+    // ========== Package Manager ==========
+    describe('read manifest', () => {
+        it('should list packages from manifest.json', () => {
+            const result = run_cli([
+                'read', 'manifest',
+                resolve(fixtures_dir, 'test-manifest'),
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('success', true);
+            expect(json.count).toBe(4);
+            expect(json.packages).toBeInstanceOf(Array);
+        });
+
+        it('should filter packages by search', () => {
+            const result = run_cli([
+                'read', 'manifest',
+                resolve(fixtures_dir, 'test-manifest'),
+                '--search', 'render',
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json.count).toBe(1);
+            expect(json.packages[0].name).toContain('render');
+        });
+    });
+
+    describe('create/delete package round-trip', () => {
+        it('should add and remove a package', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'pkg-cli-'));
+            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
+
+            try {
+                // Create
+                const create_result = run_cli([
+                    'create', 'package',
+                    tmp, 'com.unity.cinemachine', '2.9.7',
+                    '--json'
+                ]);
+                const cj = JSON.parse(create_result);
+                expect(cj).toHaveProperty('success', true);
+                expect(cj.action).toBe('added');
+
+                // Verify it's in the manifest
+                const list_result = run_cli(['read', 'manifest', tmp, '--search', 'cinemachine', '--json']);
+                expect(JSON.parse(list_result).count).toBe(1);
+
+                // Delete
+                const delete_result = run_cli([
+                    'delete', 'package',
+                    tmp, 'com.unity.cinemachine',
+                    '--json'
+                ]);
+                const dj = JSON.parse(delete_result);
+                expect(dj).toHaveProperty('success', true);
+
+                // Verify it's gone
+                const list_result2 = run_cli(['read', 'manifest', tmp, '--search', 'cinemachine', '--json']);
+                expect(JSON.parse(list_result2).count).toBe(0);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+    });
+
+    // ========== Input Actions ==========
+    describe('read input-actions', () => {
+        it('should read input actions file', () => {
+            const result = run_cli([
+                'read', 'input-actions',
+                resolve(fixtures_dir, 'test-input-actions.inputactions'),
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('name', 'TestInputActions');
+            expect(json.maps).toHaveLength(1);
+        });
+
+        it('should show summary', () => {
+            const result = run_cli([
+                'read', 'input-actions',
+                resolve(fixtures_dir, 'test-input-actions.inputactions'),
+                '--summary',
+                '--json'
+            ]);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('map_count', 1);
+            expect(json).toHaveProperty('action_count', 1);
+            expect(json).toHaveProperty('binding_count', 1);
+        });
+    });
+
+    describe('create input-actions', () => {
+        it('should create a blank .inputactions file', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'ia-cli-'));
+            const out = join(tmp, 'NewActions.inputactions');
+
+            try {
+                const result = run_cli(['create', 'input-actions', out, 'NewActions', '--json']);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+                expect(json).toHaveProperty('guid');
+                expect(existsSync(out)).toBe(true);
+                expect(existsSync(out + '.meta')).toBe(true);
+
+                // Verify content
+                const content = JSON.parse(readFileSync(out, 'utf-8'));
+                expect(content.name).toBe('NewActions');
+                expect(content.maps).toHaveLength(0);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+    });
+
+    describe('update input-actions', () => {
+        it('should add and remove a map', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'ia-cli-'));
+            const file = join(tmp, 'test.inputactions');
+            cpSync(resolve(fixtures_dir, 'test-input-actions.inputactions'), file);
+
+            try {
+                // Add map
+                const add_result = run_cli(['update', 'input-actions', file, '--add-map', 'UI', '--json']);
+                expect(JSON.parse(add_result).success).toBe(true);
+
+                // Verify
+                const read_result = run_cli(['read', 'input-actions', file, '--maps', '--json']);
+                expect(JSON.parse(read_result).maps).toHaveLength(2);
+
+                // Remove map
+                const rm_result = run_cli(['update', 'input-actions', file, '--remove-map', 'UI', '--json']);
+                expect(JSON.parse(rm_result).success).toBe(true);
+
+                // Verify
+                const read_result2 = run_cli(['read', 'input-actions', file, '--maps', '--json']);
+                expect(JSON.parse(read_result2).maps).toHaveLength(1);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+    });
+
+    // ========== Animation creation ==========
+    describe('create animation', () => {
+        it('should create a blank .anim file', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'anim-cli-'));
+            const out = join(tmp, 'NewAnim.anim');
+
+            try {
+                const result = run_cli(['create', 'animation', out, 'NewAnim', '--loop', '--sample-rate', '60', '--json']);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+                expect(json).toHaveProperty('guid');
+                expect(json.loop_time).toBe(true);
+                expect(json.sample_rate).toBe(60);
+                expect(existsSync(out)).toBe(true);
+                expect(existsSync(out + '.meta')).toBe(true);
+
+                // Verify YAML content
+                const content = readFileSync(out, 'utf-8');
+                expect(content).toContain('m_Name: NewAnim');
+                expect(content).toContain('m_LoopTime: 1');
+                expect(content).toContain('m_SampleRate: 60');
+                expect(content).toContain('m_FloatCurves: []');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+    });
+
+    // ========== Animation curve editing ==========
+    describe('update animation-curves', () => {
+        it('should add and remove a curve', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'anim-curve-'));
+            const file = join(tmp, 'test.anim');
+            cpSync(resolve(fixtures_dir, 'keyframe-test.anim'), file);
+
+            try {
+                // Add a float curve
+                const curve_spec = JSON.stringify({
+                    type: 'float',
+                    path: 'NewPath',
+                    attribute: 'm_Enabled',
+                    classID: 23,
+                    keyframes: [{ time: 0, value: 1 }, { time: 1, value: 0 }]
+                });
+                const add_result = run_cli(['update', 'animation-curves', file, '--add-curve', curve_spec, '--json']);
+                const aj = JSON.parse(add_result);
+                expect(aj.success).toBe(true);
+                expect(aj.changes[0]).toContain('added float curve');
+
+                // Verify it was added
+                const content = readFileSync(file, 'utf-8');
+                expect(content).toContain('path: NewPath');
+                expect(content).toContain('attribute: m_Enabled');
+
+                // Remove it
+                const rm_result = run_cli(['update', 'animation-curves', file, '--remove-curve', 'NewPath:m_Enabled', '--json']);
+                const rj = JSON.parse(rm_result);
+                expect(rj.success).toBe(true);
+                expect(rj.changes[0]).toContain('removed curve');
+
+                // Verify it was removed
+                const content2 = readFileSync(file, 'utf-8');
+                expect(content2).not.toContain('path: NewPath');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+    });
+
+    // ========== Animator state/transition authoring ==========
+    describe('update animator-state', () => {
+        it('should add a state', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'animator-'));
+            const file = join(tmp, 'test.controller');
+            cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
+
+            try {
+                const result = run_cli(['update', 'animator-state', file, '--add-state', 'Run', '--speed', '1.5', '--json']);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+                expect(json.changes[0]).toContain('added state "Run"');
+
+                // Verify in file
+                const content = readFileSync(file, 'utf-8');
+                expect(content).toContain('m_Name: Run');
+                expect(content).toContain('m_Speed: 1.5');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('should add a transition', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'animator-'));
+            const file = join(tmp, 'test.controller');
+            cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
+
+            try {
+                const result = run_cli([
+                    'update', 'animator-state', file,
+                    '--add-transition', 'Idle:Walk',
+                    '--condition', 'Speed,greater,0.1',
+                    '--duration', '0.25',
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+                expect(json.changes[0]).toContain('Idle -> Walk');
+
+                // Verify in file
+                const content = readFileSync(file, 'utf-8');
+                expect(content).toContain('m_ConditionEvent: Speed');
+                expect(content).toContain('m_TransitionDuration: 0.25');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('should remove a state', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'animator-'));
+            const file = join(tmp, 'test.controller');
+            cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
+
+            try {
+                const result = run_cli(['update', 'animator-state', file, '--remove-state', 'Walk', '--json']);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+                expect(json.changes[0]).toContain('removed state "Walk"');
+
+                // Verify Walk is gone
+                const content = readFileSync(file, 'utf-8');
+                expect(content).not.toContain('m_Name: Walk');
+                // Idle should still be there
+                expect(content).toContain('m_Name: Idle');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('should set default state', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'animator-'));
+            const file = join(tmp, 'test.controller');
+            cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
+
+            try {
+                const result = run_cli(['update', 'animator-state', file, '--set-default-state', 'Walk', '--json']);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+
+                // Verify default state changed
+                const content = readFileSync(file, 'utf-8');
+                expect(content).toContain('m_DefaultState: {fileID: 1102000030}');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+    });
+
+    // ========== Sibling ordering ==========
+    describe('update sibling-index', () => {
+        it('should reorder siblings', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'sibling-'));
+            const scene_fixture = resolve(fixtures_dir, 'external', 'SampleScene.unity');
+
+            // Only run if external fixture exists
+            if (!existsSync(scene_fixture)) {
+                return;
+            }
+
+            const file = join(tmp, 'SampleScene.unity');
+            cpSync(scene_fixture, file);
+
+            try {
+                const result = run_cli(['update', 'sibling-index', file, 'Main Camera', '0', '--json']);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+                expect(json.new_index).toBe(0);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+    });
+
+    // ========== Bug fix regression tests ==========
+    describe('bug fixes', () => {
+        it('Bug 1: should reject invalid package version', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'pkg-bug1-'));
+            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
+            try {
+                run_cli(['create', 'package', tmp, 'com.test.bad', 'not-a-version', '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('Invalid version');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('Bug 2: should reject duplicate map name', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'ia-bug2-'));
+            const file = join(tmp, 'test.inputactions');
+            cpSync(resolve(fixtures_dir, 'test-input-actions.inputactions'), file);
+            try {
+                // "Player" already exists in fixture
+                run_cli(['update', 'input-actions', file, '--add-map', 'Player', '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('already exists');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('Bug 4: should reject duplicate curve', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'anim-bug4-'));
+            const file = join(tmp, 'test.anim');
+            cpSync(resolve(fixtures_dir, 'keyframe-test.anim'), file);
+            try {
+                // Body/Mesh:m_Alpha already exists in the fixture
+                const spec = JSON.stringify({
+                    type: 'float', path: 'Body/Mesh', attribute: 'm_Alpha',
+                    classID: 23, keyframes: [{ time: 0, value: 999 }]
+                });
+                run_cli(['update', 'animation-curves', file, '--add-curve', spec, '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('already exists');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('Bug 5: should error on missing required fields in --add-curve', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'anim-bug5-'));
+            const file = join(tmp, 'test.anim');
+            cpSync(resolve(fixtures_dir, 'keyframe-test.anim'), file);
+            try {
+                run_cli(['update', 'animation-curves', file, '--add-curve', '{"type":"float","path":"Body"}', '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('Missing required field');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('Bug 6: should give specific error for non-existent curve removal', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'anim-bug6-'));
+            const file = join(tmp, 'test.anim');
+            cpSync(resolve(fixtures_dir, 'keyframe-test.anim'), file);
+            try {
+                run_cli(['update', 'animation-curves', file, '--remove-curve', 'NonExistent:m_Foo', '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('not found');
+                expect(json.error).toContain('NonExistent');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('Bug 7: should reject non-.anim file for animation-curves', () => {
+            try {
+                run_cli([
+                    'update', 'animation-curves',
+                    resolve(fixtures_dir, 'test-animator.controller'),
+                    '--add-curve', '{"type":"float","path":"Body","attribute":"m_Alpha","classID":23,"keyframes":[{"time":0,"value":0}]}',
+                    '--json'
+                ]);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('.anim');
+            }
+        });
+
+        it('Bug 3: --set-keyframes should accept single JSON argument', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'anim-bug3-'));
+            const file = join(tmp, 'test.anim');
+            cpSync(resolve(fixtures_dir, 'keyframe-test.anim'), file);
+            try {
+                const spec = JSON.stringify({
+                    curve: 'Body:m_LocalPosition.x',
+                    keyframes: [{ time: 0, value: 10 }, { time: 1, value: 20 }]
+                });
+                const result = run_cli(['update', 'animation-curves', file, '--set-keyframes', spec, '--json']);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+                expect(json.changes).toContain('set keyframes on Body:m_LocalPosition.x');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('Bug 8: should reject duplicate state name', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'anim-bug8-'));
+            const file = join(tmp, 'test.controller');
+            cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
+            try {
+                // "Idle" already exists in fixture
+                run_cli(['update', 'animator-state', file, '--add-state', 'Idle', '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('already exists');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('Edge 1: should reject empty component name', () => {
+            try {
+                run_cli(['create', 'component', resolve(fixtures_dir, 'SampleScene.unity'), 'Main Camera', '', '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('Component name must not be empty');
+            }
+        });
+
+        it('Edge 2: should reject empty package name', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'pkg-edge2-'));
+            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
+            try {
+                run_cli(['create', 'package', tmp, '', '1.0.0', '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('must not be empty');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('Edge 3: should reject package name with spaces', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'pkg-edge3-'));
+            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
+            try {
+                run_cli(['create', 'package', tmp, 'com.test package', '1.0.0', '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('must not contain spaces');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('Edge 4: should reject NaN keyframe time', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'anim-edge4-'));
+            const file = join(tmp, 'test.anim');
+            cpSync(resolve(fixtures_dir, 'keyframe-test.anim'), file);
+            try {
+                const spec = JSON.stringify({ curve: 'Body:m_LocalPosition.x', keyframes: [{ time: 'NaN', value: 0 }] });
+                run_cli(['update', 'animation-curves', file, '--set-keyframes', spec, '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('finite number');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('Edge 5: should reject boolean keyframe values', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'anim-edge5-'));
+            const file = join(tmp, 'test.anim');
+            cpSync(resolve(fixtures_dir, 'keyframe-test.anim'), file);
+            try {
+                const spec = JSON.stringify({ curve: 'Body:m_LocalPosition.x', keyframes: [{ time: true, value: false }] });
+                run_cli(['update', 'animation-curves', file, '--set-keyframes', spec, '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('finite number');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('Edge 6: should reject non-numeric sample-rate', () => {
+            try {
+                run_cli(['create', 'animation', '/tmp/edge6-test.anim', 'Test', '--sample-rate', 'abc', '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('sample-rate');
+            }
+        });
+
+        it('Edge 7: should give specific error for empty map name', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'ia-edge7-'));
+            const file = join(tmp, 'test.inputactions');
+            cpSync(resolve(fixtures_dir, 'test-input-actions.inputactions'), file);
+            try {
+                run_cli(['update', 'input-actions', file, '--add-map', '', '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('must not be empty');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('Edge 8: should reject condition on non-existent parameter', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'ctrl-edge8-'));
+            const file = join(tmp, 'test.controller');
+            cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
+            try {
+                run_cli(['update', 'animator-state', file, '--add-transition', 'Idle:Walk', '--condition', 'FakeParam,Greater,0.5', '--json']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('FakeParam');
+                expect(json.error).toContain('not found');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('Bug 9: --add-parameter should report skipped on malformed controller', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'ctrl-bug9-'));
+            const file = join(tmp, 'test.controller');
+            writeFileSync(file, [
+                '%YAML 1.1',
+                '%TAG !u! tag:unity3d.com,2011:',
+                '--- !u!91 &9100000',
+                'AnimatorController:',
+                '  m_Name: Malformed',
+                '  m_AnimatorParameters:',
+                '  - m_Name: Existing',
+                '    m_Type: 1',
+                '',
+            ].join('\n'));
+            try {
+                const result = run_cli(['update', 'animator', file, '--add-parameter', 'Speed', '--type', 'float', '--json']);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+                expect(json.changes.some((c: string) => c.includes('(skipped)'))).toBe(true);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('Edge 10: should return exit code 1 for invalid grep regex', () => {
+            try {
+                run_cli(['grep', resolve(fixtures_dir), '[invalid(regex']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBeTruthy();
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toBeDefined();
             }
         });
     });

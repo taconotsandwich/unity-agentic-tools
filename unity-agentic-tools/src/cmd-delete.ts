@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { deleteGameObject, removeComponent, deletePrefabInstance } from './editor';
 import { remove_scene } from './build-editor';
+import { remove_package } from './packages';
 
 export function build_delete_command(): Command {
     const cmd = new Command('delete')
@@ -56,6 +57,25 @@ export function build_delete_command(): Command {
             });
             console.log(JSON.stringify(result, null, 2));
             if (!result.success) process.exitCode = 1;
+        });
+
+    // ========== Package deletion ==========
+    cmd.command('package <project_path> <name>')
+        .description('Remove a package from Packages/manifest.json')
+        .option('-j, --json', 'Output as JSON')
+        .action((project_path, name, _options) => {
+            try {
+                const result = remove_package(project_path, name);
+                if ('error' in result) {
+                    console.log(JSON.stringify({ success: false, error: result.error }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+                console.log(JSON.stringify(result, null, 2));
+            } catch (err: unknown) {
+                console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+                process.exitCode = 1;
+            }
         });
 
     return cmd;

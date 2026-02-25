@@ -8,8 +8,8 @@ TypeScript CLI + native Rust backend providing token-efficient Unity file manipu
 
 **Core Structure:**
 - `unity-agentic-tools/src/` - TypeScript source code
-- `unity-agentic-tools/test/` - Vitest tests (891 tests)
-- `rust-core/` - Native Rust module via napi-rs (162 tests)
+- `unity-agentic-tools/test/` - Vitest tests (871 tests)
+- `rust-core/` - Native Rust module via napi-rs (173 tests)
 - `doc-indexer/` - Documentation indexing module
 
 ## Quick Setup
@@ -29,7 +29,7 @@ bun install && bun run build:rust && bun run build
 ```bash
 bun run build:rust     # Rebuild Rust native module (after .rs changes)
 bun run build          # Build TypeScript
-bun run test           # Unit tests (891 TS + 162 Rust)
+bun run test           # Unit tests (871 TS + 173 Rust)
 bun run test:integration  # CLI integration tests
 ```
 
@@ -46,7 +46,7 @@ bun run test:integration  # CLI integration tests
 - Functions/Methods: snake_case (`scan_scene`, `find_by_name`)
 - Constants: UPPER_SNAKE_CASE (`MAX_CHUNK_SIZE`)
 
-## CLI Commands Reference (69 commands)
+## CLI Commands Reference (76 commands)
 
 All commands: `unity-agentic-tools <command> [args]`
 
@@ -60,7 +60,7 @@ All commands: `unity-agentic-tools <command> [args]`
 - `cleanup -p <project>` - Remove cached data
 - `status -p <project>` - Show current configuration
 
-### Create (9 subcommands)
+### Create (14 subcommands)
 - `create gameobject <file> <name>` - New GameObject (`-p` for parent)
 - `create scene <path>` - New .unity file (`-d` for defaults)
 - `create prefab-variant <source> <output>` - Prefab Variant
@@ -70,11 +70,17 @@ All commands: `unity-agentic-tools <command> [args]`
 - `create component-copy <file> <src_fid> <target>` - Copy component
 - `create build <project> <scene>` - Add scene to build settings
 - `create material <output>` - New Material (`--shader`, `--properties`)
+- `create package <project> <name> <version>` - Add package to manifest.json
+- `create input-actions <path> <name>` - Create blank .inputactions file
+- `create animation <path> [name]` - Create blank .anim file
+- `create animator <path> [name]` - Create blank .controller file
+- `create prefab <file> <name>` - Create prefab from GameObject
 
-### Read (18 subcommands)
+### Read (21 subcommands)
 - `read scene <file>` - GameObject hierarchy (`--properties`, `--summary`, `--page-size`, `--filter-component`)
 - `read gameobject <file> <id>` - Single object by name/fileID (`-c` component filter, `-p` properties)
-- `read asset <file>` - Any Unity YAML asset file
+- `read asset <file>` - Any Unity YAML asset file (`--raw` to skip mesh auto-decode)
+- `read scriptable-object` - (Deprecated: renamed to `read asset`)
 - `read material <file>` - Structured material properties (`--summary`, `--project`)
 - `read dependencies <file>` - Asset GUID dependencies (`--recursive`, `--unresolved`)
 - `read dependents <project> <guid>` - Reverse dependency lookup
@@ -90,8 +96,10 @@ All commands: `unity-agentic-tools <command> [args]`
 - `read meta <file>` - .meta importer settings
 - `read animation <file>` - AnimationClip (`--summary`, `--paths`, `--curves`)
 - `read animator <file>` - AnimatorController (`--summary`, `--parameters`, `--states`, `--transitions`)
+- `read manifest <project>` - List packages from manifest.json (`--search`)
+- `read input-actions <file>` - Input Actions file (`--summary`, `--maps`, `--actions`, `--bindings`)
 
-### Update (24 subcommands)
+### Update (28 subcommands)
 - `update gameobject <file> <name> <prop> <value>` - Edit GameObject property
 - `update component <file> <fid> <prop> <value>` - Edit component (dotted paths, array paths)
 - `update transform <file> <id>` - Position/rotation/scale (`-p`, `-r`, `-s`)
@@ -109,13 +117,18 @@ All commands: `unity-agentic-tools <command> [args]`
 - `update meta [file]` - Edit .meta (`--set`, `--max-size`, `--compression`, `--batch`, `--dry-run`)
 - `update animation <file>` - Edit AnimationClip (`--set`, `--add-event`, `--remove-event`)
 - `update animator <file>` - Edit parameters (`--add-parameter`, `--type`, `--remove-parameter`, `--set-default`)
+- `update sibling-index <file> <name> <index>` - Set sibling index of a GameObject
+- `update input-actions <file>` - Edit Input Actions (add/remove maps, actions, bindings)
+- `update animation-curves <file>` - Add, remove, or modify animation curves
+- `update animator-state <file>` - Add/remove states and transitions
 - `update prefab unpack|override|remove-override|remove-component|restore-component|remove-gameobject|restore-gameobject`
 
-### Delete (4 subcommands)
+### Delete (5 subcommands)
 - `delete gameobject <file> <name>` - Delete GameObject and hierarchy
 - `delete component <file> <file_id>` - Remove component
 - `delete build <project> <scene>` - Remove scene from build settings
 - `delete prefab <file> <instance>` - Delete PrefabInstance
+- `delete package <project> <name>` - Remove package from manifest.json
 
 ## Claude Code Integration
 

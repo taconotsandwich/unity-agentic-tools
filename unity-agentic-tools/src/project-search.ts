@@ -1,7 +1,7 @@
 import { readdirSync, statSync, readFileSync, existsSync } from 'fs';
 import * as path from 'path';
 import { UnityScanner, isNativeModuleAvailable, getNativeWalkProjectFiles, getNativeGrepProject } from './scanner';
-import { glob_match } from './utils';
+import { glob_match, is_match_all } from './utils';
 import type {
     ProjectSearchOptions,
     ProjectSearchResult,
@@ -293,7 +293,7 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
                 // Slow path: need full component data
                 gameObjects = scanner.scan_scene_with_components(file);
                 // If name filter is also specified, post-filter by name
-                if (name) {
+                if (name && !is_match_all(name)) {
                     const nameLower = name.toLowerCase();
                     const hasWildcard = name.includes('*') || name.includes('?');
                     gameObjects = gameObjects.filter((go: GameObjectWithComponents) => {
@@ -311,7 +311,7 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
                 // Medium path: tag/layer only — no component extraction
                 gameObjects = scanner.scan_scene_metadata(file);
                 // If name filter is also specified, post-filter by name
-                if (name) {
+                if (name && !is_match_all(name)) {
                     const nameLower = name.toLowerCase();
                     const hasWildcard = name.includes('*') || name.includes('?');
                     gameObjects = gameObjects.filter((go: GameObjectWithComponents) => {

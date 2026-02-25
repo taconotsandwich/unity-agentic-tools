@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { existsSync, writeFileSync } from 'fs';
+import { basename } from 'path';
 import { randomBytes } from 'crypto';
 import {
     createGameObject,
@@ -11,6 +12,9 @@ import {
     copyComponent,
 } from './editor';
 import { add_scene } from './build-editor';
+import { add_package } from './packages';
+import { save_input_actions } from './input-actions';
+import type { InputActionsFile } from './input-actions';
 
 export function build_create_command(): Command {
     const cmd = new Command('create')
@@ -105,6 +109,12 @@ export function build_create_command(): Command {
         .option('-p, --project <path>', 'Unity project path (for script GUID lookup)')
         .option('-j, --json', 'Output as JSON')
         .action((file, object_name, component, options) => {
+            if (!component || component.trim() === '') {
+                console.log(JSON.stringify({ success: false, file_path: file, error: 'Component name must not be empty' }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
             const result = addComponent({
                 file_path: file,
                 game_object_name: object_name,
@@ -261,6 +271,337 @@ NativeFormatImporter:
                 guid,
                 name,
                 shader_guid,
+            }, null, 2));
+        });
+
+    // ========== Package creation ==========
+    cmd.command('package <project_path> <name> <version>')
+        .description('Add a package to Packages/manifest.json')
+        .option('-j, --json', 'Output as JSON')
+        .action((project_path, name, version, _options) => {
+            try {
+                const result = add_package(project_path, name, version);
+                if ('error' in result) {
+                    console.log(JSON.stringify({ success: false, error: result.error }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+                console.log(JSON.stringify(result, null, 2));
+            } catch (err: unknown) {
+                console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+                process.exitCode = 1;
+            }
+        });
+
+    // ========== Input Actions creation ==========
+    cmd.command('input-actions <output_path> <name>')
+        .description('Create a blank .inputactions file')
+        .option('-j, --json', 'Output as JSON')
+        .action((output_path, name, _options) => {
+            if (existsSync(output_path)) {
+                console.log(JSON.stringify({ success: false, error: `File already exists: ${output_path}` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            const blank: InputActionsFile = {
+                name,
+                maps: [],
+                controlSchemes: [],
+            };
+            save_input_actions(output_path, blank);
+
+            // Generate .meta file
+            const guid = randomBytes(16).toString('hex');
+            const meta_content = `fileFormatVersion: 2
+guid: ${guid}
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 2
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+  script: {fileID: 11500000, guid: 8404be70184654265930450def6a9037, type: 3}
+  generateWrapperCode: 0
+  wrapperCodePath:
+  wrapperClassName:
+  wrapperCodeNamespace:
+`;
+            writeFileSync(`${output_path}.meta`, meta_content, 'utf-8');
+
+            console.log(JSON.stringify({
+                success: true,
+                file: output_path,
+                meta_file: `${output_path}.meta`,
+                guid,
+                name,
+            }, null, 2));
+        });
+
+    // ========== Animation creation ==========
+    cmd.command('animation <output_path> [name]')
+        .description('Create a blank .anim AnimationClip file (name defaults to filename without extension)')
+        .option('--sample-rate <n>', 'Sample rate (default: 60)', '60')
+        .option('--loop', 'Enable loop time')
+        .option('-j, --json', 'Output as JSON')
+        .action((output_path, name_arg, options) => {
+            const name = name_arg || basename(output_path).replace(/\.anim$/i, '');
+            if (existsSync(output_path)) {
+                console.log(JSON.stringify({ success: false, error: `File already exists: ${output_path}` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            const parsed_rate = parseInt(options.sampleRate as string, 10);
+            if (isNaN(parsed_rate) || parsed_rate < 1) {
+                console.log(JSON.stringify({ success: false, error: `Invalid --sample-rate "${options.sampleRate}". Must be a positive integer.` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+            const sample_rate = parsed_rate;
+            const loop_time = options.loop ? 1 : 0;
+
+            const anim_content = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!74 &7400000
+AnimationClip:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: ${name}
+  serializedVersion: 7
+  m_Legacy: 0
+  m_Compressed: 0
+  m_UseHighQualityCurve: 1
+  m_RotationCurves: []
+  m_CompressedRotationCurves: []
+  m_EulerCurves: []
+  m_PositionCurves: []
+  m_ScaleCurves: []
+  m_FloatCurves: []
+  m_PPtrCurves: []
+  m_SampleRate: ${sample_rate}
+  m_WrapMode: 0
+  m_Bounds:
+    m_Center: {x: 0, y: 0, z: 0}
+    m_Extent: {x: 0, y: 0, z: 0}
+  m_ClipBindingConstant:
+    genericBindings: []
+    pptrCurveMapping: []
+  m_AnimationClipSettings:
+    serializedVersion: 2
+    m_AdditiveReferencePoseClip: {fileID: 0}
+    m_AdditiveReferencePoseTime: 0
+    m_StartTime: 0
+    m_StopTime: 1
+    m_OrientationOffsetY: 0
+    m_Level: 0
+    m_CycleOffset: 0
+    m_HasAdditiveReferencePose: 0
+    m_LoopTime: ${loop_time}
+    m_LoopBlend: 0
+    m_LoopBlendOrientation: 0
+    m_LoopBlendPositionY: 0
+    m_LoopBlendPositionXZ: 0
+    m_KeepOriginalOrientation: 0
+    m_KeepOriginalPositionY: 1
+    m_KeepOriginalPositionXZ: 0
+    m_HeightFromFeet: 0
+    m_Mirror: 0
+  m_EditorCurves: []
+  m_EulerEditorCurves: []
+  m_HasGenericRootTransform: 0
+  m_HasMotionFloatCurves: 0
+  m_Events: []
+`;
+
+            writeFileSync(output_path, anim_content, 'utf-8');
+
+            // Generate .meta file
+            const guid = randomBytes(16).toString('hex');
+            const meta_content = `fileFormatVersion: 2
+guid: ${guid}
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 7400000
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+`;
+            writeFileSync(`${output_path}.meta`, meta_content, 'utf-8');
+
+            console.log(JSON.stringify({
+                success: true,
+                file: output_path,
+                meta_file: `${output_path}.meta`,
+                guid,
+                name,
+                sample_rate,
+                loop_time: loop_time === 1,
+            }, null, 2));
+        });
+
+    // ========== create animator ==========
+    cmd.command('animator <output_path> [name]')
+        .description('Create a blank .controller AnimatorController file (name defaults to filename without extension)')
+        .option('--layer <name>', 'Name of the initial layer (default: "Base Layer")', 'Base Layer')
+        .option('-j, --json', 'Output as JSON')
+        .action((output_path, name_arg, options) => {
+            const name = name_arg || basename(output_path).replace(/\.controller$/i, '');
+            if (!output_path.toLowerCase().endsWith('.controller')) {
+                console.log(JSON.stringify({ success: false, error: 'Output path must end with .controller' }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+            if (existsSync(output_path)) {
+                console.log(JSON.stringify({ success: false, error: `File already exists: ${output_path}` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            const layer_name = options.layer as string;
+            const ctrl_content = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!91 &9100000
+AnimatorController:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: ${name}
+  serializedVersion: 5
+  m_AnimatorParameters: []
+  m_AnimatorLayers:
+  - serializedVersion: 5
+    m_Name: ${layer_name}
+    m_StateMachine: {fileID: 1107000010}
+    m_Mask: {fileID: 0}
+    m_Motions: []
+    m_Behaviours: []
+    m_BlendingMode: 0
+    m_SyncedLayerIndex: -1
+    m_DefaultWeight: 0
+    m_IKPass: 0
+    m_SyncedLayerAffectsTiming: 0
+    m_Controller: {fileID: 9100000}
+--- !u!1107 &1107000010
+AnimatorStateMachine:
+  serializedVersion: 6
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: ${layer_name}
+  m_ChildStates: []
+  m_ChildStateMachines: []
+  m_AnyStateTransitions: []
+  m_EntryTransitions: []
+  m_StateMachineTransitions: {}
+  m_StateMachineBehaviours: []
+  m_AnyStatePosition: {x: 50, y: 20, z: 0}
+  m_EntryPosition: {x: 50, y: 120, z: 0}
+  m_ExitPosition: {x: 800, y: 120, z: 0}
+  m_ParentStateMachinePosition: {x: 800, y: 20, z: 0}
+  m_DefaultState: {fileID: 0}
+`;
+
+            writeFileSync(output_path, ctrl_content, 'utf-8');
+
+            const guid = randomBytes(16).toString('hex');
+            const meta_content = `fileFormatVersion: 2
+guid: ${guid}
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 9100000
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+`;
+            writeFileSync(`${output_path}.meta`, meta_content, 'utf-8');
+
+            console.log(JSON.stringify({
+                success: true,
+                file: output_path,
+                meta_file: `${output_path}.meta`,
+                guid,
+                name,
+                layer: layer_name,
+            }, null, 2));
+        });
+
+    // ========== create prefab ==========
+    cmd.command('prefab <output_path> [name]')
+        .description('Create a blank .prefab file (name defaults to filename without extension)')
+        .option('-j, --json', 'Output as JSON')
+        .action((output_path, name_arg) => {
+            const name = name_arg || basename(output_path).replace(/\.prefab$/i, '');
+            if (!output_path.toLowerCase().endsWith('.prefab')) {
+                console.log(JSON.stringify({ success: false, error: 'Output path must end with .prefab' }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+            if (existsSync(output_path)) {
+                console.log(JSON.stringify({ success: false, error: `File already exists: ${output_path}` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            const prefab_content = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &100000
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 400000}
+  m_Layer: 0
+  m_Name: ${name}
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &400000
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 100000}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+`;
+
+            writeFileSync(output_path, prefab_content, 'utf-8');
+
+            const guid = randomBytes(16).toString('hex');
+            const meta_content = `fileFormatVersion: 2
+guid: ${guid}
+PrefabImporter:
+  externalObjects: {}
+  userData:
+  assetBundleName:
+  assetBundleVariant:
+`;
+            writeFileSync(`${output_path}.meta`, meta_content, 'utf-8');
+
+            console.log(JSON.stringify({
+                success: true,
+                file: output_path,
+                meta_file: `${output_path}.meta`,
+                guid,
+                name,
             }, null, 2));
         });
 

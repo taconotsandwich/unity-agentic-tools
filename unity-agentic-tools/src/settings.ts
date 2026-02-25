@@ -199,8 +199,57 @@ function parse_time_manager(content: string): TimeSettingsData {
     };
 }
 
-function parse_generic_asset(content: string): Record<string, any> {
-    const result: Record<string, any> = {};
+interface InputAxis {
+    name: string;
+    descriptive_name: string;
+    descriptive_negative_name: string;
+    negative_button: string;
+    positive_button: string;
+    alt_negative_button: string;
+    alt_positive_button: string;
+    gravity: number;
+    dead: number;
+    sensitivity: number;
+    snap: boolean;
+    invert: boolean;
+    type: number;
+    axis: number;
+    joy_num: number;
+}
+
+function parse_input_manager(content: string): { axes: InputAxis[] } {
+    const axes: InputAxis[] = [];
+    const entries = content.split(/\n  - serializedVersion:/);
+    for (let i = 1; i < entries.length; i++) {
+        const block = entries[i];
+        const field = (key: string): string => {
+            const re = new RegExp(`^\\s*${key}:[ \\t]*(.*)$`, 'm');
+            const m = re.exec(block);
+            return m ? m[1].trim() : '';
+        };
+        axes.push({
+            name: field('m_Name'),
+            descriptive_name: field('descriptiveName'),
+            descriptive_negative_name: field('descriptiveNegativeName'),
+            negative_button: field('negativeButton'),
+            positive_button: field('positiveButton'),
+            alt_negative_button: field('altNegativeButton'),
+            alt_positive_button: field('altPositiveButton'),
+            gravity: parseFloat(field('gravity') || '0'),
+            dead: parseFloat(field('dead') || '0'),
+            sensitivity: parseFloat(field('sensitivity') || '0'),
+            snap: field('snap') === '1',
+            invert: field('invert') === '1',
+            type: parseInt(field('type') || '0', 10),
+            axis: parseInt(field('axis') || '0', 10),
+            joy_num: parseInt(field('joyNum') || '0', 10),
+        });
+    }
+    return { axes };
+}
+
+function parse_generic_asset(content: string): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
 
     // Extract simple key: value pairs from the main block
     const lines = content.split('\n');
@@ -208,7 +257,7 @@ function parse_generic_asset(content: string): Record<string, any> {
         const match = line.match(/^\s{2}(\w[\w\s]*\w|\w+):\s*(.+)$/);
         if (match) {
             const key = match[1];
-            let value: any = match[2].trim();
+            let value: string | number = match[2].trim();
 
             // Try parsing as number
             if (/^-?\d+(\.\d+)?$/.test(value)) {
@@ -270,6 +319,9 @@ export function read_settings(options: ReadSettingsOptions): ReadSettingsResult 
             break;
         case 'TimeManager':
             data = parse_time_manager(content);
+            break;
+        case 'InputManager':
+            data = parse_input_manager(content);
             break;
         default:
             data = parse_generic_asset(content);

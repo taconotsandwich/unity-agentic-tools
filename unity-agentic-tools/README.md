@@ -15,19 +15,19 @@ unity-agentic-tools read gameobject MyScene.unity "Main Camera" -p
 unity-agentic-tools update transform MyScene.unity "Main Camera" -p 0,5,-10
 ```
 
-## Commands (69 total)
+## Commands (76 total)
 
-### Read (18)
-`read scene` | `read gameobject` | `read asset` | `read material` | `read dependencies` | `read dependents` | `read unused` | `read settings` | `read build` | `read overrides` | `read component` | `read reference` | `read script` | `read scripts` | `read log` | `read meta` | `read animation` | `read animator`
+### Read (21)
+`read scene` | `read gameobject` | `read asset` | `read scriptable-object` | `read material` | `read dependencies` | `read dependents` | `read unused` | `read settings` | `read build` | `read overrides` | `read component` | `read reference` | `read script` | `read scripts` | `read log` | `read meta` | `read animation` | `read animator` | `read manifest` | `read input-actions`
 
-### Create (9)
-`create gameobject` | `create scene` | `create prefab-variant` | `create scriptable-object` | `create meta` | `create component` | `create component-copy` | `create build` | `create material`
+### Create (14)
+`create gameobject` | `create scene` | `create prefab-variant` | `create scriptable-object` | `create meta` | `create component` | `create component-copy` | `create build` | `create material` | `create package` | `create input-actions` | `create animation` | `create animator` | `create prefab`
 
-### Update (24)
-`update gameobject` | `update component` | `update transform` | `update scriptable-object` | `update settings` | `update tag` | `update layer` | `update sorting-layer` | `update parent` | `update build` | `update array` | `update batch` | `update batch-components` | `update material` | `update meta` | `update animation` | `update animator` | `update prefab` (7 subcommands)
+### Update (28)
+`update gameobject` | `update component` | `update transform` | `update scriptable-object` | `update settings` | `update tag` | `update layer` | `update sorting-layer` | `update parent` | `update build` | `update array` | `update batch` | `update batch-components` | `update material` | `update meta` | `update animation` | `update animator` | `update sibling-index` | `update input-actions` | `update animation-curves` | `update animator-state` | `update prefab` (7 subcommands)
 
-### Delete (4)
-`delete gameobject` | `delete component` | `delete build` | `delete prefab`
+### Delete (5)
+`delete gameobject` | `delete component` | `delete build` | `delete prefab` | `delete package`
 
 ### Utilities (8)
 `search` | `grep` | `clone` | `version` | `docs` | `setup` | `cleanup` | `status`
