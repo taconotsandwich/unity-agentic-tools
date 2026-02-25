@@ -158,10 +158,13 @@ export class UnityDocument {
         const transform_ids: string[] = [];
 
         for (const go of game_objects) {
-            // First component listed is always the Transform
-            const match = go.raw.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(\d+)\}/);
-            if (match) {
-                transform_ids.push(match[1]);
+            const comp_matches = go.raw.matchAll(/component:[ \t]*\{fileID:[ \t]*(\d+)\}/g);
+            for (const cm of comp_matches) {
+                const comp_block = this.find_by_file_id(cm[1]);
+                if (comp_block && (comp_block.class_id === 4 || comp_block.class_id === 224)) {
+                    transform_ids.push(cm[1]);
+                    break;
+                }
             }
         }
 
@@ -212,12 +215,17 @@ export class UnityDocument {
             if (block.class_id === 4) {
                 return block;
             }
+            if (block.class_id === 224) {
+                return block;
+            }
             if (block.class_id === 1) {
-                // It's a GO, find its transform
-                const match = block.raw.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(\d+)\}/);
-                if (match) {
-                    const transform = this.find_by_file_id(match[1]);
-                    if (transform) return transform;
+                // It's a GO, find its Transform/RectTransform among components
+                const comp_matches = block.raw.matchAll(/component:[ \t]*\{fileID:[ \t]*(\d+)\}/g);
+                for (const cm of comp_matches) {
+                    const comp_block = this.find_by_file_id(cm[1]);
+                    if (comp_block && (comp_block.class_id === 4 || comp_block.class_id === 224)) {
+                        return comp_block;
+                    }
                 }
                 return { error: `Transform for GameObject fileID ${name_or_id} not found` };
             }

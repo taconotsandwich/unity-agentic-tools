@@ -203,13 +203,18 @@ program.command('search <path> [pattern]')
 program.command('grep <project_path> <pattern>')
   .description('Search for a regex pattern across project files')
   .option('--type <type>', 'File type filter: cs, yaml, unity, prefab, asset, all', 'all')
-  .option('-m, --max <n>', 'Max results', '100')
+  .option('-m, --max <n>', 'Max results (default: 100)', '100')
   .option('-C, --context <n>', 'Context lines around matches', '0')
   .option('-j, --json', 'Output as JSON')
   .action((project_path, pattern, options) => {
     if (!pattern || pattern.trim() === '') {
       console.log(JSON.stringify({ success: false, error: 'Pattern must not be empty' }, null, 2));
       process.exit(1);
+    }
+    const abs_path = path.resolve(project_path);
+    const project_root = find_unity_project_root(abs_path);
+    if (project_root) {
+      project_path = project_root;
     }
     const VALID_GREP_TYPES = ['cs', 'yaml', 'unity', 'prefab', 'asset', 'mat', 'anim', 'controller', 'all'];
     if (!VALID_GREP_TYPES.includes(options.type)) {

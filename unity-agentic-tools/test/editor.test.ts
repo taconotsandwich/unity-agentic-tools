@@ -319,13 +319,13 @@ describe('UnityEditor', () => {
         it('should validate Unity YAML header', () => {
             const valid = validateUnityYAML('%YAML 1.1\ntest content...');
 
-            expect(valid).toBe(true);
+            expect(valid).toBeNull();
         });
 
         it('should reject invalid YAML header', () => {
             const invalid = validateUnityYAML('Missing header');
 
-            expect(invalid).toBe(false);
+            expect(invalid).toBe('Missing or invalid YAML header');
         });
 
         it('should validate proper GUID format', () => {
@@ -333,20 +333,20 @@ describe('UnityEditor', () => {
                 '%YAML 1.1\nguid: 123e4567890abcdef1234567890abcdef12'
             );
 
-            expect(valid).toBe(true);
+            expect(valid).toBeNull();
         });
 
         it('should reject invalid GUID format', () => {
             const invalid = validateUnityYAML('%YAML 1.1\nguid: 123e456');
 
-            expect(invalid).toBe(false);
+            expect(invalid).toBe('Found invalid GUID format (missing characters)');
         });
 
         it('should validate actual Unity file content', () => {
             const content = readFileSync(temp_fixture.temp_path, 'utf-8');
             const valid = validateUnityYAML(content);
 
-            expect(valid).toBe(true);
+            expect(valid).toBeNull();
         });
     });
 
@@ -1572,7 +1572,7 @@ describe('removeComponent', () => {
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content.startsWith('%YAML 1.1')).toBe(true);
-        expect(validateUnityYAML(content)).toBe(true);
+        expect(validateUnityYAML(content)).toBeNull();
         // Other objects should still exist
         expect(content).toContain('m_Name: Main Camera');
         expect(content).toContain('m_Name: Directional Light');
@@ -1672,7 +1672,7 @@ describe('deleteGameObject', () => {
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content.startsWith('%YAML 1.1')).toBe(true);
-        expect(validateUnityYAML(content)).toBe(true);
+        expect(validateUnityYAML(content)).toBeNull();
     });
 
     it('should detach from parent when deleting child', () => {
@@ -2141,7 +2141,7 @@ describe('unpackPrefab', () => {
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content.startsWith('%YAML 1.1')).toBe(true);
-        expect(validateUnityYAML(content)).toBe(true);
+        expect(validateUnityYAML(content)).toBeNull();
     });
 });
 
@@ -2984,7 +2984,7 @@ describe('createScene', () => {
         createScene({ output_path: scenePath, include_defaults: true });
 
         const content = readFileSync(scenePath, 'utf-8');
-        expect(validateUnityYAML(content)).toBe(true);
+        expect(validateUnityYAML(content)).toBeNull();
     });
 
     it('should refuse to overwrite existing scene file (Bug #13)', () => {
@@ -3017,7 +3017,7 @@ describe('Bug #4: reparent YAML integrity', () => {
             // Verify YAML integrity — m_Children and m_Father should be on separate lines
             const content = readFileSync(temp.temp_path, 'utf-8');
             expect(content).not.toMatch(/m_Children:.*m_Father:/);
-            expect(validateUnityYAML(content)).toBe(true);
+            expect(validateUnityYAML(content)).toBeNull();
         } finally {
             temp.cleanup_fn();
         }

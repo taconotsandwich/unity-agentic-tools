@@ -188,6 +188,7 @@ impl Scanner {
         if fuzzy {
             let glob_re = glob_to_regex(&pattern);
             let lower_pattern = pattern.to_lowercase();
+            let norm_pattern = lower_pattern.replace('_', "");
 
             let mut matches: Vec<FindResult> = Vec::new();
 
@@ -199,7 +200,8 @@ impl Scanner {
                     }
                 } else {
                     let lower_name = go.name.to_lowercase();
-                    if lower_name.contains(&lower_pattern) {
+                    if lower_name.contains(&lower_pattern) ||
+                       (!norm_pattern.is_empty() && lower_name.replace('_', "").contains(&norm_pattern)) {
                         let score = calculate_fuzzy_score(&lower_pattern, &lower_name);
                         matches.push(FindResult::from_game_object(go, Some(score)));
                     }
@@ -214,7 +216,8 @@ impl Scanner {
                     }
                 } else {
                     let lower_name = pi.name.to_lowercase();
-                    if lower_name.contains(&lower_pattern) {
+                    if lower_name.contains(&lower_pattern) ||
+                       (!norm_pattern.is_empty() && lower_name.replace('_', "").contains(&norm_pattern)) {
                         let score = calculate_fuzzy_score(&lower_pattern, &lower_name);
                         matches.push(FindResult::from_prefab_instance(pi, Some(score)));
                     }
@@ -961,7 +964,14 @@ fn calculate_fuzzy_score(pattern: &str, text: &str) -> f64 {
         return 70.0;
     }
 
-    let common_chars: usize = pattern.chars().filter(|c| text.contains(*c)).count();
+    // Normalize underscores as optional separators: "Part_" matches "Part01"
+    let norm_pattern = pattern.replace('_', "");
+    let norm_text = text.replace('_', "");
+    if !norm_pattern.is_empty() && norm_text.contains(&norm_pattern) {
+        return 65.0;
+    }
+
+    let common_chars: usize = pattern.chars().filter(|c| *c != '_' && text.contains(*c)).count();
     if pattern.is_empty() {
         0.0
     } else {
@@ -1113,6 +1123,18 @@ mod tests {
     #[test]
     fn test_calculate_fuzzy_score_substring() {
         assert_eq!(calculate_fuzzy_score("amer", "camera"), 70.0);
+    }
+
+    #[test]
+    fn test_calculate_fuzzy_score_underscore_normalized() {
+        // "part_" should match "part01" via underscore normalization
+        assert_eq!(calculate_fuzzy_score("part_", "part01"), 65.0);
+        // "part_a" should match "parta"
+        assert_eq!(calculate_fuzzy_score("part_a", "parta"), 65.0);
+        // Exact with underscores still scores 100
+        assert_eq!(calculate_fuzzy_score("part_01", "part_01"), 100.0);
+        // Prefix with underscore
+        assert_eq!(calculate_fuzzy_score("part_", "part_01"), 85.0);
     }
 
     #[test]

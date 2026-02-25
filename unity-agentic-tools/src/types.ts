@@ -383,6 +383,8 @@ export interface EditComponentResult {
   file_id?: string;
   class_id?: number;
   bytes_written?: number;
+  no_change?: boolean;
+  message?: string;
   error?: string;
 }
 

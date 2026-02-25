@@ -163,6 +163,11 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .option('--file-id <id>', 'Target a specific block by file ID instead of the first object')
         .option('-j, --json', 'Output as JSON')
         .action((file, property, value, options) => {
+            if (!file.endsWith('.asset')) {
+                console.log(JSON.stringify({ success: false, error: `File is not a ScriptableObject (.asset): ${file}` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
             let targetFileId: string;
             if (options.fileId) {
                 targetFileId = options.fileId;
@@ -182,9 +187,11 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 new_value: value,
             });
 
-            // Rewrite generic "Component not found" to contextually appropriate message
-            if (!result.success && result.error?.includes('Component not found')) {
-                result.error = result.error.replace('Component not found', 'ScriptableObject not found');
+            // Rewrite generic component error to contextually appropriate message
+            if (!result.success && result.error) {
+                result.error = result.error
+                    .replace(/Component with file ID/g, 'Object with file ID')
+                    .replace(/component \d+/g, (m) => m.replace('component', 'object'));
             }
 
             console.log(JSON.stringify(result, null, 2));
@@ -418,7 +425,12 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .action((file, edits_json, _options) => {
             let raw_edits: Array<{ object_name: string; property: string; new_value?: string; value?: string }>;
             try {
-                raw_edits = JSON.parse(edits_json);
+                const parsed = JSON.parse(edits_json);
+                if (!Array.isArray(parsed)) {
+                    console.log(JSON.stringify({ success: false, error: 'Edits must be a JSON array. Format: [{"object_name":"...","property":"...","value":"..."}]' }, null, 2));
+                    process.exit(1);
+                }
+                raw_edits = parsed;
             } catch {
                 console.log(JSON.stringify({ success: false, error: 'Invalid JSON for edits' }, null, 2));
                 process.exit(1);
@@ -459,7 +471,12 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .action((file, edits_json, _options) => {
             let raw_edits: Array<{ file_id: string; property: string; new_value?: string; value?: string }>;
             try {
-                raw_edits = JSON.parse(edits_json);
+                const parsed = JSON.parse(edits_json);
+                if (!Array.isArray(parsed)) {
+                    console.log(JSON.stringify({ success: false, error: 'Edits must be a JSON array. Format: [{"file_id":"...","property":"...","value":"..."}]' }, null, 2));
+                    process.exit(1);
+                }
+                raw_edits = parsed;
             } catch {
                 console.log(JSON.stringify({ success: false, error: 'Invalid JSON for edits' }, null, 2));
                 process.exit(1);
@@ -641,6 +658,10 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 if (eq < 0) { console.log(JSON.stringify({ success: false, error: 'Invalid --set-texture format. Use property=guid' }, null, 2)); process.exit(1); }
                 const prop = (options.setTexture as string).slice(0, eq);
                 const guid = (options.setTexture as string).slice(eq + 1);
+                if (!/^[a-f0-9]{32}$/.test(guid)) {
+                    console.log(JSON.stringify({ success: false, error: `Invalid texture GUID "${guid}". Must be a 32-character hex string` }, null, 2));
+                    process.exit(1);
+                }
                 // Find the texture entry and replace its guid
                 const tex_section_re = new RegExp(`(- ${prop.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:[\\s\\S]*?m_Texture:\\s*\\{[^}]*guid:\\s*)[a-f0-9]+`);
                 if (tex_section_re.test(content)) {
@@ -890,6 +911,10 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 console.log(JSON.stringify({ success: false, error: `File not found: ${file}` }, null, 2));
                 process.exit(1);
             }
+            if (!file.endsWith('.anim')) {
+                console.log(JSON.stringify({ success: false, error: `File is not an AnimationClip (.anim): ${file}` }, null, 2));
+                process.exit(1);
+            }
             let content = readFileSync(file, 'utf-8');
             const changes: string[] = [];
 
@@ -1048,6 +1073,14 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             if (changes.length === 0) {
                 console.log(JSON.stringify({ success: false, error: 'No changes specified. Use --set, --add-event, or --remove-event' }, null, 2));
                 process.exit(1);
+            }
+
+            // Check if all changes were skipped (no real modifications)
+            const has_real_anim_changes = changes.some(c => !c.includes('(skipped)'));
+            if (!has_real_anim_changes) {
+                console.log(JSON.stringify({ success: false, file, changes, error: 'No properties were modified (all targets not found)' }, null, 2));
+                process.exitCode = 1;
+                return;
             }
 
             writeFileSync(file, content, 'utf-8');

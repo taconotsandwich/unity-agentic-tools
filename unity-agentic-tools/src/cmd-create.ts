@@ -298,6 +298,11 @@ NativeFormatImporter:
         .description('Create a blank .inputactions file')
         .option('-j, --json', 'Output as JSON')
         .action((output_path, name, _options) => {
+            if (!output_path.endsWith('.inputactions')) {
+                console.log(JSON.stringify({ success: false, error: 'Output path must end with .inputactions' }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
             if (existsSync(output_path)) {
                 console.log(JSON.stringify({ success: false, error: `File already exists: ${output_path}` }, null, 2));
                 process.exitCode = 1;
@@ -346,6 +351,11 @@ ScriptedImporter:
         .option('--loop', 'Enable loop time')
         .option('-j, --json', 'Output as JSON')
         .action((output_path, name_arg, options) => {
+            if (!output_path.endsWith('.anim')) {
+                console.log(JSON.stringify({ success: false, error: 'Output path must end with .anim' }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
             const name = name_arg || basename(output_path).replace(/\.anim$/i, '');
             if (existsSync(output_path)) {
                 console.log(JSON.stringify({ success: false, error: `File already exists: ${output_path}` }, null, 2));
