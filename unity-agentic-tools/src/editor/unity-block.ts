@@ -14,7 +14,7 @@ interface BlockHeader {
  * Regex for the Unity YAML block header line.
  * Captures: class_id, file_id, optional "stripped" suffix.
  */
-const HEADER_PATTERN = /^--- !u!(\d+) &(\d+)(\s+stripped)?/;
+const HEADER_PATTERN = /^--- !u!(\d+) &(-?\d+)(\s+stripped)?/;
 
 /**
  * Parse a Unity YAML block header line.

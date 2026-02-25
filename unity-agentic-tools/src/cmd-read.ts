@@ -9,6 +9,9 @@ import { get_build_settings } from './build-settings';
 import { UnityDocument } from './editor';
 import { load_guid_cache, load_guid_cache_for_file } from './guid-cache';
 import { path_glob_to_regex } from './utils';
+import { list_packages } from './packages';
+import { load_input_actions } from './input-actions';
+import type { InputActionsFile } from './input-actions';
 
 // ========== Material Parsing ==========
 
@@ -399,6 +402,7 @@ function parse_animation_yaml(content: string, include_curves = false): ParsedAn
     if (!content.includes('AnimationClip:')) return null;
 
     const paths = new Set<string>();
+    let raw_length = 0;
 
     for (let i = 0; i < lines.length; i++) {
         const trimmed = lines[i].trimStart();
@@ -415,6 +419,8 @@ function parse_animation_yaml(content: string, include_curves = false): ParsedAn
             result.loop_time = trimmed.slice('m_LoopTime:'.length).trim() === '1';
         } else if (trimmed.startsWith('m_StopTime:')) {
             result.duration = parseFloat(trimmed.slice('m_StopTime:'.length).trim()) || 0;
+        } else if (trimmed.startsWith('m_Length:')) {
+            raw_length = parseFloat(trimmed.slice('m_Length:'.length).trim()) || 0;
         } else if (trimmed.startsWith('m_PositionCurves:') && !trimmed.endsWith('[]')) {
             result.position_curve_count++;
         } else if (trimmed.startsWith('m_RotationCurves:') && !trimmed.endsWith('[]')) {
@@ -446,8 +452,10 @@ function parse_animation_yaml(content: string, include_curves = false): ParsedAn
     }
 
     // Count curves more accurately by counting "- curve:" entries in each section
+    // Also track max keyframe time for duration fallback (legacy clips lack m_Length)
     let in_section = '';
     let pos_count = 0, rot_count = 0, scale_count = 0, float_count = 0, euler_count = 0;
+    let max_keyframe_time = 0;
     for (const line of lines) {
         const t = line.trimStart();
         if (t.startsWith('m_PositionCurves:')) in_section = 'pos';
@@ -455,7 +463,7 @@ function parse_animation_yaml(content: string, include_curves = false): ParsedAn
         else if (t.startsWith('m_ScaleCurves:')) in_section = 'scale';
         else if (t.startsWith('m_FloatCurves:')) in_section = 'float';
         else if (t.startsWith('m_EulerCurves:')) in_section = 'euler';
-        else if (t.startsWith('m_') && t.includes(':')) in_section = '';
+        else if (/^  m_\w+:/.test(line)) in_section = '';
 
         if (t.startsWith('- curve:')) {
             if (in_section === 'pos') pos_count++;
@@ -463,6 +471,11 @@ function parse_animation_yaml(content: string, include_curves = false): ParsedAn
             else if (in_section === 'scale') scale_count++;
             else if (in_section === 'float') float_count++;
             else if (in_section === 'euler') euler_count++;
+        }
+
+        if (in_section && t.startsWith('time:')) {
+            const kt = parseFloat(t.slice('time:'.length).trim());
+            if (kt > max_keyframe_time) max_keyframe_time = kt;
         }
     }
     result.position_curve_count = pos_count;
@@ -472,6 +485,13 @@ function parse_animation_yaml(content: string, include_curves = false): ParsedAn
     result.euler_curve_count = euler_count;
 
     result.animated_paths = Array.from(paths);
+
+    // Duration priority: m_Length > max keyframe time > m_StopTime
+    // m_Length is actual clip duration (not present in legacy clips)
+    // Max keyframe time derived from curve data (reliable for legacy clips)
+    // m_StopTime is normalized (0-1) for legacy clips, only useful as last resort
+    if (raw_length > 0) result.duration = raw_length;
+    else if (max_keyframe_time > 0) result.duration = max_keyframe_time;
 
     // Parse full curve data if requested
     if (include_curves) {
@@ -594,7 +614,7 @@ interface AnimatorBlock {
 /** Split a multi-document Unity YAML into blocks. */
 function split_yaml_blocks(content: string): AnimatorBlock[] {
     const blocks: AnimatorBlock[] = [];
-    const doc_re = /^--- !u!(\d+) &(\d+)/;
+    const doc_re = /^--- !u!(\d+) &(-?\d+)/;
     const lines = content.split(/\r?\n/);
     let current_lines: string[] = [];
     let current_class_id = 0;
@@ -640,7 +660,7 @@ function yaml_field(raw: string, field: string): string | null {
 
 /** Extract an inline reference {fileID: X, guid: Y} from a string. */
 function parse_inline_ref(str: string): { fileID: string; guid: string } | null {
-    const m = /\{[^}]*fileID:\s*(\d+)(?:[^}]*guid:\s*([a-f0-9]+))?/.exec(str);
+    const m = /\{[^}]*fileID:\s*(-?\d+)(?:[^}]*guid:\s*([a-f0-9]+))?/.exec(str);
     return m ? { fileID: m[1], guid: m[2] || '' } : null;
 }
 
@@ -682,6 +702,10 @@ function validate_unity_yaml(file: string): string | null {
         require('fs').closeSync(fd);
         const header = buf.toString('utf-8');
         if (!header.startsWith('%YAML') || !header.includes('!u!')) {
+            // Check for binary serialization (null bytes in header)
+            if (buf.some(b => b === 0)) {
+                return `File "${file}" uses binary serialization — only text-format Unity files are supported. Re-serialize as text in Unity: Edit > Project Settings > Editor > Asset Serialization > Force Text`;
+            }
             return `File "${file}" is not a Unity YAML file (missing %YAML/!u! header)`;
         }
     } catch {
@@ -746,8 +770,8 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 process.exit(1);
             }
 
-            if (!file.endsWith('.unity') && result.gameobjects) {
-                result.warning = `File "${file}" is not a .unity scene file`;
+            if (!file.endsWith('.unity') && !file.endsWith('.prefab') && result.gameobjects) {
+                result.warning = `File "${file}" is not a .unity scene or prefab file`;
             }
             if (pageSizeWarning) {
                 result.warning = result.warning ? `${result.warning}; ${pageSizeWarning}` : pageSizeWarning;
@@ -772,6 +796,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     total_at_depth: result.total,
                     prefab_instances,
                     component_counts,
+                    ...(result.truncated ? { component_counts_note: 'Counts reflect current page only. Use --page-size or --cursor to see more.' } : {}),
                     page_shown: gos.length,
                     truncated: result.truncated,
                 }, null, 2));
@@ -849,6 +874,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
     cmd.command('asset <file>')
         .description('Read any Unity YAML asset file (.asset, .mat, .anim, etc.)')
         .option('-p, --properties', 'Include object properties (omitted by default for token efficiency)')
+        .option('--raw', 'Output raw hex data for mesh vertex/index buffers (skip auto-decode)')
         .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             const soValidationError = validate_unity_yaml(file);
@@ -856,7 +882,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 console.log(JSON.stringify({ error: soValidationError }, null, 2));
                 process.exit(1);
             }
-            const objects = getScanner().read_asset(file);
+            const objects = getScanner().read_asset(file, !options.raw);
             const outputObjects = options.properties
                 ? objects
                 : objects.map(obj => {
@@ -1768,8 +1794,16 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 }
                 if (in_layers && t.startsWith('m_Name:')) {
                     const name = t.slice('m_Name:'.length).trim();
-                    const sm_line = ctrl_lines[i + 1]?.trimStart() || '';
-                    const sm_ref = parse_inline_ref(sm_line);
+                    // Forward scan for m_StateMachine (don't assume it's the next line)
+                    let sm_ref: { fileID: string; guid: string } | null = null;
+                    for (let j = i + 1; j < Math.min(i + 10, ctrl_lines.length); j++) {
+                        const st = ctrl_lines[j].trimStart();
+                        if (st.startsWith('m_StateMachine:')) {
+                            sm_ref = parse_inline_ref(st);
+                            break;
+                        }
+                        if (st.startsWith('- serializedVersion:') || st.startsWith('m_AnimatorLayers:')) break;
+                    }
                     const blend_line = ctrl_lines.slice(i, i + 8).find(l => l.trimStart().startsWith('m_BlendingMode:'));
                     const weight_line = ctrl_lines.slice(i, i + 8).find(l => l.trimStart().startsWith('m_DefaultWeight:'));
                     layers.push({
@@ -1796,7 +1830,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             const state_to_layer: Record<string, string> = {};
             for (const sm of sm_blocks) {
                 const layer_name = sm_to_layer[sm.file_id] || 'Unknown';
-                const child_re = /m_State:\s*\{fileID:\s*(\d+)/g;
+                const child_re = /m_State:\s*\{fileID:\s*(-?\d+)/g;
                 let cm: RegExpExecArray | null;
                 while ((cm = child_re.exec(sm.raw)) !== null) {
                     state_to_layer[cm[1]] = layer_name;
@@ -1804,6 +1838,15 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             const animCache = load_guid_cache_for_file(file, options.project);
+
+            // Check if we should hint about missing GUID cache
+            const has_motion_refs = state_blocks.some(sb => {
+                const motion_line = sb.raw.split(/\r?\n/).find((l: string) => l.trimStart().startsWith('m_Motion:'));
+                if (!motion_line) return false;
+                const ref = parse_inline_ref(motion_line);
+                return ref && ref.guid;
+            });
+            const needs_setup_hint = !animCache && has_motion_refs;
 
             const states: State[] = state_blocks.map(sb => {
                 const name = yaml_field(sb.raw, 'm_Name') || '';
@@ -1826,8 +1869,25 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 duration: number;
                 offset: number;
                 destination_state_id: string;
+                source_state_id: string;
+                exit_time: number;
+                has_exit_time: boolean;
             }
             const transition_blocks = blocks.filter(b => b.class_id === 1101);
+
+            // Build reverse map: transition fileID -> source state fileID
+            const transition_to_source: Record<string, string> = {};
+            for (const sb of state_blocks) {
+                const t_re = /m_Transitions:[ \t]*\n((?:[ \t]*-[^\n]*\n)*)/;
+                const t_match = t_re.exec(sb.raw);
+                if (t_match) {
+                    const ref_re = /\{fileID:[ \t]*(-?\d+)/g;
+                    let rm: RegExpExecArray | null;
+                    while ((rm = ref_re.exec(t_match[1])) !== null) {
+                        transition_to_source[rm[1]] = sb.file_id;
+                    }
+                }
+            }
             const transitions: Transition[] = transition_blocks.map(tb => {
                 const t_lines = tb.raw.split(/\r?\n/);
                 const conditions: Transition['conditions'] = [];
@@ -1855,6 +1915,9 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     duration: parseFloat(yaml_field(tb.raw, 'm_TransitionDuration') || '0'),
                     offset: parseFloat(yaml_field(tb.raw, 'm_TransitionOffset') || '0'),
                     destination_state_id: dst_ref?.fileID || '',
+                    source_state_id: transition_to_source[tb.file_id] || '',
+                    exit_time: parseFloat(yaml_field(tb.raw, 'm_ExitTime') || '1'),
+                    has_exit_time: yaml_field(tb.raw, 'm_HasExitTime') !== '0',
                 };
             });
 
@@ -1872,15 +1935,18 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                         motion_path: s.motion_ref ? animCache?.resolve(s.motion_ref) ?? null : null,
                     });
                 }
-                console.log(JSON.stringify({ file, states_by_layer: by_layer }, null, 2));
+                const states_out: Record<string, unknown> = { file, states_by_layer: by_layer };
+                if (needs_setup_hint) states_out._hint = "Run 'setup <project>' to resolve motion paths";
+                console.log(JSON.stringify(states_out, null, 2));
                 return;
             }
             if (options.transitions) {
-                // Resolve destination state names
+                // Resolve state names
                 const state_names: Record<string, string> = {};
                 for (const s of states) state_names[s.file_id] = s.name;
                 const resolved = transitions.map(t => ({
                     ...t,
+                    source_state: state_names[t.source_state_id] || t.source_state_id,
                     destination_state: state_names[t.destination_state_id] || t.destination_state_id,
                 }));
                 console.log(JSON.stringify({ file, transitions: resolved }, null, 2));
@@ -1898,7 +1964,11 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 return;
             }
 
-            console.log(JSON.stringify({
+            // Build state name map for default output
+            const default_state_names: Record<string, string> = {};
+            for (const s of states) default_state_names[s.file_id] = s.name;
+
+            const default_out: Record<string, unknown> = {
                 file,
                 name: yaml_field(controller_block.raw, 'm_Name') || basename(file),
                 parameters: params,
@@ -1908,8 +1978,14 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     motion_guid: s.motion_ref,
                     motion_path: s.motion_ref ? animCache?.resolve(s.motion_ref) ?? null : null,
                 })),
-                transitions: transitions.length,
-            }, null, 2));
+                transitions: transitions.map(t => ({
+                    from: default_state_names[t.source_state_id] || t.source_state_id,
+                    to: default_state_names[t.destination_state_id] || t.destination_state_id,
+                    has_exit_time: t.has_exit_time,
+                })),
+            };
+            if (needs_setup_hint) default_out._hint = "Run 'setup <project>' to resolve motion paths";
+            console.log(JSON.stringify(default_out, null, 2));
         });
 
     // ========== P6.2: Reverse dependency lookup ==========
@@ -2075,6 +2151,87 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 truncated,
                 by_type,
             }, null, 2));
+        });
+
+    // ========== Package manifest reading ==========
+    cmd.command('manifest <project_path>')
+        .description('List packages from Packages/manifest.json')
+        .option('--search <pattern>', 'Filter packages by name pattern')
+        .option('-j, --json', 'Output as JSON')
+        .action((project_path, options) => {
+            const result = list_packages(project_path, options.search);
+            if ('error' in result) {
+                console.log(JSON.stringify({ success: false, error: result.error }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+            console.log(JSON.stringify({ success: true, ...result }, null, 2));
+        });
+
+    // ========== Input Actions reading ==========
+    cmd.command('input-actions <file>')
+        .description('Read a Unity Input Actions file (.inputactions)')
+        .option('--summary', 'Show map count, action count, binding count, scheme count')
+        .option('--maps', 'List action maps only')
+        .option('--actions', 'List all actions grouped by map')
+        .option('--bindings', 'List all bindings grouped by action')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, options) => {
+            const data = load_input_actions(file);
+            if ('error' in data) {
+                console.log(JSON.stringify({ success: false, error: data.error }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+            const ia = data as InputActionsFile;
+
+            if (options.summary) {
+                const total_actions = ia.maps.reduce((sum, m) => sum + m.actions.length, 0);
+                const total_bindings = ia.maps.reduce((sum, m) => sum + m.bindings.length, 0);
+                console.log(JSON.stringify({
+                    file,
+                    name: ia.name,
+                    map_count: ia.maps.length,
+                    action_count: total_actions,
+                    binding_count: total_bindings,
+                    control_scheme_count: ia.controlSchemes.length,
+                }, null, 2));
+                return;
+            }
+
+            if (options.maps) {
+                console.log(JSON.stringify({
+                    file,
+                    maps: ia.maps.map(m => ({ name: m.name, action_count: m.actions.length, binding_count: m.bindings.length })),
+                }, null, 2));
+                return;
+            }
+
+            if (options.actions) {
+                const by_map: Record<string, { name: string; type: string; expectedControlType: string }[]> = {};
+                for (const m of ia.maps) {
+                    by_map[m.name] = m.actions.map(a => ({ name: a.name, type: a.type, expectedControlType: a.expectedControlType }));
+                }
+                console.log(JSON.stringify({ file, actions_by_map: by_map }, null, 2));
+                return;
+            }
+
+            if (options.bindings) {
+                const by_map: Record<string, Record<string, { path: string; groups: string }[]>> = {};
+                for (const m of ia.maps) {
+                    by_map[m.name] = {};
+                    for (const b of m.bindings) {
+                        const action_name = b.action;
+                        if (!by_map[m.name][action_name]) by_map[m.name][action_name] = [];
+                        by_map[m.name][action_name].push({ path: b.path, groups: b.groups });
+                    }
+                }
+                console.log(JSON.stringify({ file, bindings_by_map: by_map }, null, 2));
+                return;
+            }
+
+            // Full output
+            console.log(JSON.stringify({ file, ...ia }, null, 2));
         });
 
     return cmd;

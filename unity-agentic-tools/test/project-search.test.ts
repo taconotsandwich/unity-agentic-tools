@@ -190,6 +190,17 @@ describeIfNative('search_project', () => {
         }
     });
 
+    it('should treat "." as match-all when combined with layer filter', () => {
+        const result = search_project({
+            project_path: EXTERNAL_FIXTURES,
+            name: '.',
+            layer: 0,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.total_matches).toBeGreaterThanOrEqual(1);
+    });
+
     it('should combine tag and name filters', () => {
         const result = search_project({
             project_path: EXTERNAL_FIXTURES,

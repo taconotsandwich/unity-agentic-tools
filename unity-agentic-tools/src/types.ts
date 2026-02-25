@@ -227,7 +227,7 @@ export interface NativeScannerInstance {
     maxDepth?: number;
     filterComponent?: string;
   }): PaginatedInspection;
-  readAsset(file: string): AssetObject[];
+  readAsset(file: string, decodeMesh?: boolean): AssetObject[];
 }
 
 // Asset object types (for .asset files / ScriptableObjects)

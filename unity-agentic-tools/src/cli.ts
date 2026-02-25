@@ -77,7 +77,7 @@ program.command('search <path> [pattern]')
   .option('-c, --component <type>', 'Filter by component type')
   .option('-t, --tag <tag>', 'Filter by tag')
   .option('-l, --layer <index>', 'Filter by layer index')
-  .option('--type <type>', 'File type filter: scene, prefab, mat, anim, controller, asset, all', 'all')
+  .option('-T, --type <type>', 'File type filter: scene, prefab, mat, anim, controller, asset, all', 'all')
   .option('-m, --max-matches <n>', 'Max total matches (caps results across all files)')
   .option('-j, --json', 'Output as JSON')
   .action((search_path, pattern, options) => {
@@ -231,6 +231,7 @@ program.command('grep <project_path> <pattern>')
     });
 
     console.log(JSON.stringify(result, null, 2));
+    if (!result.success) process.exitCode = 1;
   });
 
 // Version command (top-level — reads Unity project version)

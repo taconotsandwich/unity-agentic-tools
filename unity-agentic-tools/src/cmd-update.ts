@@ -21,6 +21,12 @@ import {
 } from './editor';
 import { edit_settings, edit_tag, edit_layer, edit_sorting_layer } from './settings';
 import { enable_scene, disable_scene, move_scene } from './build-editor';
+import { load_input_actions, save_input_actions, add_map, remove_map, add_action, remove_action, add_binding, remove_binding, add_control_scheme, remove_control_scheme } from './input-actions';
+import type { InputActionsFile } from './input-actions';
+import { UnityDocument } from './editor';
+import { update_root_order_in_block, extractGuidFromMeta } from './editor/shared';
+import { split_yaml_blocks, parse_inline_ref, find_state_by_name, find_state_machine_for_layer, generate_file_id, collect_file_ids } from './animator-utils';
+import type { AnimatorBlock } from './animator-utils';
 
 function parseVector(str: string): { x: number; y: number; z: number } {
     const parts = str.split(',').map(Number);
@@ -90,6 +96,16 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .description('Edit any component property by file ID. Supports dotted paths (m_LocalPosition.x) and array paths (m_Materials.Array.data[0])')
         .option('-j, --json', 'Output as JSON')
         .action((file, file_id, property, value, _options) => {
+            // Validate m_RootOrder: must be a non-negative integer
+            if (property === 'm_RootOrder') {
+                const num = Number(value);
+                if (!Number.isInteger(num) || num < 0) {
+                    console.log(JSON.stringify({ success: false, error: `m_RootOrder must be a non-negative integer, got "${value}"` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+            }
+
             const result = editComponentByFileId({
                 file_path: file,
                 file_id: file_id,
@@ -866,7 +882,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
     cmd.command('animation <file>')
         .description('Edit AnimationClip settings and events')
         .option('--set <property=value>', 'Set a clip property (e.g., wrap-mode=2 for Loop)', (v: string, p: string[]) => [...p, v], [] as string[])
-        .option('--add-event <time,function[,data]>', 'Add an animation event (e.g., 0.5,OnFootstep,left)')
+        .option('--add-event <time,function[,data]>', 'Add an animation event (e.g., 0.5,OnFootstep,left)', (v: string, p: string[]) => [...p, v], [] as string[])
         .option('--remove-event <index>', 'Remove an animation event by index (0-based)')
         .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
@@ -899,8 +915,8 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             }
 
             // --add-event
-            if (options.addEvent) {
-                const parts = (options.addEvent as string).split(',');
+            for (const addEventEntry of (options.addEvent as string[])) {
+                const parts = addEventEntry.split(',');
                 if (parts.length < 2) {
                     console.log(JSON.stringify({ success: false, error: 'Invalid --add-event format. Use: time,functionName[,data]' }, null, 2));
                     process.exit(1);
@@ -1094,14 +1110,17 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 const empty_re = /m_AnimatorParameters: \[\]/;
                 if (empty_re.test(content)) {
                     content = content.replace(empty_re, `m_AnimatorParameters:\n${param_entry}`);
+                    changes.push(`added parameter "${name}" (${type_str})`);
                 } else {
                     // Append before m_AnimatorLayers
                     const layers_re = /(  m_AnimatorLayers:)/;
                     if (layers_re.test(content)) {
                         content = content.replace(layers_re, `${param_entry}\n$1`);
+                        changes.push(`added parameter "${name}" (${type_str})`);
+                    } else {
+                        changes.push(`parameter "${name}": could not find insertion point (skipped)`);
                     }
                 }
-                changes.push(`added parameter "${name}" (${type_str})`);
             }
 
             // --remove-parameter
@@ -1170,6 +1189,958 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             }
 
             // Restore original line endings
+            if (had_crlf) content = content.replace(/\n/g, '\r\n');
+            writeFileSync(file, content, 'utf-8');
+            console.log(JSON.stringify({ success: true, file, changes }, null, 2));
+        });
+
+    // ========== Sibling ordering ==========
+    cmd.command('sibling-index <file> <object_name> <index>')
+        .description('Set the sibling index of a GameObject, renumbering all siblings')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, object_name, index_str, _options) => {
+            const target_index = parseInt(index_str, 10);
+            if (!Number.isFinite(target_index) || target_index < 0) {
+                console.log(JSON.stringify({ success: false, error: 'Index must be a non-negative integer' }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            if (!existsSync(file)) {
+                console.log(JSON.stringify({ success: false, error: `File not found: ${file}` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            try {
+                const doc = UnityDocument.from_file(file);
+                const result = doc.require_unique_transform(object_name);
+                if ('error' in result) {
+                    console.log(JSON.stringify({ success: false, error: result.error }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+                const target_transform = result;
+
+                // Get the parent fileID
+                const father_val = target_transform.get_property('m_Father');
+                if (!father_val) {
+                    console.log(JSON.stringify({ success: false, error: 'Cannot determine parent Transform' }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+                const father_match = father_val.match(/fileID:\s*(-?\d+)/);
+                const father_id = father_match ? father_match[1] : '0';
+
+                // Find all sibling Transforms (same m_Father)
+                const all_transforms = doc.find_by_class_id(4);
+                const siblings = all_transforms.filter(t => {
+                    const f = t.get_property('m_Father');
+                    if (!f) return false;
+                    const m = f.match(/fileID:\s*(-?\d+)/);
+                    return m && m[1] === father_id;
+                });
+
+                // Sort by current m_RootOrder
+                siblings.sort((a, b) => {
+                    const ao = parseInt(a.get_property('m_RootOrder') || '0', 10);
+                    const bo = parseInt(b.get_property('m_RootOrder') || '0', 10);
+                    return ao - bo;
+                });
+
+                // Remove target from current position
+                const current_idx = siblings.findIndex(s => s.file_id === target_transform.file_id);
+                if (current_idx < 0) {
+                    console.log(JSON.stringify({ success: false, error: 'Target not found among siblings' }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+                siblings.splice(current_idx, 1);
+
+                // Insert at new position (clamped)
+                const clamped = Math.min(target_index, siblings.length);
+                siblings.splice(clamped, 0, target_transform);
+
+                // Renumber all siblings (update_root_order_in_block handles insert when m_RootOrder is missing)
+                for (let i = 0; i < siblings.length; i++) {
+                    const updated = update_root_order_in_block(siblings[i].raw, i);
+                    siblings[i].replace_raw(updated);
+                }
+
+                // Reorder the actual data structures so readers see the new order
+                const ordered_ids = siblings.map(s => s.file_id);
+                if (father_id !== '0') {
+                    // Non-root siblings: rewrite parent's m_Children array
+                    doc.reorder_children(father_id, ordered_ids);
+                }
+                // Physical block order determines flat list order in read output
+                doc.reorder_entities(ordered_ids);
+
+                const save_result = doc.save();
+                if (!save_result.success) {
+                    console.log(JSON.stringify({ success: false, error: save_result.error ?? 'Failed to save file' }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+                console.log(JSON.stringify({
+                    success: true,
+                    file,
+                    object: object_name,
+                    new_index: clamped,
+                    sibling_count: siblings.length,
+                }, null, 2));
+            } catch (err: unknown) {
+                console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+                process.exitCode = 1;
+            }
+        });
+
+    // ========== Input Actions editing ==========
+    cmd.command('input-actions <file>')
+        .description('Edit a Unity Input Actions file (.inputactions)')
+        .option('--add-map <name>', 'Add a new action map')
+        .option('--remove-map <name>', 'Remove an action map')
+        .option('--add-action <map:name>', 'Add an action to a map (format: MapName:ActionName)')
+        .option('--remove-action <map:name>', 'Remove an action from a map (format: MapName:ActionName)')
+        .option('--add-binding <map:action:path>', 'Add a binding (format: MapName:ActionName:<Path>/control)')
+        .option('--remove-binding <map:action:path>', 'Remove a binding (format: MapName:ActionName:<Path>/control)')
+        .option('--add-control-scheme <name:group>', 'Add a control scheme (format: Name:BindingGroup)')
+        .option('--remove-control-scheme <name>', 'Remove a control scheme')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, options) => {
+            let data = load_input_actions(file);
+            if ('error' in data) {
+                console.log(JSON.stringify({ success: false, error: data.error }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+            let ia = data as InputActionsFile;
+            const changes: string[] = [];
+
+            if (options.addMap !== undefined) {
+                const result = add_map(ia, options.addMap as string);
+                if ('error' in result) { console.log(JSON.stringify({ success: false, error: result.error }, null, 2)); process.exitCode = 1; return; }
+                ia = result;
+                changes.push(`added map "${options.addMap}"`);
+            }
+            if (options.removeMap) {
+                const result = remove_map(ia, options.removeMap as string);
+                if ('error' in result) { console.log(JSON.stringify({ success: false, error: result.error }, null, 2)); process.exitCode = 1; return; }
+                ia = result;
+                changes.push(`removed map "${options.removeMap}"`);
+            }
+            if (options.addAction) {
+                const parts = (options.addAction as string).split(':');
+                if (parts.length < 2) { console.log(JSON.stringify({ success: false, error: 'Invalid --add-action format. Use MapName:ActionName' }, null, 2)); process.exitCode = 1; return; }
+                const result = add_action(ia, parts[0], parts[1]);
+                if ('error' in result) { console.log(JSON.stringify({ success: false, error: result.error }, null, 2)); process.exitCode = 1; return; }
+                ia = result;
+                changes.push(`added action "${parts[1]}" to map "${parts[0]}"`);
+            }
+            if (options.removeAction) {
+                const parts = (options.removeAction as string).split(':');
+                if (parts.length < 2) { console.log(JSON.stringify({ success: false, error: 'Invalid --remove-action format. Use MapName:ActionName' }, null, 2)); process.exitCode = 1; return; }
+                const result = remove_action(ia, parts[0], parts[1]);
+                if ('error' in result) { console.log(JSON.stringify({ success: false, error: result.error }, null, 2)); process.exitCode = 1; return; }
+                ia = result;
+                changes.push(`removed action "${parts[1]}" from map "${parts[0]}"`);
+            }
+            if (options.addBinding) {
+                const parts = (options.addBinding as string).split(':');
+                if (parts.length < 3) { console.log(JSON.stringify({ success: false, error: 'Invalid --add-binding format. Use MapName:ActionName:BindingPath' }, null, 2)); process.exitCode = 1; return; }
+                const binding_path = parts.slice(2).join(':');
+                const result = add_binding(ia, parts[0], parts[1], binding_path);
+                if ('error' in result) { console.log(JSON.stringify({ success: false, error: result.error }, null, 2)); process.exitCode = 1; return; }
+                ia = result;
+                changes.push(`added binding "${binding_path}" to "${parts[1]}"`);
+            }
+            if (options.removeBinding) {
+                const parts = (options.removeBinding as string).split(':');
+                if (parts.length < 3) { console.log(JSON.stringify({ success: false, error: 'Invalid --remove-binding format. Use MapName:ActionName:BindingPath' }, null, 2)); process.exitCode = 1; return; }
+                const binding_path = parts.slice(2).join(':');
+                const result = remove_binding(ia, parts[0], parts[1], binding_path);
+                if ('error' in result) { console.log(JSON.stringify({ success: false, error: result.error }, null, 2)); process.exitCode = 1; return; }
+                ia = result;
+                changes.push(`removed binding "${binding_path}" from "${parts[1]}"`);
+            }
+            if (options.addControlScheme) {
+                const parts = (options.addControlScheme as string).split(':');
+                if (parts.length < 2) { console.log(JSON.stringify({ success: false, error: 'Invalid --add-control-scheme format. Use Name:BindingGroup' }, null, 2)); process.exitCode = 1; return; }
+                ia = add_control_scheme(ia, parts[0], parts[1]);
+                changes.push(`added control scheme "${parts[0]}"`);
+            }
+            if (options.removeControlScheme) {
+                const result = remove_control_scheme(ia, options.removeControlScheme as string);
+                if ('error' in result) { console.log(JSON.stringify({ success: false, error: result.error }, null, 2)); process.exitCode = 1; return; }
+                ia = result;
+                changes.push(`removed control scheme "${options.removeControlScheme}"`);
+            }
+
+            if (changes.length === 0) {
+                console.log(JSON.stringify({ success: false, error: 'No changes specified.' }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            save_input_actions(file, ia);
+            console.log(JSON.stringify({ success: true, file, changes }, null, 2));
+        });
+
+    // ========== Animation curve authoring ==========
+    // Extend existing 'animation' command options are handled by inserting new option processing
+    // into the existing animation command above. Instead, we add curve operations as part of
+    // the existing animation command. Since we can't modify the already-registered command,
+    // we add a separate 'animation-curves' command.
+    cmd.command('animation-curves <file>')
+        .description('Add, remove, or modify animation curves in an .anim file')
+        .option('--add-curve <json>', 'Add a curve (JSON: {"type":"float","path":"Body","attribute":"m_Alpha","classID":23,"keyframes":[{"time":0,"value":1}]})')
+        .option('--remove-curve <spec>', 'Remove a curve by path:attribute (e.g., Body/Mesh:m_Alpha)')
+        .option('--set-keyframes <json>', 'Replace keyframes (JSON: {"curve":"path:attribute","keyframes":[{"time":0,"value":10}]})')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, options) => {
+            if (!existsSync(file)) {
+                console.log(JSON.stringify({ success: false, error: `File not found: ${file}` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            // Bug 7: Validate file is an .anim file
+            if (!file.endsWith('.anim')) {
+                console.log(JSON.stringify({ success: false, error: `File is not an AnimationClip (.anim): ${file}` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            let content = readFileSync(file, 'utf-8');
+            const had_crlf = content.includes('\r\n');
+            if (had_crlf) content = content.replace(/\r\n/g, '\n');
+            const changes: string[] = [];
+
+            // Curve type -> YAML section mapping
+            const CURVE_SECTIONS: Record<string, string> = {
+                float: 'm_FloatCurves',
+                position: 'm_PositionCurves',
+                rotation: 'm_RotationCurves',
+                scale: 'm_ScaleCurves',
+                euler: 'm_EulerCurves',
+            };
+
+            /** Check if a curve with the given path+attribute already exists in the file. */
+            function curve_exists(content: string, target_path: string, target_attr: string): boolean {
+                const lines = content.split('\n');
+                for (let i = 0; i < lines.length; i++) {
+                    if (lines[i].trim() === '- curve:') {
+                        let cp = '', ca = '';
+                        for (let j = i + 1; j < lines.length; j++) {
+                            const t = lines[j].trimStart();
+                            if (t.startsWith('- curve:') || /^  m_\w+:/.test(lines[j])) break;
+                            if (t.startsWith('path:')) cp = t.slice('path:'.length).trim();
+                            if (t.startsWith('attribute:')) ca = t.slice('attribute:'.length).trim();
+                        }
+                        if (cp === target_path && ca === target_attr) return true;
+                    }
+                }
+                return false;
+            }
+
+            /** Validate that all keyframe time/value fields are finite numbers. */
+            function validate_keyframes(keyframes: { time: unknown; value: unknown; inSlope?: unknown; outSlope?: unknown }[]): string | null {
+                for (let i = 0; i < keyframes.length; i++) {
+                    const kf = keyframes[i];
+                    if (typeof kf.time !== 'number' || !Number.isFinite(kf.time)) {
+                        return `Keyframe[${i}].time must be a finite number, got ${JSON.stringify(kf.time)}`;
+                    }
+                    if (typeof kf.value !== 'number' || !Number.isFinite(kf.value)) {
+                        return `Keyframe[${i}].value must be a finite number, got ${JSON.stringify(kf.value)}`;
+                    }
+                    if (kf.inSlope !== undefined && (typeof kf.inSlope !== 'number' || !Number.isFinite(kf.inSlope))) {
+                        return `Keyframe[${i}].inSlope must be a finite number, got ${JSON.stringify(kf.inSlope)}`;
+                    }
+                    if (kf.outSlope !== undefined && (typeof kf.outSlope !== 'number' || !Number.isFinite(kf.outSlope))) {
+                        return `Keyframe[${i}].outSlope must be a finite number, got ${JSON.stringify(kf.outSlope)}`;
+                    }
+                }
+                return null;
+            }
+
+            // --add-curve
+            if (options.addCurve) {
+                let spec: { type?: string; path?: string; attribute?: string; classID?: number; keyframes?: { time: number; value: number; inSlope?: number; outSlope?: number }[] };
+                try {
+                    spec = JSON.parse(options.addCurve as string);
+                } catch {
+                    console.log(JSON.stringify({ success: false, error: 'Invalid JSON for --add-curve' }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                // Validate required fields (path can be empty string for root transforms)
+                const missing: string[] = [];
+                if (!spec.type) missing.push('type');
+                if (spec.path === undefined || spec.path === null) missing.push('path');
+                if (!spec.attribute) missing.push('attribute');
+                if (spec.classID === undefined) missing.push('classID');
+                if (!spec.keyframes || !Array.isArray(spec.keyframes) || spec.keyframes.length === 0) missing.push('keyframes');
+                if (missing.length > 0) {
+                    console.log(JSON.stringify({ success: false, error: `Missing required field(s): ${missing.join(', ')}. Required: type, path, attribute, classID, keyframes` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                const kf_error = validate_keyframes(spec.keyframes!);
+                if (kf_error) {
+                    console.log(JSON.stringify({ success: false, error: kf_error }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                const section = CURVE_SECTIONS[spec.type!];
+                if (!section) {
+                    console.log(JSON.stringify({ success: false, error: `Unknown curve type "${spec.type}". Valid: ${Object.keys(CURVE_SECTIONS).join(', ')}` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                // Bug 4: Duplicate guard
+                if (curve_exists(content, spec.path!, spec.attribute!)) {
+                    console.log(JSON.stringify({ success: false, error: `Curve "${spec.path}:${spec.attribute}" already exists. Use --remove-curve first or --set-keyframes to modify.` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                // Build keyframe YAML
+                const kf_lines = spec.keyframes!.map(kf => [
+                    `      - serializedVersion: 3`,
+                    `        time: ${kf.time}`,
+                    `        value: ${kf.value}`,
+                    `        inSlope: ${kf.inSlope ?? 0}`,
+                    `        outSlope: ${kf.outSlope ?? 0}`,
+                    `        tangentMode: 0`,
+                    `        weightedMode: 0`,
+                    `        inWeight: 0.333`,
+                    `        outWeight: 0.333`,
+                ].join('\n')).join('\n');
+
+                const curve_yaml = [
+                    `  - curve:`,
+                    `      serializedVersion: 2`,
+                    `      m_Curve:`,
+                    kf_lines,
+                    `      m_PreInfinity: 2`,
+                    `      m_PostInfinity: 2`,
+                    `      m_RotationOrder: 4`,
+                    `    path: ${spec.path}`,
+                    `    attribute: ${spec.attribute}`,
+                    `    classID: ${spec.classID}`,
+                    `    script: {fileID: 0}`,
+                    `    flags: 0`,
+                ].join('\n');
+
+                // Find section and insert
+                const empty_re = new RegExp(`(  ${section}:) \\[\\]`);
+                if (empty_re.test(content)) {
+                    content = content.replace(empty_re, `$1\n${curve_yaml}`);
+                    changes.push(`added ${spec.type} curve: ${spec.path}:${spec.attribute}`);
+                } else {
+                    // Find end of section (next m_ field at indent 2)
+                    const section_re = new RegExp(`^  ${section}:`, 'm');
+                    const section_match = section_re.exec(content);
+                    if (section_match) {
+                        const lines = content.split('\n');
+                        const section_line_idx = lines.findIndex(l => l.match(new RegExp(`^  ${section}:`)));
+                        let insert_idx = lines.length;
+                        for (let i = section_line_idx + 1; i < lines.length; i++) {
+                            const t = lines[i];
+                            if (/^  m_\w+:/.test(t)) {
+                                insert_idx = i;
+                                break;
+                            }
+                        }
+                        lines.splice(insert_idx, 0, curve_yaml);
+                        content = lines.join('\n');
+                        changes.push(`added ${spec.type} curve: ${spec.path}:${spec.attribute}`);
+                    }
+                }
+            }
+
+            // --remove-curve
+            if (options.removeCurve) {
+                const spec_str = options.removeCurve as string;
+                const colon_idx = spec_str.lastIndexOf(':');
+                if (colon_idx < 0) {
+                    console.log(JSON.stringify({ success: false, error: 'Invalid --remove-curve format. Use path:attribute (e.g., Body/Mesh:m_Alpha)' }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+                const target_path = spec_str.slice(0, colon_idx);
+                const target_attr = spec_str.slice(colon_idx + 1);
+
+                const lines = content.split('\n');
+                let found = false;
+
+                // Find the curve entry matching path and attribute
+                for (let i = 0; i < lines.length; i++) {
+                    if (lines[i].trim() === '- curve:') {
+                        // Scan forward for path and attribute
+                        let curve_start = i;
+                        let curve_end = lines.length;
+                        let curve_path = '';
+                        let curve_attr = '';
+
+                        for (let j = i + 1; j < lines.length; j++) {
+                            const t = lines[j].trimStart();
+                            if (t.startsWith('- curve:') || /^  m_\w+:/.test(lines[j])) {
+                                curve_end = j;
+                                break;
+                            }
+                            if (t.startsWith('path:')) curve_path = t.slice('path:'.length).trim();
+                            if (t.startsWith('attribute:')) curve_attr = t.slice('attribute:'.length).trim();
+                        }
+
+                        if (curve_path === target_path && curve_attr === target_attr) {
+                            lines.splice(curve_start, curve_end - curve_start);
+                            found = true;
+                            changes.push(`removed curve: ${target_path}:${target_attr}`);
+                            break;
+                        }
+                    }
+                }
+
+                // Bug 6: Specific error when curve not found
+                if (!found) {
+                    console.log(JSON.stringify({ success: false, error: `Curve "${target_path}:${target_attr}" not found` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                content = lines.join('\n');
+                // Check if section is now empty and restore []
+                for (const [, section_name] of Object.entries(CURVE_SECTIONS)) {
+                    const section_re = new RegExp(`^(  ${section_name}:)\\s*$`, 'm');
+                    const match = content.match(section_re);
+                    if (match) {
+                        // Check if next non-empty line is another section
+                        const after = content.slice(content.indexOf(match[0]) + match[0].length);
+                        const next_line = after.split('\n').find(l => l.trim() !== '');
+                        if (next_line && /^  m_\w+:/.test(next_line)) {
+                            content = content.replace(section_re, `$1 []`);
+                        }
+                    }
+                }
+            }
+
+            // --set-keyframes (Bug 3: single JSON object to avoid Commander.js arg splitting)
+            if (options.setKeyframes) {
+                const raw_val = options.setKeyframes as string;
+                let parsed: { curve?: string; keyframes?: { time: number; value: number; inSlope?: number; outSlope?: number }[] };
+                try {
+                    parsed = JSON.parse(raw_val);
+                } catch {
+                    console.log(JSON.stringify({ success: false, error: 'Invalid JSON for --set-keyframes. Use: {"curve":"path:attribute","keyframes":[{"time":0,"value":10}]}' }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                if (!parsed.curve || !parsed.keyframes || !Array.isArray(parsed.keyframes) || parsed.keyframes.length === 0) {
+                    console.log(JSON.stringify({ success: false, error: 'Missing required fields. --set-keyframes needs: {"curve":"path:attribute","keyframes":[...]}' }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                const sk_kf_error = validate_keyframes(parsed.keyframes);
+                if (sk_kf_error) {
+                    console.log(JSON.stringify({ success: false, error: sk_kf_error }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                const colon_idx = parsed.curve.lastIndexOf(':');
+                if (colon_idx < 0) {
+                    console.log(JSON.stringify({ success: false, error: 'Invalid curve spec. "curve" must be "path:attribute"' }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+                const target_path = parsed.curve.slice(0, colon_idx);
+                const target_attr = parsed.curve.slice(colon_idx + 1);
+                const keyframes = parsed.keyframes;
+
+                const lines = content.split('\n');
+                let sk_found = false;
+                for (let i = 0; i < lines.length; i++) {
+                    if (lines[i].trim() === '- curve:') {
+                        let curve_path = '';
+                        let curve_attr = '';
+                        let m_curve_start = -1;
+                        let m_pre_infinity_line = -1;
+
+                        for (let j = i + 1; j < lines.length; j++) {
+                            const t = lines[j].trimStart();
+                            if (t.startsWith('- curve:') || /^  m_\w+:/.test(lines[j])) {
+                                break;
+                            }
+                            if (t.startsWith('path:')) curve_path = t.slice('path:'.length).trim();
+                            if (t.startsWith('attribute:')) curve_attr = t.slice('attribute:'.length).trim();
+                            if (t.startsWith('m_Curve:')) m_curve_start = j;
+                            if (t.startsWith('m_PreInfinity:')) m_pre_infinity_line = j;
+                        }
+
+                        if (curve_path === target_path && curve_attr === target_attr && m_curve_start >= 0 && m_pre_infinity_line >= 0) {
+                            // Replace keyframes between m_Curve: and m_PreInfinity:
+                            const new_kf_lines = keyframes.map(kf => [
+                                `      - serializedVersion: 3`,
+                                `        time: ${kf.time}`,
+                                `        value: ${kf.value}`,
+                                `        inSlope: ${kf.inSlope ?? 0}`,
+                                `        outSlope: ${kf.outSlope ?? 0}`,
+                                `        tangentMode: 0`,
+                                `        weightedMode: 0`,
+                                `        inWeight: 0.333`,
+                                `        outWeight: 0.333`,
+                            ].join('\n')).join('\n');
+
+                            lines.splice(m_curve_start + 1, m_pre_infinity_line - m_curve_start - 1, new_kf_lines);
+                            changes.push(`set keyframes on ${target_path}:${target_attr}`);
+                            sk_found = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!sk_found) {
+                    console.log(JSON.stringify({ success: false, error: `Curve "${target_path}:${target_attr}" not found` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                content = lines.join('\n');
+            }
+
+            if (changes.length === 0) {
+                console.log(JSON.stringify({ success: false, error: 'No changes specified. Use --add-curve, --remove-curve, or --set-keyframes' }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            if (had_crlf) content = content.replace(/\n/g, '\r\n');
+            writeFileSync(file, content, 'utf-8');
+            console.log(JSON.stringify({ success: true, file, changes }, null, 2));
+        });
+
+    // ========== Animator state/transition authoring ==========
+    // Extend the existing 'animator' command with state/transition operations
+    // Since we can't modify the already-registered command, we add 'animator-state' command
+    cmd.command('animator-state <file>')
+        .description('Add/remove states and transitions in an AnimatorController')
+        .option('--add-state <name>', 'Add a new AnimatorState')
+        .option('--motion <guid-or-path>', 'Motion clip GUID or file path (companion to --add-state)')
+        .option('--layer <name>', 'Target layer name (default: first layer)')
+        .option('--speed <n>', 'State speed (companion to --add-state, default: 1)')
+        .option('--remove-state <name>', 'Remove a state and all its transitions')
+        .option('--add-transition <src:dst>', 'Add a transition (use "any" for AnyState source)')
+        .option('--condition <param,mode,threshold>', 'Transition condition (repeatable)', (v: string, p: string[]) => [...p, v], [] as string[])
+        .option('--has-exit-time', 'Enable exit time on transition')
+        .option('--exit-time <n>', 'Exit time value (default: 0.75)')
+        .option('--duration <n>', 'Transition duration (default: 0.25)')
+        .option('--remove-transition <src:dst>', 'Remove a transition by source:destination state names')
+        .option('--set-default-state <name>', 'Set the default state in the state machine')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, options) => {
+            if (!existsSync(file)) {
+                console.log(JSON.stringify({ success: false, error: `File not found: ${file}` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            let content = readFileSync(file, 'utf-8');
+            const had_crlf = content.includes('\r\n');
+            if (had_crlf) content = content.replace(/\r\n/g, '\n');
+            const changes: string[] = [];
+            const existing_ids = collect_file_ids(content);
+
+            // Locate controller block
+            const blocks = split_yaml_blocks(content);
+            const controller_block = blocks.find(b => b.class_id === 91);
+            if (!controller_block) {
+                console.log(JSON.stringify({ success: false, error: 'No AnimatorController block found (class_id 91)' }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            const sm = find_state_machine_for_layer(blocks, controller_block, options.layer as string | undefined);
+            if (!sm) {
+                console.log(JSON.stringify({ success: false, error: 'No state machine found for the specified layer' }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            // --add-state
+            if (options.addState) {
+                const state_name = options.addState as string;
+
+                // Bug 8: Duplicate guard
+                if (find_state_by_name(blocks, state_name)) {
+                    console.log(JSON.stringify({ success: false, error: `State "${state_name}" already exists` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                const speed = parseFloat(options.speed as string || '1');
+                let motion_guid = options.motion as string || '';
+                if (motion_guid && !/^[a-f0-9]{32}$/.test(motion_guid)) {
+                    const meta_path = motion_guid.endsWith('.meta') ? motion_guid : `${motion_guid}.meta`;
+                    const resolved = extractGuidFromMeta(meta_path);
+                    if (!resolved) {
+                        console.log(JSON.stringify({ success: false, error: `Cannot resolve motion GUID: no valid .meta file at "${meta_path}"` }, null, 2));
+                        process.exitCode = 1;
+                        return;
+                    }
+                    motion_guid = resolved;
+                }
+
+                const state_id = generate_file_id(existing_ids);
+                existing_ids.add(state_id);
+
+                const motion_ref = motion_guid
+                    ? `{fileID: 2100000, guid: ${motion_guid}, type: 2}`
+                    : '{fileID: 0}';
+
+                const state_block = `--- !u!1102 &${state_id}
+AnimatorState:
+  serializedVersion: 6
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: ${state_name}
+  m_Transitions: []
+  m_StateMachineBehaviours: []
+  m_Position: {x: 50, y: 50, z: 0}
+  m_IKOnFeet: 0
+  m_WriteDefaultValues: 1
+  m_Mirror: 0
+  m_SpeedParameterActive: 0
+  m_MirrorParameterActive: 0
+  m_CycleOffsetParameterActive: 0
+  m_TimeParameterActive: 0
+  m_Motion: ${motion_ref}
+  m_Tag:
+  m_SpeedParameter:
+  m_MirrorParameter:
+  m_CycleOffsetParameter:
+  m_TimeParameter:
+  m_Speed: ${speed}
+`;
+
+                // Append state block to file
+                content = content.trimEnd() + '\n' + state_block;
+
+                // Add m_ChildStates entry to state machine
+                const child_entry = `  - serializedVersion: 1\n    m_State: {fileID: ${state_id}}\n    m_Position: {x: 200, y: 0, z: 0}`;
+                const empty_children_re = new RegExp(`(--- !u!1107 &${sm.file_id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?m_ChildStates:) \\[\\]`);
+                if (empty_children_re.test(content)) {
+                    content = content.replace(empty_children_re, `$1\n${child_entry}`);
+                } else {
+                    // Append before m_ChildStateMachines
+                    const before_machines_re = new RegExp(`(--- !u!1107 &${sm.file_id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?)(  m_ChildStateMachines:)`);
+                    content = content.replace(before_machines_re, `$1${child_entry}\n$2`);
+                }
+
+                changes.push(`added state "${state_name}" (fileID: ${state_id})`);
+            }
+
+            // --remove-state
+            if (options.removeState) {
+                const state_name = options.removeState as string;
+                // Re-parse since content may have changed
+                const curr_blocks = split_yaml_blocks(content);
+                const target = find_state_by_name(curr_blocks, state_name);
+                if (!target) {
+                    console.log(JSON.stringify({ success: false, error: `State "${state_name}" not found` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                const ids_to_remove = new Set<string>([target.file_id]);
+
+                // Find all transitions referencing this state (as source or destination)
+                const transition_blocks = curr_blocks.filter(b => b.class_id === 1101);
+                for (const tb of transition_blocks) {
+                    const dst_line = tb.raw.split(/\r?\n/).find(l => l.trimStart().startsWith('m_DstState:'));
+                    const dst_ref = dst_line ? parse_inline_ref(dst_line) : null;
+                    if (dst_ref && dst_ref.fileID === target.file_id) {
+                        ids_to_remove.add(tb.file_id);
+                    }
+                }
+
+                // Also remove transitions that are in the state's m_Transitions
+                const trans_re = /m_Transitions:[\s\S]*?(?=\s*m_StateMachineBehaviours:)/;
+                const trans_match = target.raw.match(trans_re);
+                if (trans_match) {
+                    const ref_matches = trans_match[0].matchAll(/fileID:\s*(-?\d+)/g);
+                    for (const rm of ref_matches) {
+                        if (rm[1] !== '0') ids_to_remove.add(rm[1]);
+                    }
+                }
+
+                // Remove blocks
+                for (const id of ids_to_remove) {
+                    const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const block_re = new RegExp(`--- !u!\\d+ &${escaped}\\n[\\s\\S]*?(?=--- !u!|$)`);
+                    content = content.replace(block_re, '');
+                }
+
+                // Remove m_ChildStates entry from state machine
+                const child_state_re = new RegExp(`  - serializedVersion: 1\\n    m_State: \\{fileID: ${target.file_id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}\\n    m_Position: \\{[^}]+\\}\\n?`, 'g');
+                content = content.replace(child_state_re, '');
+
+                // Remove from m_AnyStateTransitions if present
+                for (const id of ids_to_remove) {
+                    const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const any_trans_line_re = new RegExp(`\\n?\\s*- \\{fileID: ${escaped}\\}`, 'g');
+                    content = content.replace(any_trans_line_re, '');
+                }
+
+                // Clean up empty arrays that might have been created
+                content = content.replace(/m_ChildStates:\s*\n(  m_ChildStateMachines:)/g, 'm_ChildStates: []\n$1');
+                content = content.replace(/m_AnyStateTransitions:\s*\n(  m_EntryTransitions:)/g, 'm_AnyStateTransitions: []\n$1');
+
+                changes.push(`removed state "${state_name}" and ${ids_to_remove.size - 1} related transitions`);
+            }
+
+            // --add-transition
+            if (options.addTransition) {
+                const parts = (options.addTransition as string).split(':');
+                if (parts.length < 2) {
+                    console.log(JSON.stringify({ success: false, error: 'Invalid --add-transition format. Use source:destination' }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+                const src_name = parts[0];
+                const dst_name = parts[1];
+                const is_any = src_name.toLowerCase() === 'any';
+
+                // Re-parse blocks
+                const curr_blocks = split_yaml_blocks(content);
+
+                const dst_state = find_state_by_name(curr_blocks, dst_name);
+                if (!dst_state) {
+                    console.log(JSON.stringify({ success: false, error: `Destination state "${dst_name}" not found` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                let src_state: AnimatorBlock | null = null;
+                if (!is_any) {
+                    src_state = find_state_by_name(curr_blocks, src_name);
+                    if (!src_state) {
+                        console.log(JSON.stringify({ success: false, error: `Source state "${src_name}" not found` }, null, 2));
+                        process.exitCode = 1;
+                        return;
+                    }
+                }
+
+                const trans_id = generate_file_id(existing_ids);
+                existing_ids.add(trans_id);
+
+                const duration = parseFloat(options.duration as string || '0.25');
+                const exit_time = parseFloat(options.exitTime as string || '0.75');
+                const has_exit_time = options.hasExitTime ? 1 : 0;
+
+                // Build conditions
+                let conditions_yaml = '[]';
+                const conds = options.condition as string[] | undefined;
+                if (conds && conds.length > 0) {
+                    // Extract parameter names from controller block for validation
+                    const param_names: string[] = [];
+                    const ctrl_lines = controller_block.raw.split('\n');
+                    for (let pi = 0; pi < ctrl_lines.length; pi++) {
+                        const pm = ctrl_lines[pi].match(/^\s+-\s+m_Name:\s*(.+)/);
+                        if (pm && pi > 0 && ctrl_lines.slice(0, pi).some(l => l.includes('m_AnimatorParameters'))) {
+                            // Only capture names under m_AnimatorParameters, stop at m_AnimatorLayers
+                            const before = ctrl_lines.slice(0, pi + 1).join('\n');
+                            if (before.includes('m_AnimatorParameters') && !before.split('m_AnimatorParameters')[1].includes('m_AnimatorLayers')) {
+                                param_names.push(pm[1].trim());
+                            }
+                        }
+                    }
+
+                    for (const c of conds) {
+                        const param_name = c.split(',')[0];
+                        if (param_names.length > 0 && !param_names.includes(param_name)) {
+                            console.log(JSON.stringify({ success: false, error: `Parameter "${param_name}" not found in controller. Available: ${param_names.join(', ')}` }, null, 2));
+                            process.exitCode = 1;
+                            return;
+                        }
+                    }
+
+                    const cond_entries = conds.map(c => {
+                        const cp = c.split(',');
+                        if (cp.length < 2) return null;
+                        const COND_MODES: Record<string, number> = { if: 1, ifnot: 2, greater: 3, less: 4, equals: 6, notequal: 7 };
+                        const mode = COND_MODES[cp[1].toLowerCase()] ?? parseInt(cp[1], 10);
+                        const threshold = cp[2] ? parseFloat(cp[2]) : 0;
+                        return `  - m_ConditionMode: ${mode}\n    m_ConditionEvent: ${cp[0]}\n    m_EventTreshold: ${threshold}`;
+                    }).filter(Boolean);
+
+                    if (cond_entries.length > 0) {
+                        conditions_yaml = `\n${cond_entries.join('\n')}`;
+                    }
+                }
+
+                const trans_block = `--- !u!1101 &${trans_id}
+AnimatorStateTransition:
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name:
+  m_Conditions: ${conditions_yaml}
+  m_DstStateMachine: {fileID: 0}
+  m_DstState: {fileID: ${dst_state.file_id}}
+  m_Solo: 0
+  m_Mute: 0
+  m_IsExit: 0
+  serializedVersion: 3
+  m_TransitionDuration: ${duration}
+  m_TransitionOffset: 0
+  m_ExitTime: ${exit_time}
+  m_HasExitTime: ${has_exit_time}
+  m_HasFixedDuration: 1
+  m_InterruptionSource: 0
+  m_OrderedInterruption: 1
+  m_CanTransitionToSelf: 1
+`;
+
+                content = content.trimEnd() + '\n' + trans_block;
+
+                // Add transition reference
+                if (is_any) {
+                    // Add to m_AnyStateTransitions in the state machine
+                    const curr_sm = find_state_machine_for_layer(split_yaml_blocks(content), controller_block, options.layer as string | undefined);
+                    if (curr_sm) {
+                        const escaped_sm_id = curr_sm.file_id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const empty_any_re = new RegExp(`(--- !u!1107 &${escaped_sm_id}[\\s\\S]*?m_AnyStateTransitions:) \\[\\]`);
+                        if (empty_any_re.test(content)) {
+                            content = content.replace(empty_any_re, `$1\n  - {fileID: ${trans_id}}`);
+                        } else {
+                            const any_before_entry_re = new RegExp(`(--- !u!1107 &${escaped_sm_id}[\\s\\S]*?m_AnyStateTransitions:[\\s\\S]*?)(  m_EntryTransitions:)`);
+                            content = content.replace(any_before_entry_re, `$1  - {fileID: ${trans_id}}\n$2`);
+                        }
+                    }
+                } else if (src_state) {
+                    // Add to source state's m_Transitions
+                    const escaped_src_id = src_state.file_id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+                    // Normalize bare null "m_Transitions:" (no [] and no list items) to "m_Transitions: []"
+                    const bare_null_re = new RegExp(`(--- !u!1102 &${escaped_src_id}[\\s\\S]*?m_Transitions:)[ \\t]*\\n(  m_StateMachineBehaviours:)`);
+                    if (bare_null_re.test(content)) {
+                        content = content.replace(bare_null_re, `$1 []\n$2`);
+                    }
+
+                    const empty_trans_re = new RegExp(`(--- !u!1102 &${escaped_src_id}[\\s\\S]*?m_Transitions:) \\[\\]`);
+                    if (empty_trans_re.test(content)) {
+                        content = content.replace(empty_trans_re, `$1\n  - {fileID: ${trans_id}}`);
+                    } else {
+                        const trans_before_behaviours_re = new RegExp(`(--- !u!1102 &${escaped_src_id}[\\s\\S]*?m_Transitions:[\\s\\S]*?)(  m_StateMachineBehaviours:)`);
+                        content = content.replace(trans_before_behaviours_re, `$1  - {fileID: ${trans_id}}\n$2`);
+                    }
+                }
+
+                changes.push(`added transition ${src_name} -> ${dst_name} (fileID: ${trans_id})`);
+            }
+
+            // --remove-transition
+            if (options.removeTransition) {
+                const parts = (options.removeTransition as string).split(':');
+                if (parts.length < 2) {
+                    console.log(JSON.stringify({ success: false, error: 'Invalid --remove-transition format. Use source:destination' }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+                const src_name = parts[0];
+                const dst_name = parts[1];
+                const is_any = src_name.toLowerCase() === 'any';
+
+                const curr_blocks = split_yaml_blocks(content);
+                const dst_state = find_state_by_name(curr_blocks, dst_name);
+                if (!dst_state) {
+                    console.log(JSON.stringify({ success: false, error: `Destination state "${dst_name}" not found` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                // Find transition blocks pointing to destination
+                const transition_blocks = curr_blocks.filter(b => b.class_id === 1101);
+                const to_remove: string[] = [];
+
+                for (const tb of transition_blocks) {
+                    const dst_line = tb.raw.split(/\r?\n/).find(l => l.trimStart().startsWith('m_DstState:'));
+                    const dst_ref = dst_line ? parse_inline_ref(dst_line) : null;
+                    if (dst_ref && dst_ref.fileID === dst_state.file_id) {
+                        if (is_any) {
+                            // Check if this transition is referenced in m_AnyStateTransitions
+                            const curr_sm = find_state_machine_for_layer(curr_blocks, controller_block, options.layer as string | undefined);
+                            if (curr_sm && curr_sm.raw.includes(`fileID: ${tb.file_id}`)) {
+                                to_remove.push(tb.file_id);
+                            }
+                        } else {
+                            const src_state = find_state_by_name(curr_blocks, src_name);
+                            if (src_state && src_state.raw.includes(`fileID: ${tb.file_id}`)) {
+                                to_remove.push(tb.file_id);
+                            }
+                        }
+                    }
+                }
+
+                if (to_remove.length === 0) {
+                    console.log(JSON.stringify({ success: false, error: `No transition found from "${src_name}" to "${dst_name}"` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                for (const id of to_remove) {
+                    const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    // Remove the block
+                    const block_re = new RegExp(`--- !u!1101 &${escaped}\\n[\\s\\S]*?(?=--- !u!|$)`);
+                    content = content.replace(block_re, '');
+                    // Remove references
+                    const ref_re = new RegExp(`\\n?\\s*- \\{fileID: ${escaped}\\}`, 'g');
+                    content = content.replace(ref_re, '');
+                }
+
+                // Restore empty arrays
+                content = content.replace(/m_Transitions:\s*\n(  m_StateMachineBehaviours:)/g, 'm_Transitions: []\n$1');
+                content = content.replace(/m_AnyStateTransitions:\s*\n(  m_EntryTransitions:)/g, 'm_AnyStateTransitions: []\n$1');
+
+                changes.push(`removed ${to_remove.length} transition(s) ${src_name} -> ${dst_name}`);
+            }
+
+            // --set-default-state
+            if (options.setDefaultState) {
+                const state_name = options.setDefaultState as string;
+                const curr_blocks = split_yaml_blocks(content);
+                const target = find_state_by_name(curr_blocks, state_name);
+                if (!target) {
+                    console.log(JSON.stringify({ success: false, error: `State "${state_name}" not found` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+
+                const curr_sm = find_state_machine_for_layer(curr_blocks, controller_block, options.layer as string | undefined);
+                if (curr_sm) {
+                    const escaped_sm_id = curr_sm.file_id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const default_re = new RegExp(`(--- !u!1107 &${escaped_sm_id}[\\s\\S]*?m_DefaultState: )\\{fileID: -?\\d+\\}`);
+                    content = content.replace(default_re, `$1{fileID: ${target.file_id}}`);
+                    changes.push(`set default state to "${state_name}"`);
+                }
+            }
+
+            if (changes.length === 0) {
+                console.log(JSON.stringify({ success: false, error: 'No changes specified.' }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
             if (had_crlf) content = content.replace(/\n/g, '\r\n');
             writeFileSync(file, content, 'utf-8');
             console.log(JSON.stringify({ success: true, file, changes }, null, 2));

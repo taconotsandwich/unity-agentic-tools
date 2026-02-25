@@ -112,6 +112,21 @@ describe('Settings Reader', () => {
             expect(result.setting).toBe(expected);
         });
 
+        it('should parse InputManager axes', () => {
+            const result = read_settings({
+                project_path: EXTERNAL_FIXTURES,
+                setting: 'input',
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.setting).toBe('InputManager');
+            const data = result.data as { axes: { name: string }[] };
+            expect(data.axes).toBeDefined();
+            expect(Array.isArray(data.axes)).toBe(true);
+            expect(data.axes.length).toBeGreaterThanOrEqual(1);
+            expect(data.axes[0].name).toBe('Horizontal');
+        });
+
         it('should return error for nonexistent setting', () => {
             const result = read_settings({
                 project_path: EXTERNAL_FIXTURES,

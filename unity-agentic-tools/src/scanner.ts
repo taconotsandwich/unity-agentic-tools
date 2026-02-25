@@ -154,10 +154,11 @@ export class UnityScanner {
   }
 
   /**
-   * Read a .asset file (ScriptableObject) and return its root objects with properties
+   * Read a .asset file (ScriptableObject) and return its root objects with properties.
+   * When decode_mesh is true (default), Mesh assets get hex data decoded into structured arrays.
    */
-  read_asset(file: string): AssetObject[] {
-    return this.scanner.readAsset(file);
+  read_asset(file: string, decode_mesh?: boolean): AssetObject[] {
+    return this.scanner.readAsset(file, decode_mesh);
   }
 }
 
