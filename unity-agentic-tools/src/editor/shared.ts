@@ -407,29 +407,27 @@ export function requireUniqueTransform(content: string, objectName: string): { i
 
 /**
  * Validate Unity YAML file integrity.
+ * Returns null if valid, or an error description string if invalid.
  */
-export function validateUnityYAML(content: string): boolean {
+export function validateUnityYAML(content: string): string | null {
   if (!content.startsWith('%YAML 1.1')) {
-    console.error('Missing or invalid YAML header');
-    return false;
+    return 'Missing or invalid YAML header';
   }
 
   // Check for GUIDs that are too short (less than 30 hex characters)
   // Valid Unity GUIDs are typically 32-36 hex characters
   const invalidGuids = content.match(/guid:\s*[a-f0-9]{1,29}\b/g);
   if (invalidGuids) {
-    console.error('Found invalid GUID format (missing characters)');
-    return false;
+    return 'Found invalid GUID format (missing characters)';
   }
 
   const blockOpens = (content.match(/--- !u!/g) || []).length;
   const blockCloses = (content.match(/\n---(?!u!)/g) || []).length;
   if (Math.abs(blockOpens - blockCloses) > 1) {
-    console.error('Unbalanced YAML block markers');
-    return false;
+    return 'Unbalanced YAML block markers';
   }
 
-  return true;
+  return null;
 }
 
 /**

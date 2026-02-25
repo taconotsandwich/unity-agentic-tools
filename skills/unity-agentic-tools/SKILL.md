@@ -70,7 +70,7 @@ CLI: `unity-agentic-tools <command>`
 | `update array <file> <file_id> <array_prop> <action> [args]` | Insert, append, or remove array elements in a component |
 | `update batch <file> <edits_json>` | Batch edit multiple GameObject properties. JSON: `[{"object_name":"...","property":"...","value":"..."}]` |
 | `update batch-components <file> <edits_json>` | Batch edit multiple component properties by fileID |
-| `update material <file>` | Edit Material properties (.mat file) |
+| `update material <file>` | Edit Material properties (`--set`, `--set-color`, `--set-texture`, `--shader`, `--keyword-add`, `--keyword-remove`) |
 | `update meta <file>` | Edit .meta file importer settings |
 | `update animation <file>` | Edit AnimationClip settings and events |
 | `update animator <file>` | Edit AnimatorController parameters |

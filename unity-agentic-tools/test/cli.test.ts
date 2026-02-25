@@ -1591,7 +1591,7 @@ describeIfNative('CLI', () => {
                 if (err instanceof Error && err.message === 'Should have thrown') throw err;
                 const execErr = err as { stdout: string };
                 const json = JSON.parse(execErr.stdout);
-                expect(json.error).toContain('binary serialization');
+                expect(json.error).toContain('binary file');
             } finally {
                 rmSync(tmp, { recursive: true, force: true });
             }

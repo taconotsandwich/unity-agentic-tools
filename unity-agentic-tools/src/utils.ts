@@ -91,7 +91,7 @@ export function atomicWrite(filePath: string, content: string): AtomicWriteResul
  * Patterns like "*", ".", "**" mean "all objects" — not a real filter.
  */
 export function is_match_all(pattern: string): boolean {
-    return pattern === '*' || pattern === '.' || pattern === '**';
+    return pattern === '*' || pattern === '.' || pattern === '**' || pattern === '.*';
 }
 
 /**
@@ -194,9 +194,23 @@ export function validate_file_path(file_path: string, operation: 'read' | 'write
         return 'Path traversal (..) is not allowed in relative paths for security reasons.';
     }
 
-    // Reject Packages/ writes in relative paths (read-only in Unity)
-    if (operation === 'write' && !isAbsolute && normalized.startsWith('Packages/')) {
-        return 'Cannot write to Packages/ directory (read-only in Unity).';
+    // Reject writes to read-only Unity directories
+    if (operation === 'write') {
+        // Library/PackageCache is immutable (absolute or relative)
+        if (normalized.includes('/Library/PackageCache/') || normalized.startsWith('Library/PackageCache/')) {
+            return 'Cannot write to Library/PackageCache/ (immutable package cache).';
+        }
+
+        // Packages/ directory is read-only in Unity (check via path segments)
+        const segments = normalized.split('/');
+        const pkgIdx = segments.indexOf('Packages');
+        if (pkgIdx >= 0) {
+            // Don't block paths under Assets/ that happen to contain a "Packages" folder
+            const assetsIdx = segments.indexOf('Assets');
+            if (assetsIdx < 0 || assetsIdx > pkgIdx) {
+                return 'Cannot write to Packages/ directory (read-only in Unity).';
+            }
+        }
     }
 
     return null; // Valid

@@ -698,13 +698,26 @@ function validate_unity_yaml(file: string): string | null {
     try {
         const fd = require('fs').openSync(file, 'r');
         const buf = Buffer.alloc(64);
-        require('fs').readSync(fd, buf, 0, 64, 0);
+        const bytesRead = require('fs').readSync(fd, buf, 0, 64, 0);
         require('fs').closeSync(fd);
-        const header = buf.toString('utf-8');
+        if (bytesRead === 0) {
+            return `File is empty: ${file}`;
+        }
+        const header = buf.toString('utf-8', 0, bytesRead);
         if (!header.startsWith('%YAML') || !header.includes('!u!')) {
-            // Check for binary serialization (null bytes in header)
-            if (buf.some(b => b === 0)) {
-                return `File "${file}" uses binary serialization — only text-format Unity files are supported. Re-serialize as text in Unity: Edit > Project Settings > Editor > Asset Serialization > Force Text`;
+            if (buf[0] === 0x89 && header.slice(1, 4) === 'PNG') {
+                return `File '${file}' is a binary file (PNG image), not a Unity YAML file`;
+            }
+            if (buf[0] === 0xFF && buf[1] === 0xD8) {
+                return `File '${file}' is a binary file (JPEG image), not a Unity YAML file`;
+            }
+            const headerStr = header.slice(0, 10);
+            if (headerStr.startsWith('UnityFS') || headerStr.startsWith('UnityRaw') || headerStr.startsWith('UnityWeb')) {
+                const bundleType = headerStr.startsWith('UnityFS') ? 'UnityFS bundle' : headerStr.startsWith('UnityRaw') ? 'UnityRaw bundle' : 'UnityWeb bundle';
+                return `File '${file}' is a binary file (${bundleType}), not a Unity YAML file`;
+            }
+            if (buf.subarray(0, bytesRead).some(b => b === 0)) {
+                return `File '${file}' is not a Unity YAML file (binary content detected). If this is a Unity asset, re-serialize as text: Edit > Project Settings > Editor > Asset Serialization > Force Text`;
             }
             return `File "${file}" is not a Unity YAML file (missing %YAML/!u! header)`;
         }
@@ -778,6 +791,16 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
             if (maxDepthWarning) {
                 result.warning = result.warning ? `${result.warning}; ${maxDepthWarning}` : maxDepthWarning;
+            }
+
+            if (result.total === 0 && !result.error) {
+                try {
+                    const fileSize = statSync(file).size;
+                    if (fileSize > 100) {
+                        const corruptWarning = 'File has valid Unity YAML header but contains no parseable GameObjects -- file may be corrupt or malformed';
+                        result.warning = result.warning ? `${result.warning}; ${corruptWarning}` : corruptWarning;
+                    }
+                } catch { /* ignore stat errors */ }
             }
 
             if (options.summary) {
@@ -1128,7 +1151,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 return;
             }
 
-            console.log(JSON.stringify({
+            const output: Record<string, unknown> = {
                 file,
                 project_path: projectPath || null,
                 total_references: guids.size,
@@ -1136,7 +1159,11 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 unresolved: dependencies.filter(d => d.path === null).length,
                 dependencies: options.unresolved ? filtered : undefined,
                 by_type: options.unresolved ? undefined : byType,
-            }, null, 2));
+            };
+            if (!cache) {
+                output._hint = "Run 'setup <project>' to resolve GUID paths";
+            }
+            console.log(JSON.stringify(output, null, 2));
         });
 
     cmd.command('settings <project_path>')
@@ -1237,8 +1264,8 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         });
 
     cmd.command('component <file> <file_id>')
-        .description('Read a single component by fileID')
-        .option('-p, --properties', 'Include component raw text')
+        .description('Read a single component by fileID (use -p for content)')
+        .option('-p, --properties', 'Include component properties/raw text (required to see values)')
         .option('-j, --json', 'Output as JSON')
         .action((file, file_id, options) => {
             try {
@@ -1352,6 +1379,12 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             const projectPath = resolve(options.project);
+            const validSources = ['assets', 'packages', 'dlls', 'all'];
+            if (!validSources.includes(options.source)) {
+                console.log(JSON.stringify({ error: `Invalid --source "${options.source}". Valid values: ${validSources.join(', ')}` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
             const includePackages = options.source === 'all' || options.source === 'packages';
             const includeDlls = options.source === 'all' || options.source === 'dlls';
 
@@ -1371,7 +1404,12 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 types = types.filter(t => t.kind.toLowerCase() === kindLower);
             }
             if (options.source === 'assets') {
-                types = types.filter(t => t.filePath?.startsWith('Assets/') || t.filePath?.startsWith('Assets\\'));
+                types = types.filter(t => {
+                    const fp = t.filePath;
+                    if (!fp) return false;
+                    return fp.startsWith('Assets/') || fp.startsWith('Assets\\') ||
+                        fp.includes('/Assets/') || fp.includes('\\Assets\\');
+                });
             } else if (options.source === 'packages') {
                 types = types.filter(t => t.filePath?.includes('PackageCache'));
             } else if (options.source === 'dlls') {
@@ -1878,7 +1916,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             // Build reverse map: transition fileID -> source state fileID
             const transition_to_source: Record<string, string> = {};
             for (const sb of state_blocks) {
-                const t_re = /m_Transitions:[ \t]*\n((?:[ \t]*-[^\n]*\n)*)/;
+                const t_re = /m_Transitions:[ \t]*\n((?:[ \t]*-[^\n]*(?:\n|$))*)/;
                 const t_match = t_re.exec(sb.raw);
                 if (t_match) {
                     const ref_re = /\{fileID:[ \t]*(-?\d+)/g;
@@ -1994,6 +2032,10 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--type <type>', 'Filter to specific file types (scene, prefab, mat, etc.)')
         .option('-j, --json', 'Output as JSON')
         .action((project_path, guid, options) => {
+            if (!/^[0-9a-f]{32}$/i.test(guid)) {
+                console.log(JSON.stringify({ error: 'GUID must be a 32-character hexadecimal string' }, null, 2));
+                process.exit(1);
+            }
             const assetsDir = join(resolve(project_path), 'Assets');
             if (!existsSync(assetsDir)) {
                 console.log(JSON.stringify({ error: `Assets directory not found in "${project_path}"` }, null, 2));
@@ -2177,6 +2219,11 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--bindings', 'List all bindings grouped by action')
         .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
+            if (!file.endsWith('.inputactions')) {
+                console.log(JSON.stringify({ success: false, error: `File is not an Input Actions file (.inputactions): ${file}` }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
             const data = load_input_actions(file);
             if ('error' in data) {
                 console.log(JSON.stringify({ success: false, error: data.error }, null, 2));

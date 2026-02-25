@@ -465,7 +465,9 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
         file_path,
         file_id,
         class_id: classId,
-        bytes_written: 0
+        bytes_written: 0,
+        no_change: true,
+        message: 'Property already has the requested value'
       };
     }
     return {
@@ -1162,7 +1164,7 @@ export function batchEditComponentProperties(
     };
   }
 
-  // For each edit: find block by file_id, call block.set_property(property, new_value)
+  // For each edit: find block by file_id, resolve property name (matching editComponentByFileId logic)
   for (const edit of edits) {
     const targetBlock = doc.find_by_file_id(edit.file_id);
     if (!targetBlock) {
@@ -1173,22 +1175,35 @@ export function batchEditComponentProperties(
       };
     }
 
-    // Normalize property name
-    const normalizedProperty = edit.property.startsWith('m_') ? edit.property : 'm_' + edit.property;
+    // Align property resolution with editComponentByFileId:
+    // 1. exactProperty = user's original input
+    // 2. prefixedProperty = with m_ prepended to root segment (handles dot-notation)
+    const exactProperty = edit.property;
+    let prefixedProperty: string;
+    if (edit.property.includes('.') || edit.property.includes('Array')) {
+      const rootSegment = edit.property.split('.')[0];
+      prefixedProperty = rootSegment.startsWith('m_') ? edit.property : 'm_' + edit.property;
+    } else {
+      prefixedProperty = edit.property.startsWith('m_') ? edit.property : 'm_' + edit.property;
+    }
 
-    // Try to set the property
-    const modified = targetBlock.set_property(normalizedProperty, edit.new_value, '{fileID: 0}');
+    // Try exact property first (custom MonoBehaviour fields), then m_-prefixed (built-in Unity)
+    let modified = targetBlock.set_property(exactProperty, edit.new_value, '{fileID: 0}');
+    if (!modified && exactProperty !== prefixedProperty) {
+      modified = targetBlock.set_property(prefixedProperty, edit.new_value, '{fileID: 0}');
+    }
     if (!modified) {
-      // Try without prefix
-      const withoutPrefix = edit.property.startsWith('m_') ? edit.property.slice(2) : edit.property;
-      const modified2 = targetBlock.set_property(withoutPrefix, edit.new_value, '{fileID: 0}');
-      if (!modified2) {
-        return {
-          success: false,
-          file_path: filePath,
-          error: `Property "${edit.property}" not found in component ${edit.file_id}`
-        };
+      // Check if property exists but value already matches (no-op)
+      const currentValue = targetBlock.get_property(exactProperty)
+        ?? (exactProperty !== prefixedProperty ? targetBlock.get_property(prefixedProperty) : null);
+      if (currentValue !== null) {
+        continue; // Value already set, skip without error
       }
+      return {
+        success: false,
+        file_path: filePath,
+        error: `Property "${edit.property}" not found in component ${edit.file_id}`
+      };
     }
   }
 
