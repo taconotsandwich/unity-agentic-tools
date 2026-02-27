@@ -9,6 +9,7 @@ For Claude Code integration, see the [Claude Code plugin](https://github.com/tac
 - **Scene Analysis** - List hierarchies, search GameObjects, inspect components with pagination
 - **Prefab Support** - Inspect, create variants, unpack instances, manage overrides
 - **Safe Editing** - Modify properties, transforms, components while preserving Unity's YAML format
+- **Live Editor Bridge** - WebSocket connection to running Unity Editor for play mode, UI interaction, input simulation, screenshots, and console access
 - **Material Editing** - Read/edit shader properties, colors, textures, keywords
 - **Animation & Animator** - Read/edit AnimationClip events and AnimatorController parameters
 - **Meta Files** - Read/edit importer settings with batch glob support
@@ -135,12 +136,89 @@ unity-agentic-tools setup -p <project>                        # Initialize GUID 
 unity-agentic-tools cleanup -p <project>                      # Remove cached data
 ```
 
+### Editor Bridge Setup
+
+The editor commands require the C# bridge package installed in your Unity project (2021.3+).
+
+**Via CLI:**
+```bash
+unity-agentic-tools editor install <unity-project-path>
+```
+
+**Via Unity Package Manager:**
+Window > Package Manager > + > Add package from git URL:
+```
+https://github.com/taconotsandwich/unity-agentic-tools.git?path=unity-package
+```
+
+**Developers (from source):**
+Copy or symlink `unity-package/` into your Unity project's `Packages/` directory for live reload when editing C# source.
+
+The bridge starts automatically via `[InitializeOnLoad]` and writes connection info to `.unity-agentic/editor.json`.
+
+### Editor Commands
+
+```bash
+# Connection & Play Mode
+unity-agentic-tools editor status -p <project>                # Check bridge connection
+unity-agentic-tools editor play                               # Enter play mode
+unity-agentic-tools editor stop                               # Exit play mode
+unity-agentic-tools editor pause                              # Toggle pause
+unity-agentic-tools editor step                               # Advance one frame
+
+# Discovery (snapshot interactive state with compact refs)
+unity-agentic-tools editor hierarchy-snapshot                  # Scene hierarchy with @hN refs
+unity-agentic-tools editor ui-snapshot                         # Interactive UI elements with @uN refs
+unity-agentic-tools editor input-map                           # List all input actions + legacy axes
+
+# State Queries (by ref)
+unity-agentic-tools editor get active @h1                      # Is GameObject active?
+unity-agentic-tools editor get position @h1                    # Transform world position
+unity-agentic-tools editor get component @h1 Rigidbody         # Component property values
+unity-agentic-tools editor get text @u1                        # UI element text content
+unity-agentic-tools editor get value @u2                       # UI element value (slider, toggle, etc.)
+
+# UI Interaction (by ref)
+unity-agentic-tools editor ui-click @u1                        # Click a Button
+unity-agentic-tools editor ui-fill @u2 "hello"                 # Clear + type into InputField
+unity-agentic-tools editor ui-type @u2 " world"                # Append text (no clear)
+unity-agentic-tools editor ui-toggle @u3                       # Toggle a Toggle
+unity-agentic-tools editor ui-slider @u4 0.75                  # Set Slider value
+unity-agentic-tools editor ui-select @u5 "Option A"            # Select Dropdown option
+unity-agentic-tools editor ui-scroll @u6 down 0.2              # Scroll a ScrollRect
+unity-agentic-tools editor ui-focus @u7                        # Focus an element
+
+# Input Simulation (requires Input System package)
+unity-agentic-tools editor input-key Space press               # Keyboard input
+unity-agentic-tools editor input-mouse 400 300 click           # Mouse at screen coords
+unity-agentic-tools editor input-touch 200 500 tap             # Touch simulation
+unity-agentic-tools editor input-action Jump                   # Trigger Input System action
+
+# Observation
+unity-agentic-tools editor screenshot --annotate               # Game view with numbered UI labels
+unity-agentic-tools editor wait --scene MainMenu               # Wait for scene to load
+unity-agentic-tools editor wait --ui @u1                       # Wait for UI element active
+unity-agentic-tools editor wait --ui-gone @u1                  # Wait for element to deactivate
+unity-agentic-tools editor wait --log "Level loaded"           # Wait for log message
+unity-agentic-tools editor wait --compile                      # Wait for compilation
+unity-agentic-tools editor wait 500                            # Wait N milliseconds
+
+# Console & Assets
+unity-agentic-tools editor console-logs --type Error           # Get console entries
+unity-agentic-tools editor console-clear                       # Clear console
+unity-agentic-tools editor console-follow                      # Stream logs real-time
+unity-agentic-tools editor screenshot -o shot.png              # Capture game view
+unity-agentic-tools editor tests-run --mode playmode           # Run Unity tests
+unity-agentic-tools editor menu "File/Save"                    # Execute menu item
+```
+
 ## Project Structure
 
 ```
-unity-agentic-tools/     TypeScript CLI + tests (871 unit tests)
+unity-agentic-tools/     TypeScript CLI + tests (882 unit tests)
 rust-core/               Native Rust module via napi-rs (173 tests)
 doc-indexer/             Documentation indexing module
+unity-package/           Unity Editor bridge (C# UPM package)
 ```
 
 ## Development
@@ -150,7 +228,7 @@ Requires: Rust toolchain, Bun runtime.
 ```bash
 bun run build:rust         # after Rust code changes
 bun run build              # after TypeScript changes
-bun run test               # unit tests (871 TS + 173 Rust)
+bun run test               # unit tests (882 TS + 173 Rust)
 bun run test:integration   # CLI integration tests
 bun run type-check         # tsc --noEmit
 ```
