@@ -4,7 +4,7 @@ Token-efficient CLI and library for parsing, analyzing, and editing Unity YAML f
 
 ## Overview
 
-Fast CLI for Unity scene, prefab, and asset files. Extracts GameObject hierarchies, components, properties, materials, animations, and project settings with minimal token output for AI agent consumption.
+Fast CLI for Unity scene, prefab, and asset files. Extracts GameObject hierarchies, components, properties, materials, animations, and project settings with minimal token output for AI agent consumption. Includes a live editor bridge (WebSocket/JSON-RPC) for play mode control, UI interaction, input simulation, and annotated screenshots.
 
 ## Quick Start
 
@@ -15,7 +15,7 @@ unity-agentic-tools read gameobject MyScene.unity "Main Camera" -p
 unity-agentic-tools update transform MyScene.unity "Main Camera" -p 0,5,-10
 ```
 
-## Commands (76 total)
+## Commands (125 total)
 
 ### Read (21)
 `read scene` | `read gameobject` | `read asset` | `read scriptable-object` | `read material` | `read dependencies` | `read dependents` | `read unused` | `read settings` | `read build` | `read overrides` | `read component` | `read reference` | `read script` | `read scripts` | `read log` | `read meta` | `read animation` | `read animator` | `read manifest` | `read input-actions`
@@ -28,6 +28,9 @@ unity-agentic-tools update transform MyScene.unity "Main Camera" -p 0,5,-10
 
 ### Delete (5)
 `delete gameobject` | `delete component` | `delete build` | `delete prefab` | `delete package`
+
+### Editor (49) -- Live Unity Bridge
+`editor status` | `editor play` | `editor stop` | `editor pause` | `editor step` | `editor play-state` | `editor save` | `editor scene-open` | `editor active-scene` | `editor refresh` | `editor compiling` | `editor selection-get` | `editor selection-set` | `editor selection-clear` | `editor console-logs` | `editor console-clear` | `editor console-follow` | `editor menu` | `editor screenshot` | `editor tests-run` | `editor install` | `editor uninstall` | `editor hierarchy-snapshot` | `editor ui-snapshot` | `editor input-map` | `editor get text` | `editor get value` | `editor get active` | `editor get position` | `editor get component` | `editor ui-click` | `editor ui-fill` | `editor ui-type` | `editor ui-toggle` | `editor ui-slider` | `editor ui-select` | `editor ui-scroll` | `editor ui-focus` | `editor input-key` | `editor input-mouse` | `editor input-touch` | `editor input-action` | `editor wait`
 
 ### Utilities (8)
 `search` | `grep` | `clone` | `version` | `docs` | `setup` | `cleanup` | `status`

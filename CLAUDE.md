@@ -16,7 +16,7 @@ The Claude Code plugin (hooks, skills, manifest) lives in a separate repo: [unit
 bun install           # Install all deps (workspaces resolve native module)
 bun run build:rust    # Build Rust native module
 bun run build         # Build TypeScript
-bun run test          # Unit tests (871 TS + 173 Rust)
+bun run test          # Unit tests (882 TS + 173 Rust)
 bun run test:integration  # CLI integration tests (bash)
 ```
 
@@ -32,6 +32,7 @@ cd unity-agentic-tools && npm link   # Register unity-agentic-tools CLI globally
 unity-agentic-tools/         TypeScript CLI + Vitest tests
 rust-core/          Native Rust module (napi-rs)
 doc-indexer/        Documentation indexing module
+unity-package/      Unity Editor bridge (C# UPM package)
 ```
 
 - Workspaces: root package.json has `"workspaces": ["rust-core", "unity-agentic-tools", "doc-indexer"]`
@@ -56,15 +57,17 @@ doc-indexer/        Documentation indexing module
 - Each exports a `build_<verb>_command()` returning a Commander.Command, wired via `program.addCommand()`
 - `getScanner` passed as callback to `read` and `update` commands (lazy init stays in cli.ts)
 - Non-CRUD utilities stay top-level: `search`, `grep`, `clone`, `docs`, `version`, `setup`, `cleanup`, `status`
-- `update prefab` is a nested command group with 6 subcommands: `unpack`, `override`, `remove-override`, `remove-component`, `restore-component`, `remove-gameobject`, `restore-gameobject`
+- `update prefab` is a nested command group with 7 subcommands: `unpack`, `override`, `remove-override`, `remove-component`, `restore-component`, `remove-gameobject`, `restore-gameobject`
+- `editor` is a live bridge command group with 49 subcommands, built in `cmd-editor.ts`
 
-### Command Counts (76 total)
+### Command Counts (125 total)
 
 - **Top-level**: clone, search, grep, version, docs, setup, cleanup, status (8)
 - **create**: gameobject, scene, prefab-variant, scriptable-object, meta, component, component-copy, build, material, package, input-actions, animation, animator, prefab (14)
 - **read**: scene, gameobject, asset, scriptable-object, material, dependencies, dependents, unused, settings, build, overrides, component, reference, script, scripts, log, meta, animation, animator, manifest, input-actions (21)
 - **update**: gameobject, component, transform, scriptable-object, settings, tag, layer, sorting-layer, parent, build, array, batch, batch-components, material, meta, animation, animator, sibling-index, input-actions, animation-curves, animator-state + prefab subgroup (7) (28)
 - **delete**: gameobject, component, build, prefab, package (5)
+- **editor**: status, play, stop, pause, step, play-state, save, scene-open, active-scene, refresh, compiling, selection-get, selection-set, selection-clear, console-logs, console-clear, console-follow, menu, screenshot, tests-run, install, uninstall, hierarchy-snapshot, ui-snapshot, input-map, get (text/value/active/position/component), ui-click, ui-fill, ui-type, ui-toggle, ui-slider, ui-select, ui-scroll, ui-focus, input-key, input-mouse, input-touch, input-action, wait (49)
 
 ### Setting Aliases
 
@@ -104,11 +107,32 @@ doc-indexer/        Documentation indexing module
 - dist/ is gitignored at root level — dist files are NOT committed
 - **Regex `\s*` newline bleed**: In both Rust and TypeScript, `\s*` between YAML key and value will match newlines, causing the regex to capture data from subsequent lines. Always use `[ \t]*` for horizontal whitespace only. This caused critical bugs in tag extraction (`gameobject.rs`) and name extraction (`mod.rs`).
 
+## Editor Bridge (Live Unity Integration)
+
+- **Architecture**: JSON-RPC 2.0 over WebSocket at `ws://localhost:{port}/unity-agentic`
+- **C# package**: `unity-package/` is a UPM package (`com.unity-agentic-tools.editor-bridge`) with `[InitializeOnLoad]` server
+- **Discovery**: Unity writes `.unity-agentic/editor.json` (port + PID); CLI reads it, validates PID alive
+- **Zero deps**: Bun native WebSocket client, C# `TcpListener` + manual RFC 6455 framing
+- **Port range**: 53782-53791 (scans for first available)
+- **Domain reload safety**: Server stops on `beforeAssemblyReload`, restarts on `afterAssemblyReload`
+- **Main thread dispatch**: `RunOnMainThread<T>()` queues actions via `ConcurrentQueue`, pumped by `EditorApplication.update`
+- **Handler routing**: `IRequestHandler` interface with `MethodPrefix` property; `MessageDispatcher` does reflection-based discovery
+- **Event streaming**: `EventBroadcaster` + `UnityEventBridge` broadcast play mode changes and log messages to all connected clients
+- **Install**: `editor install <project>` adds git URL to manifest.json; for dev, copy `unity-package/` into project's `Packages/`
+- **Transport**: `editor-client.ts` exports `call_editor()` (single request/response) and `stream_editor()` (persistent connection for events)
+- **Ref system**: `RefManager.cs` maintains `@hN` (hierarchy) and `@uN` (UI) ref registries. Refs created by `hierarchy-snapshot`/`ui-snapshot`, cleared on scene change, play mode transition, or domain reload
+- **UI walking**: `UIWalker.cs` walks both uGUI (Canvas/Selectable) and UI Toolkit (UIDocument/VisualElement) trees. TMP variants accessed via reflection to avoid hard dependency
+- **Wait conditions**: `WaitConditionRunner.cs` pumps conditions via `EditorApplication.update` with timeout support
+- **Input System**: `InputHandler.cs` uses `#if ENABLE_INPUT_SYSTEM` conditional compilation. Legacy Input returns honest error (read-only API)
+- **Annotated screenshots**: `ScreenshotHandler.cs` `annotated` action captures via RenderTexture, composites numbered pixel-art labels, returns element refs
+
 ## Skills
 
 - The `unity-agentic-tools` skill is installed globally at `~/.claude/skills/unity-agentic-tools`
 - Skill source files live in `skills/unity-agentic-tools/` within this repo
-- `check-setup.mjs` verification script is at `skills/unity-agentic-tools/scripts/check-setup.mjs`
+- **Sync to global install**: `bun run sync-skill` copies SKILL.md, reference files, and scripts to `~/.claude/skills/`
+- **Structure**: SKILL.md is a navigation hub (~80 lines); detailed command tables live in `reference/` files (loaded on demand by Claude)
+- **Verification**: `node skills/unity-agentic-tools/scripts/check-setup.mjs` checks binary and native module availability
 
 ## Code Style
 
