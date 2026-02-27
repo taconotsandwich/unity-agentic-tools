@@ -151,33 +151,43 @@ export class DocStorage {
 
         const lowerQuery = query.toLowerCase();
         const queryTerms = lowerQuery.split(/\s+/).filter(t => t.length > 0);
+        if (queryTerms.length === 0) return [];
+
+        const minTermRatio = 0.5;
         const results: SearchResult[] = [];
 
         for (const [id, chunk] of this.chunks) {
             const lowerContent = chunk.content.toLowerCase();
 
-            if (lowerContent.includes(lowerQuery)) {
-                // Score by term frequency: how many times query terms appear relative to content size
-                let termHits = 0;
-                for (const term of queryTerms) {
-                    let idx = 0;
-                    while ((idx = lowerContent.indexOf(term, idx)) !== -1) {
-                        termHits++;
-                        idx += term.length;
-                    }
+            // Count how many query terms appear in the content
+            let matchedTerms = 0;
+            let termHits = 0;
+            for (const term of queryTerms) {
+                let found = false;
+                let idx = 0;
+                while ((idx = lowerContent.indexOf(term, idx)) !== -1) {
+                    termHits++;
+                    found = true;
+                    idx += term.length;
                 }
-                // TF score: hits / words (proportion of content that matches)
-                const wordCount = lowerContent.split(/\s+/).length;
-                const score = termHits / Math.max(wordCount, 1);
+                if (found) matchedTerms++;
+            }
 
-                if (score > 0) {
-                    results.push({
-                        id,
-                        content: chunk.content,
-                        score,
-                        metadata: chunk.metadata
-                    });
-                }
+            // Require at least 50% of query terms to match
+            const termRatio = matchedTerms / queryTerms.length;
+            if (termRatio < minTermRatio) continue;
+
+            // TF score: hits / words (proportion of content that matches)
+            const wordCount = lowerContent.split(/\s+/).length;
+            const score = termHits / Math.max(wordCount, 1);
+
+            if (score > 0) {
+                results.push({
+                    id,
+                    content: chunk.content,
+                    score,
+                    metadata: chunk.metadata
+                });
             }
         }
 

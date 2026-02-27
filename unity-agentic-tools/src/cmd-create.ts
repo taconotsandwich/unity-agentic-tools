@@ -20,11 +20,25 @@ export function build_create_command(): Command {
     const cmd = new Command('create')
         .description('Create Unity objects (GameObjects, scenes, prefabs, components)');
 
-    cmd.command('gameobject <file> <name>')
+    cmd.command('gameobject <file> [name]')
         .description('Create a new GameObject in a Unity file')
         .option('-p, --parent <name|id>', 'Parent GameObject name or Transform fileID')
+        .option('-n, --name <name>', 'GameObject name (alternative to positional arg)')
         .option('-j, --json', 'Output as JSON')
-        .action((file, name, options) => {
+        .action((file, name_positional, options) => {
+            const name = name_positional || options.name;
+            if (!name) {
+                console.log(JSON.stringify({
+                    success: false,
+                    error: 'Missing required name. Provide as positional argument or --name flag.',
+                    correct_usage: [
+                        'unity-agentic-tools create gameobject <file> <name>',
+                        'unity-agentic-tools create gameobject <file> --name <name>',
+                    ],
+                }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
             const ext = file.toLowerCase().split('.').pop();
             if (!ext || !['unity', 'prefab', 'asset'].includes(ext)) {
                 console.log(JSON.stringify({ success: false, error: `Invalid file type ".${ext}". create gameobject only works with .unity, .prefab, or .asset files` }, null, 2));

@@ -395,18 +395,27 @@ export function edit_settings(options: EditSettingsOptions): EditSettingsResult 
             if (pascalPattern.test(content)) {
                 content = content.replace(pascalPattern, `$1${value}`);
             } else {
-                // Try with space-separated names (TimeManager uses "Fixed Timestep")
-                const spacedName = property.replace(/_/g, ' ').replace(/(^| )([a-z])/g, (_: string, sp: string, c: string) => sp + c.toUpperCase());
-                const spacedPattern = new RegExp(`(^\\s*${spacedName}:\\s*)(.*)$`, 'm');
-                if (spacedPattern.test(content)) {
-                    content = content.replace(spacedPattern, `$1${value}`);
+                // Try camelCase decomposition: fixedTimestep -> Fixed Timestep
+                const camelSpaced = property
+                    .replace(/([a-z])([A-Z])/g, '$1 $2')
+                    .replace(/(^| )([a-z])/g, (_: string, sp: string, c: string) => sp + c.toUpperCase());
+                const camelSpacedPattern = new RegExp(`(^\\s*${camelSpaced}:\\s*)(.*)$`, 'm');
+                if (camelSpacedPattern.test(content)) {
+                    content = content.replace(camelSpacedPattern, `$1${value}`);
                 } else {
-                    return {
-                        success: false,
-                        project_path,
-                        setting,
-                        error: `Property "${property}" not found in ${setting}`,
-                    };
+                    // Try with space-separated names from snake_case (TimeManager uses "Fixed Timestep")
+                    const spacedName = property.replace(/_/g, ' ').replace(/(^| )([a-z])/g, (_: string, sp: string, c: string) => sp + c.toUpperCase());
+                    const spacedPattern = new RegExp(`(^\\s*${spacedName}:\\s*)(.*)$`, 'm');
+                    if (spacedPattern.test(content)) {
+                        content = content.replace(spacedPattern, `$1${value}`);
+                    } else {
+                        return {
+                            success: false,
+                            project_path,
+                            setting,
+                            error: `Property "${property}" not found in ${setting}`,
+                        };
+                    }
                 }
             }
         }

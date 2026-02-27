@@ -387,6 +387,22 @@ describe('Settings Editor', () => {
             const data = verify.data as TimeSettingsData;
             expect(data.time_scale).toBe(2);
         });
+
+        it('should resolve camelCase property names for TimeManager (R5 Bug #2)', () => {
+            const result = edit_settings({
+                project_path: temp.project_path,
+                setting: 'TimeManager',
+                property: 'fixedTimestep',
+                value: '0.01',
+            });
+
+            expect(result.success).toBe(true);
+
+            // Verify the change
+            const verify = read_settings({ project_path: temp.project_path, setting: 'TimeManager' });
+            const data = verify.data as TimeSettingsData;
+            expect(data.fixed_timestep).toBe(0.01);
+        });
     });
 
     describe('Bug #6: Default sorting layer protection', () => {
