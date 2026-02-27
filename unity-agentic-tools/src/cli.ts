@@ -7,6 +7,7 @@ import { build_create_command } from './cmd-create';
 import { build_read_command } from './cmd-read';
 import { build_update_command } from './cmd-update';
 import { build_delete_command } from './cmd-delete';
+import { build_editor_command } from './cmd-editor';
 import { duplicateGameObject } from './editor';
 import { search_project, grep_project } from './project-search';
 import type { ProjectGrepFileType, ProjectSearchOptions, GameObjectWithComponents, Component } from './types';
@@ -50,6 +51,7 @@ program.addCommand(build_create_command());
 program.addCommand(build_read_command(getScanner));
 program.addCommand(build_update_command(getScanner));
 program.addCommand(build_delete_command());
+program.addCommand(build_editor_command());
 
 // Clone command (top-level — duplicates a GameObject and its hierarchy)
 program.command('clone <file> <object_name>')
