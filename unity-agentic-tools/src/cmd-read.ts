@@ -1193,6 +1193,19 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
         });
 
+    cmd.command('scenes <project_path>')
+        .description('Read build scenes (alias for "read build")')
+        .option('-j, --json', 'Output as JSON')
+        .action((project_path, _options) => {
+            try {
+                const result = get_build_settings(project_path);
+                console.log(JSON.stringify(result, null, 2));
+            } catch (err) {
+                console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+                process.exitCode = 1;
+            }
+        });
+
     cmd.command('overrides <file> <prefab_instance>')
         .description('Read PrefabInstance override modifications')
         .option('--flat', 'Output simplified list')
@@ -1366,12 +1379,14 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .description('List C# types from the type registry with optional filtering')
         .option('--project <path>', 'Unity project root path', '.')
         .option('--name <name>', 'Filter by type name (case-insensitive substring match)')
+        .option('--filter <name>', 'Alias for --name')
         .option('--namespace <ns>', 'Filter by namespace (case-insensitive substring match)')
         .option('--kind <kind>', 'Filter by kind: class, struct, enum, interface')
         .option('--source <source>', 'Filter by source: assets, packages, dlls, all', 'all')
         .option('--max <n>', 'Maximum results to return', '100')
         .option('-j, --json', 'Output as JSON')
         .action((options) => {
+            if (options.filter && !options.name) options.name = options.filter;
             const buildRegistry = getNativeBuildTypeRegistry();
             if (!buildRegistry) {
                 console.log(JSON.stringify({ error: 'Native module not available' }, null, 2));
@@ -2279,6 +2294,19 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             // Full output
             console.log(JSON.stringify({ file, ...ia }, null, 2));
+        });
+
+    // Redirect: "read prefab" -> explain to use "read scene"
+    cmd.command('prefab')
+        .argument('[file]')
+        .allowUnknownOption()
+        .action(() => {
+            console.log(JSON.stringify({
+                success: false,
+                error: '"read prefab" does not exist. Use "read scene" -- it handles both .unity and .prefab files.',
+                correct_usage: 'unity-agentic-tools read scene <file.prefab>',
+            }, null, 2));
+            process.exitCode = 1;
         });
 
     return cmd;

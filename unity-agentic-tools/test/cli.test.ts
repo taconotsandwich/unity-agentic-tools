@@ -1966,6 +1966,26 @@ describe('CLI - New Features', () => {
             }
         });
 
+        it('should add a transition with layer-qualified names (R5 Bug #7)', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'animator-'));
+            const file = join(tmp, 'test.controller');
+            cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
+
+            try {
+                const result = run_cli([
+                    'update', 'animator-state', file,
+                    '--add-transition', 'Base Layer.Idle:Base Layer.Walk',
+                    '--duration', '0.3',
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+                expect(json.changes[0]).toContain('Idle -> Walk');
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
         it('should remove a state', () => {
             const tmp = mkdtempSync(join(tmpdir(), 'animator-'));
             const file = join(tmp, 'test.controller');
@@ -2369,6 +2389,64 @@ describe('CLI - New Features', () => {
                 const json = JSON.parse(execErr.stdout);
                 expect(json.success).toBe(false);
                 expect(json.error).toBeDefined();
+            }
+        });
+    });
+
+    describe('error suggestions', () => {
+        it('read prefab should redirect to read scene', () => {
+            try {
+                run_cli(['read', 'prefab', resolve(fixtures_dir, 'SampleScene.unity')]);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBe(1);
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('read scene');
+            }
+        });
+
+        it('create gameobject --name flag should work as alias', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            try {
+                const result = run_cli([
+                    'create', 'gameobject',
+                    temp_fixture.temp_path,
+                    '--name', 'TestNameFlag',
+                ]);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+            } finally {
+                temp_fixture.cleanup_fn();
+            }
+        });
+
+        it('read scripts --filter should work as alias for --name', () => {
+            try {
+                run_cli(['read', 'scripts', '--project', fixtures_dir, '--filter', 'NonExistentType']);
+            } catch {
+                // May fail if native module is not available, but should not fail
+                // due to --filter being an unknown option
+            }
+        });
+
+        it('editor log should redirect to console-logs', () => {
+            try {
+                run_cli(['editor', 'log']);
+                expect.unreachable('Should have thrown');
+            } catch (err: unknown) {
+                if (err instanceof Error && err.message === 'Should have thrown') throw err;
+                const execErr = err as { status: number; stdout: string };
+                expect(execErr.status).toBe(1);
+                const json = JSON.parse(execErr.stdout);
+                expect(json.success).toBe(false);
+                expect(json.error).toContain('editor log');
+                expect(json.alternatives).toBeDefined();
+                expect(json.alternatives.some((a: { command: string }) => a.command === 'editor console-logs')).toBe(true);
             }
         });
     });

@@ -588,6 +588,16 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .option('--keyword-add <keyword>', 'Add a shader keyword', (v: string, p: string[]) => [...p, v], [] as string[])
         .option('--keyword-remove <keyword>', 'Remove a shader keyword', (v: string, p: string[]) => [...p, v], [] as string[])
         .option('-j, --json', 'Output as JSON')
+        .configureOutput({
+            writeErr: (str: string) => {
+                if (str.includes('too many arguments')) {
+                    console.error(str.trim());
+                    console.error('Hint: Use --set-color property=r,g,b,a (single arg with =). Example: --set-color _Color=1,0,0,1');
+                } else {
+                    console.error(str);
+                }
+            }
+        })
         .action((file, options) => {
             if (!existsSync(file)) {
                 console.log(JSON.stringify({ success: false, error: `File not found: ${file}` }, null, 2));
@@ -1948,8 +1958,9 @@ AnimatorState:
                     process.exitCode = 1;
                     return;
                 }
-                const src_name = parts[0];
-                const dst_name = parts[1];
+                // Strip layer prefix (e.g., "Base Layer.Idle" -> "Idle")
+                const src_name = parts[0].includes('.') ? parts[0].split('.').pop()! : parts[0];
+                const dst_name = parts[1].includes('.') ? parts[1].split('.').pop()! : parts[1];
                 const is_any = src_name.toLowerCase() === 'any';
 
                 // Re-parse blocks
@@ -2090,8 +2101,9 @@ AnimatorStateTransition:
                     process.exitCode = 1;
                     return;
                 }
-                const src_name = parts[0];
-                const dst_name = parts[1];
+                // Strip layer prefix (e.g., "Base Layer.Idle" -> "Idle")
+                const src_name = parts[0].includes('.') ? parts[0].split('.').pop()! : parts[0];
+                const dst_name = parts[1].includes('.') ? parts[1].split('.').pop()! : parts[1];
                 const is_any = src_name.toLowerCase() === 'any';
 
                 const curr_blocks = split_yaml_blocks(content);
