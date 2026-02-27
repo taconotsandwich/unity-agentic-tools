@@ -17,7 +17,8 @@
     "type-check": "cd unity-agentic-tools && tsc --noEmit && cd ../doc-indexer && tsc --noEmit",
     "lint": "echo 'No linter configured'",
     "setup-dev": "bun install && bun run build:rust && bun run build && cd unity-agentic-tools && npm link",
-    "teardown-dev": "cd unity-agentic-tools && npm unlink -g unity-agentic-tools && rm -rf dist"
+    "teardown-dev": "cd unity-agentic-tools && npm unlink -g unity-agentic-tools && rm -rf dist",
+    "sync-skill": "bash scripts/sync-skill.sh"
   },
   "devDependencies": {
     "@types/node": "^25.0.5",
