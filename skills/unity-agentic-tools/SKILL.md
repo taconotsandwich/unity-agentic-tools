@@ -1,124 +1,74 @@
 ---
 name: unity-agentic-tools
-description: "Parse, inspect, create, edit, and search Unity YAML files (.unity, .prefab, .asset, .mat, .anim, .controller). Use when working with Unity projects, GameObjects, components, materials, animations, prefabs, build settings, or project configuration. Provides fast CLI operations instead of manual YAML editing. Not for C# scripts or shaders."
+description: "Unity project tools for reading, creating, editing, and deleting GameObjects, components, scenes, prefabs, materials, animations, build settings, and project configuration in Unity YAML files (.unity, .prefab, .asset, .mat, .anim, .controller). Also provides live Unity Editor control: play mode, UI interaction, input simulation, screenshots, test running, and console access. Use when working with Unity projects or controlling a running Unity Editor. Can read C# scripts but cannot author them."
+allowed-tools:
+  - "Bash(unity-agentic-tools *)"
+argument-hint: "<read|create|update|delete|editor|search|grep|...>"
 ---
 
-# Unity YAML CLI
+# Unity Agentic Tools
 
-CLI: `unity-agentic-tools <command>`
+CLI: `unity-agentic-tools <command>` -- 125 commands across 4 CRUD groups, live editor bridge, and top-level utilities.
 
-76 commands across 4 CRUD groups + top-level utilities. Always inspect before editing, verify after.
+Run `unity-agentic-tools setup -p <project>` before first use. Run `unity-agentic-tools status` to check readiness.
 
-## read -- Read Unity files, settings, and build data
+## Core workflow: inspect before edit
 
-| Command | Usage |
-|---------|-------|
-| `read scene <file>` | GameObject hierarchy (paginated: `--page-size`, `--cursor`, `--max-depth`, `--summary`, `--properties`) |
-| `read gameobject <file> <id>` | Single object by name or file ID (`-c <type>` filters components, `--properties` for values) |
-| `read asset <file>` | Read any Unity YAML asset file (.asset, .mat, .anim, etc.). Mesh assets auto-decode vertex/index hex data (`--raw` to skip) |
-| `read material <file>` | Read a Material file (.mat) with structured property output |
-| `read component <file> <file_id>` | Read a single component by fileID |
-| `read reference <file> <file_id>` | Trace fileID references |
-| `read dependencies <file>` | List asset dependencies (GUIDs referenced by this file) |
-| `read dependents <project> <guid>` | Find which files reference a given GUID (reverse dependency lookup) |
-| `read unused <project>` | Find potentially unused assets (zero inbound GUID references) |
-| `read settings <project> -s <name>` | Read settings (tags, physics, quality, time, input, audio, graphics, player, navmesh) |
-| `read build <project>` | Read build settings (scene list, build profiles) |
-| `read overrides <file> <instance>` | Read PrefabInstance override modifications |
-| `read script <file>` | Extract C# type declarations from a .cs file or .NET DLL |
-| `read scripts` | List C# types from the type registry with optional filtering |
-| `read log` | Read and filter the Unity Editor.log |
-| `read meta <file>` | Read a .meta file and show importer settings |
-| `read animation <file>` | Read an AnimationClip file (.anim) |
-| `read animator <file>` | Read an AnimatorController file (.controller) |
-| `read manifest <project>` | List packages from Packages/manifest.json (`--search <pattern>`) |
-| `read input-actions <file>` | Read a Unity Input Actions file (`--summary`, `--maps`, `--actions`, `--bindings`) |
+1. **Read** the target to find object names and fileIDs
+2. **Mutate** with the appropriate create/update/delete command
+3. **Verify** by re-reading the target
 
-## create -- Create Unity objects
+Use `--properties` only when component values are needed -- omit it for structure-only output (saves tokens). Use `--summary` on large scenes. Use batch commands (`update batch`, `update batch-components`) for multiple edits in one operation.
 
-| Command | Usage |
-|---------|-------|
-| `create gameobject <file> <name>` | New GameObject (`-p <parent>` for hierarchy) |
-| `create scene <path>` | New .unity file (`--defaults` for Camera+Light) |
-| `create prefab-variant <source> <output>` | Prefab Variant from source prefab |
-| `create scriptable-object <path> <script>` | New .asset file for a script |
-| `create meta <script_path>` | Generate .meta file (MonoImporter) |
-| `create component <file> <name> <component>` | Add component (built-in or script with `-p <project>`) |
-| `create component-copy <file> <src_id> <target>` | Copy component to another object |
-| `create build <project> <scene>` | Add scene to build settings |
-| `create material <path> --shader <guid>` | New Material file (.mat) (`--shader` required; `--name`, `--properties` optional) |
-| `create package <project> <name> <version>` | Add a package to Packages/manifest.json |
-| `create input-actions <path> <name>` | Create a blank .inputactions file |
-| `create animation <path> [name]` | Create a blank .anim file (name defaults to filename, `--sample-rate`, `--loop`) |
-| `create animator <path> [name]` | Create a blank .controller file |
-| `create prefab <file> <name>` | Create prefab from GameObject |
+## Command groups
 
-## update -- Modify properties, transforms, settings
+**read** (21 commands) -- Scene hierarchy, GameObjects, components, assets, materials, animations, dependencies, settings, build config, prefab overrides, scripts, logs, meta files, manifests, input actions.
+See `reference/commands-read.md`
 
-| Command | Usage |
-|---------|-------|
-| `update gameobject <file> <name> <prop> <value>` | Edit property by object name |
-| `update component <file> <file_id> <prop> <value>` | Edit any component by file ID (supports dotted paths, array paths) |
-| `update transform <file> <id> -p x,y,z -r x,y,z -s x,y,z` | Edit position/rotation/scale |
-| `update scriptable-object <file> <prop> <value>` | Edit first MonoBehaviour in .asset file |
-| `update settings <project> -s <name> --property <p> --value <v>` | Edit setting property |
-| `update tag <project> add\|remove <tag>` | Add/remove tag |
-| `update layer <project> <index> <name>` | Set named layer (3-31) |
-| `update sorting-layer <project> add\|remove <name>` | Add/remove sorting layer |
-| `update parent <file> <name> <new_parent>` | Move under new parent ("root" for scene root) |
-| `update build <project> <scene>` | Enable (`--enable`), disable (`--disable`), or move (`--move <idx>`) scene |
-| `update array <file> <file_id> <array_prop> <action> [args]` | Insert, append, or remove array elements in a component |
-| `update batch <file> <edits_json>` | Batch edit multiple GameObject properties. JSON: `[{"object_name":"...","property":"...","value":"..."}]` |
-| `update batch-components <file> <edits_json>` | Batch edit multiple component properties by fileID |
-| `update material <file>` | Edit Material properties (`--set`, `--set-color`, `--set-texture`, `--shader`, `--keyword-add`, `--keyword-remove`) |
-| `update meta <file>` | Edit .meta file importer settings |
-| `update animation <file>` | Edit AnimationClip settings and events |
-| `update animator <file>` | Edit AnimatorController parameters |
-| `update sibling-index <file> <name> <index>` | Set sibling index of a GameObject, renumbering siblings |
-| `update input-actions <file>` | Edit Input Actions (add/remove maps, actions, bindings, control schemes) |
-| `update animation-curves <file>` | Add, remove, or modify animation curves (`--add-curve`, `--remove-curve`, `--set-keyframes`) |
-| `update animator-state <file>` | Add/remove states and transitions (`--add-state`, `--remove-state`, `--add-transition`, `--remove-transition`) |
-| `update prefab unpack <file> <instance>` | Unpack PrefabInstance to standalone objects |
-| `update prefab override <file> <instance> <path> <value>` | Edit/add property override |
-| `update prefab remove-override <file> <instance> <path>` | Remove property override |
-| `update prefab remove-component <file> <instance> <ref>` | Remove a component from prefab |
-| `update prefab restore-component <file> <instance> <ref>` | Restore a removed component |
-| `update prefab remove-gameobject <file> <instance> <ref>` | Remove a GameObject from prefab |
-| `update prefab restore-gameobject <file> <instance> <ref>` | Restore a removed GameObject |
+**create** (14 commands) -- GameObjects, scenes, prefab variants, ScriptableObjects, components, materials, build entries, packages, input actions, animations, animators, prefabs.
+See `reference/commands-create.md`
 
-## delete -- Remove objects and components
+**update** (28 commands) -- Properties, transforms, settings, tags, layers, sorting layers, parent hierarchy, build settings, arrays, batch edits, materials, meta, animations, animators, sibling index, input actions, animation curves, animator states, plus 7 prefab subcommands (unpack, override, remove-override, remove-component, restore-component, remove-gameobject, restore-gameobject).
+See `reference/commands-update.md`
 
-| Command | Usage |
-|---------|-------|
-| `delete gameobject <file> <name>` | Delete GameObject and hierarchy |
-| `delete component <file> <file_id>` | Remove component by file ID |
-| `delete build <project> <scene>` | Remove scene from build settings |
-| `delete prefab <file> <instance>` | Delete PrefabInstance and stripped/added blocks |
-| `delete package <project> <name>` | Remove a package from Packages/manifest.json |
+**delete** (5 commands) -- GameObjects, components, build entries, prefab instances, packages.
+See `reference/commands-delete.md`
 
-## Top-level utilities
+**utilities** (8 commands) -- search, grep, clone, version, docs, setup, cleanup, status. Also: setting aliases for `read settings`/`update settings`.
+See `reference/commands-utilities.md`
 
-| Command | Usage |
-|---------|-------|
-| `search <file> <pattern>` | Find GameObjects by name in a file (`--exact` for exact match) |
-| `search <project> -n <pattern>` | Search across scenes/prefabs (`-c`, `-t`, `-l` filters, `-T <type>` file type, `-m <n>` max matches) |
-| `grep <project> <regex>` | Regex search across project files (`--type cs\|yaml\|unity\|prefab\|asset\|mat\|anim\|controller\|all`, `-m <n>` overrides default 100-result cap) |
-| `clone <file> <name>` | Duplicate a GameObject and its hierarchy (`-n <new_name>`) |
-| `version <project>` | Read Unity project version |
-| `docs <query>` | Search Unity docs (auto-indexes on first use) |
-| `setup` | Initialize tools for Unity project (`-p <path>`, `--index-docs`) |
-| `cleanup` | Remove .unity-agentic files (`--all` for full removal) |
-| `status` | Show config, GUID cache count, native module status |
+**editor** (49 commands) -- Live Unity Editor integration via WebSocket bridge.
+See `reference/commands-editor.md`
 
-## Setting aliases
+## Editor bridge essentials
 
-`read settings` and `update settings` accept: tags/tagmanager, physics/dynamics, quality, time, input, audio, editor, graphics, physics2d, player/project, navmesh, build/editorbuild.
+Install: `editor install <project>` -- adds UPM package to Unity project.
 
-## Key patterns
+**Snapshot-then-interact pattern**: Run `hierarchy-snapshot` or `ui-snapshot` to register compact refs (`@hN` for hierarchy, `@uN` for UI elements). Then use refs in `get`, `ui-click`, `ui-fill`, `ui-toggle`, `ui-slider`, `ui-select`, `ui-scroll`, `input-key/mouse/touch/action`, and other commands.
 
-- Always `read` before `update` -- inspect first, verify after
-- Use `--properties` flag when you need component values; omit for structure-only (saves tokens)
-- `setup` creates `.unity-agentic/` with GUID cache mapping scripts to file paths
-- Use `read gameobject -c <type>` to filter to specific component types
-- Batch commands (`update batch`, `update batch-components`) for multiple edits in one operation
-- Doc index stored at `.unity-agentic/doc-index.json`, re-indexes only when files change
+Refs invalidate on: scene change, play mode transition, domain reload. Re-snapshot to refresh.
+
+Input simulation (`input-key`, `input-mouse`, `input-touch`, `input-action`) requires the Input System package. Legacy Input is read-only.
+
+UI walking covers both uGUI (Canvas/Selectable) and UI Toolkit (UIDocument/VisualElement), including TMP variants.
+
+## Common patterns
+
+- `-c <type>` on `read gameobject` filters to specific component types
+- `search <project> -n "pattern"` for cross-file GameObject search
+- `grep <project> "regex"` for raw text search across project files
+- `docs <query>` searches indexed Unity documentation
+- GUID cache (`.unity-agentic/`) maps script GUIDs to file paths -- run `setup` to create
+
+See `reference/workflows.md` for multi-step checklists (project setup, inspect-edit-verify, prefab editing, UI testing, batch editing).
+
+## Troubleshooting
+
+- **"command not found"**: Install via `npm install -g unity-agentic-tools` or link locally with `cd unity-agentic-tools && npm link`
+- **Native module errors**: Run `unity-agentic-tools status` to check. Rebuild with `bun run build:rust` if needed
+- **Editor bridge won't connect**: Ensure Unity is open with the project, check `editor status`, re-run `editor install <project>` if needed
+- **`read prefab`**: Does not exist. Use `read scene` -- it handles both `.unity` and `.prefab` files
+- **`editor log`**: Does not exist. Use `editor console-logs` (live bridge) or `read log` (disk file)
+- **`create gameobject` name**: Pass as positional arg (`create gameobject file.unity Foo`) or `--name Foo`
+- **`get text/value @hN`**: `@hN` is a hierarchy ref. Use `@uN` (from `ui-snapshot`) for text/value queries. Use `get position`, `get active`, or `get component` for hierarchy refs
+- **`scene-open` fails**: Use Assets-relative path (e.g., `Assets/Scenes/Main.unity`). Run `editor refresh` first for newly created scenes
