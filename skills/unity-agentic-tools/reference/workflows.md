@@ -68,3 +68,20 @@ For applying the same change across many objects.
    - `update batch-components`: `[{"file_id":"...","property":"...","value":"..."}]`
 3. **Execute**: `update batch <file> '<json>'` or `update batch-components <file> '<json>'`
 4. **Verify**: Re-read affected objects to confirm changes
+
+## 6. Animation editing
+
+Read-modify-verify workflow for AnimationClips and AnimatorControllers.
+
+1. **Read** the current state:
+   - `read animation <file>` -- see curves, events, settings
+   - `read animator <file> --states` -- see states per layer
+   - `read animator <file> --transitions` -- see transitions with conditions
+2. **Edit** curves or states:
+   - `update animation-curves <file> --add-curve '<json>'` -- add a curve
+   - `update animation-curves <file> --set-keyframes '<json>'` -- modify keyframes
+   - `update animator-state <file> --add-state Idle --motion <clip_guid>` -- add state
+   - `update animator-state <file> --add-transition Idle:Walk --condition "Speed,Greater,0.1"` -- add transition
+3. **Verify** by re-reading:
+   - `read animation <file>` -- confirm curves/keyframes
+   - `read animator <file> --transitions` -- confirm transitions
