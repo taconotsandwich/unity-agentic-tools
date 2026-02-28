@@ -141,7 +141,7 @@ export function build_editor_command(): Command {
                     hints.push('Use an Assets-relative path (e.g., "Assets/Scenes/Main.unity"), not an absolute path.');
                 }
                 if (/cannot open|not imported|not found/i.test(msg)) {
-                    hints.push('Run "editor refresh" first if the scene was recently created or moved.');
+                    hints.push('Run "editor invoke UnityEditor.AssetDatabase Refresh" first if the scene was recently created or moved.');
                 }
                 console.log(JSON.stringify({
                     success: false,
@@ -155,46 +155,21 @@ export function build_editor_command(): Command {
             }
         });
 
-    // 9. active-scene
-    cmd.command('active-scene')
-        .description('Get the active scene name and path')
-        .action(async function(this: Command) {
-            await handle_rpc(this, 'editor.scene.getActive');
-        });
-
-    // 10. refresh
-    cmd.command('refresh')
-        .description('Refresh the AssetDatabase')
-        .action(async function(this: Command) {
-            await handle_rpc(this, 'editor.assets.refresh');
-        });
-
-    // 11. compiling
-    cmd.command('compiling')
-        .description('Check if Unity is compiling')
-        .action(async function(this: Command) {
-            await handle_rpc(this, 'editor.assets.getStatus');
-        });
-
-    // 12. selection-get
-    cmd.command('selection-get')
-        .description('Get currently selected objects in the editor')
-        .action(async function(this: Command) {
-            await handle_rpc(this, 'editor.selection.get');
-        });
-
-    // 13. selection-set
-    cmd.command('selection-set <ids...>')
-        .description('Set selection by instance IDs')
-        .action(async function(this: Command, ids: string[]) {
-            await handle_rpc(this, 'editor.selection.set', { instanceIds: ids.join(',') });
-        });
-
-    // 14. selection-clear
-    cmd.command('selection-clear')
-        .description('Clear the current selection')
-        .action(async function(this: Command) {
-            await handle_rpc(this, 'editor.selection.clear');
+    // 9. invoke
+    cmd.command('invoke <type> <member> [args...]')
+        .description('Call a static Unity Editor API method or read/set a static property')
+        .option('--set <value>', 'Set a static property value')
+        .option('--args <json>', 'JSON array of method arguments (overrides positional args)')
+        .action(async function(this: Command, type: string, member: string, args: string[], options: { set?: string; args?: string }) {
+            const params: Record<string, unknown> = { type, member };
+            if (options.set !== undefined) {
+                params.set = options.set;
+            } else if (options.args) {
+                params.args = options.args;
+            } else if (args.length > 0) {
+                params.args = JSON.stringify(args);
+            }
+            await handle_rpc(this, 'editor.invoke', params);
         });
 
     // 15. console-logs
@@ -267,14 +242,7 @@ export function build_editor_command(): Command {
             }
         });
 
-    // 18. menu
-    cmd.command('menu <path>')
-        .description('Execute a Unity menu item')
-        .action(async function(this: Command, menu_path: string) {
-            await handle_rpc(this, 'editor.menu.execute', { path: menu_path });
-        });
-
-    // 19. screenshot
+    // 18. screenshot
     cmd.command('screenshot')
         .description('Capture a screenshot of the game view')
         .option('-o, --output <path>', 'Output file path', 'screenshot.png')

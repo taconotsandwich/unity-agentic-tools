@@ -58,16 +58,16 @@ unity-package/      Unity Editor bridge (C# UPM package)
 - `getScanner` passed as callback to `read` and `update` commands (lazy init stays in cli.ts)
 - Non-CRUD utilities stay top-level: `search`, `grep`, `clone`, `docs`, `version`, `setup`, `cleanup`, `status`
 - `update prefab` is a nested command group with 7 subcommands: `unpack`, `override`, `remove-override`, `remove-component`, `restore-component`, `remove-gameobject`, `restore-gameobject`
-- `editor` is a live bridge command group with 49 subcommands, built in `cmd-editor.ts`
+- `editor` is a live bridge command group with 43 subcommands, built in `cmd-editor.ts`
 
-### Command Counts (125 total)
+### Command Counts (119 total)
 
 - **Top-level**: clone, search, grep, version, docs, setup, cleanup, status (8)
 - **create**: gameobject, scene, prefab-variant, scriptable-object, meta, component, component-copy, build, material, package, input-actions, animation, animator, prefab (14)
 - **read**: scene, gameobject, asset, scriptable-object, material, dependencies, dependents, unused, settings, build, overrides, component, reference, script, scripts, log, meta, animation, animator, manifest, input-actions (21)
 - **update**: gameobject, component, transform, scriptable-object, settings, tag, layer, sorting-layer, parent, build, array, batch, batch-components, material, meta, animation, animator, sibling-index, input-actions, animation-curves, animator-state + prefab subgroup (7) (28)
 - **delete**: gameobject, component, build, prefab, package (5)
-- **editor**: status, play, stop, pause, step, play-state, save, scene-open, active-scene, refresh, compiling, selection-get, selection-set, selection-clear, console-logs, console-clear, console-follow, menu, screenshot, tests-run, install, uninstall, hierarchy-snapshot, ui-snapshot, input-map, get (text/value/active/position/component), ui-click, ui-fill, ui-type, ui-toggle, ui-slider, ui-select, ui-scroll, ui-focus, input-key, input-mouse, input-touch, input-action, wait (49)
+- **editor**: status, play, stop, pause, step, play-state, save, scene-open, console-logs, console-clear, console-follow, screenshot, tests-run, install, uninstall, hierarchy-snapshot, ui-snapshot, input-map, get (text/value/active/position/component), ui-click, ui-fill, ui-type, ui-toggle, ui-slider, ui-select, ui-scroll, ui-focus, input-key, input-mouse, input-touch, input-action, wait, invoke (43)
 
 ### Setting Aliases
 

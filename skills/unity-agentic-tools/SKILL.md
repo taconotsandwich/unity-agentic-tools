@@ -8,9 +8,28 @@ argument-hint: "<read|create|update|delete|editor|search|grep|...>"
 
 # Unity Agentic Tools
 
-CLI: `unity-agentic-tools <command>` -- 125 commands across 4 CRUD groups, live editor bridge, and top-level utilities.
+CLI: `unity-agentic-tools <command>` -- 119 commands across 4 CRUD groups, live editor bridge, and utilities.
+
+All commands accept `-j`/`--json` for structured output. Run `<command> --help` for full options.
 
 Run `unity-agentic-tools setup -p <project>` before first use. Run `unity-agentic-tools status` to check readiness.
+
+## Task routing
+
+| I want to... | Command |
+|--------------|---------|
+| See what's in a scene/prefab | `read scene <file>` (handles both .unity and .prefab) |
+| Find a GameObject by name | `search <file> <name>` or `search <project> -n "pattern"` |
+| Read/edit component properties | `read gameobject <file> <name> --properties` then `update component` |
+| Add a component to a GameObject | `create component <file> <object> <type>` |
+| Edit a Material | `read material <file>` then `update material <file> --set prop=val` |
+| Change project settings | `read settings <project> -s tags` then `update settings` |
+| Work with prefab overrides | `read overrides` then `update prefab override` |
+| Edit animations/animators | `read animation`/`read animator` then `update animation-curves`/`update animator-state` |
+| Test a running Unity app | `editor play` then `ui-snapshot` then `ui-click @uN` |
+| Find text across project files | `grep <project> "regex"` |
+| Batch edit multiple objects | `update batch <file> '<json>'` |
+| Manage build scenes | `read build` / `create build` / `update build` / `delete build` |
 
 ## Core workflow: inspect before edit
 
@@ -18,57 +37,36 @@ Run `unity-agentic-tools setup -p <project>` before first use. Run `unity-agenti
 2. **Mutate** with the appropriate create/update/delete command
 3. **Verify** by re-reading the target
 
-Use `--properties` only when component values are needed -- omit it for structure-only output (saves tokens). Use `--summary` on large scenes. Use batch commands (`update batch`, `update batch-components`) for multiple edits in one operation.
+Use `--properties` only when component values are needed (saves tokens). Use `--summary` on large scenes. Use batch commands for multiple edits.
 
 ## Command groups
 
-**read** (21 commands) -- Scene hierarchy, GameObjects, components, assets, materials, animations, dependencies, settings, build config, prefab overrides, scripts, logs, meta files, manifests, input actions.
-See `reference/commands-read.md`
+**read** (21) -- Scene hierarchy, GameObjects, components, assets, materials, animations, dependencies, settings, build, overrides, scripts, logs, meta, manifests, input actions. See `reference/commands-read.md`
 
-**create** (14 commands) -- GameObjects, scenes, prefab variants, ScriptableObjects, components, materials, build entries, packages, input actions, animations, animators, prefabs.
-See `reference/commands-create.md`
+**create** (14) -- GameObjects, scenes, prefab variants, ScriptableObjects, components, materials, builds, packages, input actions, animations, animators, prefabs. See `reference/commands-create.md`
 
-**update** (28 commands) -- Properties, transforms, settings, tags, layers, sorting layers, parent hierarchy, build settings, arrays, batch edits, materials, meta, animations, animators, sibling index, input actions, animation curves, animator states, plus 7 prefab subcommands (unpack, override, remove-override, remove-component, restore-component, remove-gameobject, restore-gameobject).
-See `reference/commands-update.md`
+**update** (28) -- Properties, transforms, settings, tags, layers, sorting layers, parent hierarchy, builds, arrays, batch edits, materials, meta, animations, animators, sibling index, input actions, animation curves, animator states, plus 7 prefab subcommands. See `reference/commands-update.md`
 
-**delete** (5 commands) -- GameObjects, components, build entries, prefab instances, packages.
-See `reference/commands-delete.md`
+**delete** (5) -- GameObjects, components, build entries, prefab instances, packages. See `reference/commands-delete.md`
 
-**utilities** (8 commands) -- search, grep, clone, version, docs, setup, cleanup, status. Also: setting aliases for `read settings`/`update settings`.
-See `reference/commands-utilities.md`
+**utilities** (8) -- search, grep, clone, version, docs, setup, cleanup, status. Setting aliases for `read settings`/`update settings`. See `reference/commands-utilities.md`
 
-**editor** (49 commands) -- Live Unity Editor integration via WebSocket bridge.
-See `reference/commands-editor.md`
+**editor** (43) -- Live Unity Editor integration via WebSocket. See `reference/commands-editor.md`
 
-## Editor bridge essentials
+## Editor bridge
 
-Install: `editor install <project>` -- adds UPM package to Unity project.
+Install: `editor install <project>`. All editor commands accept `--project <path>`, `--timeout <ms>`, `--port <n>`.
 
-**Snapshot-then-interact pattern**: Run `hierarchy-snapshot` or `ui-snapshot` to register compact refs (`@hN` for hierarchy, `@uN` for UI elements). Then use refs in `get`, `ui-click`, `ui-fill`, `ui-toggle`, `ui-slider`, `ui-select`, `ui-scroll`, `input-key/mouse/touch/action`, and other commands.
+**Snapshot-then-interact**: Run `hierarchy-snapshot` or `ui-snapshot` to get compact refs (`@hN` for hierarchy, `@uN` for UI). Use refs in `get`, `ui-click`, `ui-fill`, `ui-toggle`, `ui-slider`, `ui-select`, `ui-scroll`, `input-*`, and other commands.
 
 Refs invalidate on: scene change, play mode transition, domain reload. Re-snapshot to refresh.
 
-Input simulation (`input-key`, `input-mouse`, `input-touch`, `input-action`) requires the Input System package. Legacy Input is read-only.
-
-UI walking covers both uGUI (Canvas/Selectable) and UI Toolkit (UIDocument/VisualElement), including TMP variants.
-
-## Common patterns
-
-- `-c <type>` on `read gameobject` filters to specific component types
-- `search <project> -n "pattern"` for cross-file GameObject search
-- `grep <project> "regex"` for raw text search across project files
-- `docs <query>` searches indexed Unity documentation
-- GUID cache (`.unity-agentic/`) maps script GUIDs to file paths -- run `setup` to create
-
-See `reference/workflows.md` for multi-step checklists (project setup, inspect-edit-verify, prefab editing, UI testing, batch editing).
+See `reference/workflows.md` for multi-step checklists (project setup, inspect-edit-verify, prefab editing, UI testing, batch editing, animation editing).
 
 ## Troubleshooting
 
-- **"command not found"**: Install via `npm install -g unity-agentic-tools` or link locally with `cd unity-agentic-tools && npm link`
-- **Native module errors**: Run `unity-agentic-tools status` to check. Rebuild with `bun run build:rust` if needed
-- **Editor bridge won't connect**: Ensure Unity is open with the project, check `editor status`, re-run `editor install <project>` if needed
 - **`read prefab`**: Does not exist. Use `read scene` -- it handles both `.unity` and `.prefab` files
 - **`editor log`**: Does not exist. Use `editor console-logs` (live bridge) or `read log` (disk file)
-- **`create gameobject` name**: Pass as positional arg (`create gameobject file.unity Foo`) or `--name Foo`
-- **`get text/value @hN`**: `@hN` is a hierarchy ref. Use `@uN` (from `ui-snapshot`) for text/value queries. Use `get position`, `get active`, or `get component` for hierarchy refs
-- **`scene-open` fails**: Use Assets-relative path (e.g., `Assets/Scenes/Main.unity`). Run `editor refresh` first for newly created scenes
+- **`get text/value @hN`**: `@hN` is hierarchy ref. `get text`/`get value` need UI refs (`@uN` from `ui-snapshot`). Use `get position`/`get active`/`get component` for hierarchy refs
+- **Editor bridge won't connect**: Ensure Unity is open, check `editor status`, re-run `editor install <project>`
+- **`scene-open` fails**: Use Assets-relative path (`Assets/Scenes/Main.unity`). Run `editor invoke UnityEditor.AssetDatabase Refresh` first for newly created scenes
