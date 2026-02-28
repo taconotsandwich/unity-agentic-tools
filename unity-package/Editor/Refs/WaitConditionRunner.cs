@@ -13,7 +13,6 @@ namespace UnityAgenticTools.Refs
         {
             var tcs = new TaskCompletionSource<object>();
             var startTime = DateTime.UtcNow;
-            int pollIntervalMs = 100;
 
             void Poll()
             {

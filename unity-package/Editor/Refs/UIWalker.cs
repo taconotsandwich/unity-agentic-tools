@@ -28,7 +28,7 @@ namespace UnityAgenticTools.Refs
         {
             var results = new List<UIElementInfo>();
 
-            var eventSystem = UnityEngine.Object.FindObjectOfType<EventSystem>();
+            var eventSystem = UnityEngine.Object.FindFirstObjectByType<EventSystem>();
             if (eventSystem == null)
             {
                 throw new InvalidOperationException(
@@ -36,7 +36,7 @@ namespace UnityAgenticTools.Refs
                     "Add one via GameObject > UI > EventSystem.");
             }
 
-            var canvases = UnityEngine.Object.FindObjectsOfType<Canvas>();
+            var canvases = UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None);
             foreach (var canvas in canvases)
             {
                 if (!canvas.gameObject.activeInHierarchy) continue;
@@ -277,7 +277,7 @@ namespace UnityAgenticTools.Refs
             var uiDocumentType = FindType("UnityEngine.UIElements.UIDocument");
             if (uiDocumentType == null) return results;
 
-            var documents = UnityEngine.Object.FindObjectsOfType(uiDocumentType);
+            var documents = UnityEngine.Object.FindObjectsByType(uiDocumentType, FindObjectsSortMode.None);
             foreach (var doc in documents)
             {
                 var comp = doc as Component;
