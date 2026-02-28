@@ -69,7 +69,7 @@ namespace UnityAgenticTools.Server
             var playerInputType = FindType("UnityEngine.InputSystem.PlayerInput");
             if (playerInputType == null) return actions;
 
-            var playerInputs = UnityEngine.Object.FindObjectsOfType(playerInputType);
+            var playerInputs = UnityEngine.Object.FindObjectsByType(playerInputType, FindObjectsSortMode.None);
             foreach (var pi in playerInputs)
             {
                 var actionsProperty = playerInputType.GetProperty("actions", BindingFlags.Public | BindingFlags.Instance);
@@ -514,7 +514,7 @@ namespace UnityAgenticTools.Server
                 if (playerInputType == null)
                     throw new InvalidOperationException("PlayerInput type not found. Is Input System installed?");
 
-                var playerInputs = UnityEngine.Object.FindObjectsOfType(playerInputType);
+                var playerInputs = UnityEngine.Object.FindObjectsByType(playerInputType, FindObjectsSortMode.None);
                 if (playerInputs.Length == 0)
                     throw new InvalidOperationException("No PlayerInput component found in scene.");
 
