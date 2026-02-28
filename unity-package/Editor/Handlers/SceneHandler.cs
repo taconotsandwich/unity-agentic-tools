@@ -56,21 +56,6 @@ namespace UnityAgenticTools.Server
                         };
                     });
 
-                case "getActive":
-                    return await EditorWebSocketServer.RunOnMainThread(() =>
-                    {
-                        var scene = SceneManager.GetActiveScene();
-                        return new Dictionary<string, object>
-                        {
-                            { "name", scene.name },
-                            { "path", scene.path },
-                            { "buildIndex", scene.buildIndex },
-                            { "isDirty", scene.isDirty },
-                            { "rootCount", scene.rootCount },
-                            { "isLoaded", scene.isLoaded }
-                        };
-                    });
-
                 default:
                     throw new InvalidOperationException($"Unknown scene action: {action}");
             }
