@@ -1,21 +1,42 @@
-# Top-level utilities (8 commands)
+# Top-level utilities -- 8 commands
 
-- [Commands](#commands)
-- [Setting aliases](#setting-aliases)
-
-## Commands
-
-| Command | Usage |
-|---------|-------|
-| `search <file> <pattern>` | Find GameObjects by name in a file (`--exact` for exact match) |
-| `search <project> -n <pattern>` | Search across scenes/prefabs (`-c`, `-t`, `-l` filters, `-T <type>` file type, `-m <n>` max matches) |
-| `grep <project> <regex>` | Regex search across project files (`--type cs\|yaml\|unity\|prefab\|asset\|mat\|anim\|controller\|all`, `-m <n>` overrides default 100-result cap) |
-| `clone <file> <name>` | Duplicate a GameObject and its hierarchy (`-n <new_name>`) |
+| Command | What it does |
+|---------|-------------|
+| `search <file> <pattern>` | Find GameObjects by name in a file (`--exact`) |
+| `search <project> -n <pattern>` | Search across project files |
+| `grep <project> <regex>` | Regex search across project files |
+| `clone <file> <name>` | Duplicate a GameObject and hierarchy (`-n <new_name>`) |
 | `version <project>` | Read Unity project version |
-| `docs <query>` | Search Unity docs (auto-indexes on first use) |
-| `setup` | Initialize tools for Unity project (`-p <path>`, `--index-docs`) |
+| `docs <query>` | Search indexed Unity documentation |
+| `setup` | Initialize tools (`-p <path>`, `--index-docs`) |
 | `cleanup` | Remove .unity-agentic files (`--all` for full removal) |
 | `status` | Show config, GUID cache count, native module status |
+
+## search
+
+Two modes depending on whether the path is a file or directory:
+
+**Single file**: `search <file> <pattern>` -- find GameObjects by name. `--exact` for exact match.
+
+**Project-wide**: `search <project> -n <pattern>` -- search across scenes/prefabs.
+
+| Filter | Effect |
+|--------|--------|
+| `-c <type>` | By component type |
+| `-t <tag>` | By tag |
+| `-l <index>` | By layer index |
+| `-T <type>` | File type: scene, prefab, mat, anim, controller, asset, all (default: all) |
+| `-m <n>` | Max total matches |
+
+## grep
+
+Regex search across project files. Default 100-result cap.
+
+| Option | Effect |
+|--------|--------|
+| `--type <type>` | File filter: cs, yaml, unity, prefab, asset, all (default: all) |
+| `-m <n>` | Override max results |
+| `-C <n>` | Context lines around matches |
 
 ## Setting aliases
 
