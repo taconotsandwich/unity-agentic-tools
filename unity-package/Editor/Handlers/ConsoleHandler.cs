@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using UnityEditor;
@@ -16,13 +17,127 @@ namespace UnityAgenticTools.Server
         private static readonly object _logLock = new object();
         private const int MaxBufferSize = 1000;
 
-        private static readonly HashSet<WebSocketConnection> _subscribers =
-            new HashSet<WebSocketConnection>();
-        private static readonly object _subscriberLock = new object();
+        private static readonly string _persistPath = Path.Combine(
+            Path.GetTempPath(), "unity-agentic-console-buffer.json");
 
         static ConsoleHandler()
         {
+            LoadExistingUnityLogs();
+            LoadPersistedLogs();
             Application.logMessageReceived += OnLogMessage;
+            AssemblyReloadEvents.beforeAssemblyReload += SaveLogsToDisk;
+        }
+
+        private static void LoadExistingUnityLogs()
+        {
+            try
+            {
+                var editorAssembly = typeof(UnityEditor.Editor).Assembly;
+                var logEntriesType = editorAssembly.GetType("UnityEditor.LogEntries");
+                var logEntryType   = editorAssembly.GetType("UnityEditor.LogEntry");
+                if (logEntriesType == null || logEntryType == null) return;
+
+                var startGetting = logEntriesType.GetMethod("StartGettingEntries",
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
+                var endGetting = logEntriesType.GetMethod("EndGettingEntries",
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
+                var getEntry = logEntriesType.GetMethod("GetEntryInternal",
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
+                if (startGetting == null || endGetting == null || getEntry == null) return;
+
+                // LogEntry exposes properties, not fields
+                var messageProp = logEntryType.GetProperty("message");
+                var modeProp    = logEntryType.GetProperty("mode");
+                if (messageProp == null || modeProp == null) return;
+
+                int count = (int)startGetting.Invoke(null, null);
+                try
+                {
+                    var entry = Activator.CreateInstance(logEntryType);
+                    lock (_logLock)
+                    {
+                        int start = Math.Max(0, count - MaxBufferSize);
+                        for (int i = start; i < count; i++)
+                        {
+                            getEntry.Invoke(null, new object[] { i, entry });
+                            var message = messageProp.GetValue(entry) as string ?? "";
+                            var mode    = (int)(modeProp.GetValue(entry) ?? 0);
+                            _logBuffer.Add(new LogEntry
+                            {
+                                Message   = message,
+                                StackTrace = "",
+                                Type      = LogTypeFromMode(mode),
+                                Timestamp = DateTime.UtcNow.ToString("o")
+                            });
+                        }
+                    }
+                }
+                finally
+                {
+                    endGetting.Invoke(null, null);
+                }
+            }
+            catch { }
+        }
+
+        private static string LogTypeFromMode(int mode)
+        {
+            const int errorBits   = 0x001 | 0x010 | 0x100 | 0x20000 | 0x800;
+            const int warningBits = 0x004 | 0x200 | 0x1000;
+            if ((mode & errorBits) != 0) return "Error";
+            if ((mode & warningBits) != 0) return "Warning";
+            return "Log";
+        }
+
+        private static void LoadPersistedLogs()
+        {
+            try
+            {
+                if (!File.Exists(_persistPath)) return;
+                var json = File.ReadAllText(_persistPath);
+                var data = JsonUtility.FromJson<LogEntryList>(json);
+                if (data?.entries == null) return;
+                lock (_logLock)
+                {
+                    foreach (var e in data.entries)
+                    {
+                        _logBuffer.Add(new LogEntry
+                        {
+                            Message = e.message,
+                            StackTrace = e.stackTrace,
+                            Type = e.type,
+                            Timestamp = e.timestamp
+                        });
+                    }
+                    if (_logBuffer.Count > MaxBufferSize)
+                        _logBuffer.RemoveRange(0, _logBuffer.Count - MaxBufferSize);
+                }
+            }
+            catch { }
+        }
+
+        private static void SaveLogsToDisk()
+        {
+            try
+            {
+                List<LogEntry> snapshot;
+                lock (_logLock)
+                {
+                    snapshot = new List<LogEntry>(_logBuffer);
+                }
+                var data = new LogEntryList
+                {
+                    entries = snapshot.Select(e => new LogEntryData
+                    {
+                        message = e.Message,
+                        stackTrace = e.StackTrace,
+                        type = e.Type,
+                        timestamp = e.Timestamp
+                    }).ToList()
+                };
+                File.WriteAllText(_persistPath, JsonUtility.ToJson(data));
+            }
+            catch { }
         }
 
         public Task<object> HandleAsync(string method, Dictionary<string, object> parameters)
@@ -141,6 +256,21 @@ namespace UnityAgenticTools.Server
                     { "timestamp", Timestamp }
                 };
             }
+        }
+
+        [Serializable]
+        private class LogEntryData
+        {
+            public string message;
+            public string stackTrace;
+            public string type;
+            public string timestamp;
+        }
+
+        [Serializable]
+        private class LogEntryList
+        {
+            public List<LogEntryData> entries = new List<LogEntryData>();
         }
     }
 }
