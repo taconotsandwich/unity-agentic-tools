@@ -6,11 +6,12 @@ import { tmpdir } from 'os';
 
 const CLI_PATH = join(__dirname, '..', '..', 'dist', 'cli.js');
 
-function runCli(args: string): { stdout: string; stderr: string; exitCode: number } {
+function runCli(args: string, cwd?: string): { stdout: string; stderr: string; exitCode: number } {
     try {
         const stdout = execSync(`bun ${CLI_PATH} ${args}`, {
             encoding: 'utf-8',
             timeout: 10000,
+            cwd,
         });
         return { stdout, stderr: '', exitCode: 0 };
     } catch (err: any) {
@@ -23,12 +24,26 @@ function runCli(args: string): { stdout: string; stderr: string; exitCode: numbe
 }
 
 describe('doc-indexer CLI integration', () => {
+    let temp_dir: string;
+
+    beforeEach(() => {
+        temp_dir = mkdtempSync(join(tmpdir(), 'cli-test-'));
+    });
+
+    afterEach(() => {
+        if (existsSync(temp_dir)) {
+            rmSync(temp_dir, { recursive: true, force: true });
+        }
+    });
+
     it('search subcommand should execute without "does not exist" error', () => {
-        const result = runCli('search "Rigidbody"');
+        const storagePath = join(temp_dir, 'index.json');
+        const result = runCli(`--storage-path ${storagePath} search "Rigidbody"`, temp_dir);
         expect(result.stderr).not.toContain('does not exist');
         expect(result.stderr).not.toContain('is not recognized');
+        // With empty index and no project root, should return empty results JSON
         const output = result.stdout + result.stderr;
-        expect(output).toMatch(/Found|results|error/i);
+        expect(output).toMatch(/results|indexed|documentation/i);
     });
 
     it('index subcommand should execute against a nonexistent path gracefully', () => {
@@ -60,7 +75,8 @@ describe('doc-indexer CLI integration', () => {
     });
 
     it('search -j (json) should output valid JSON', () => {
-        const result = runCli('search "Rigidbody" -j');
+        const storagePath = join(temp_dir, 'index.json');
+        const result = runCli(`--storage-path ${storagePath} search "Rigidbody" -j`, temp_dir);
         expect(result.stderr).not.toContain('unknown option');
         expect(() => JSON.parse(result.stdout)).not.toThrow();
     });
@@ -81,12 +97,12 @@ describe('doc-indexer CLI --storage-path', () => {
 
     it('should use --storage-path for search', () => {
         const storagePath = join(temp_dir, 'custom-index.json');
-        const result = runCli(`--storage-path ${storagePath} search "test"`);
+        const result = runCli(`--storage-path ${storagePath} search "test"`, temp_dir);
 
-        // Should not crash; index file may or may not be created (no sources)
+        // Should not crash; with empty index returns empty results
         expect(result.stderr).not.toContain('does not exist');
         const output = result.stdout + result.stderr;
-        expect(output).toMatch(/Found|results|error/i);
+        expect(output).toMatch(/results|indexed|documentation/i);
     });
 
     it('should use --storage-path for clear', () => {
@@ -98,7 +114,8 @@ describe('doc-indexer CLI --storage-path', () => {
 
     it('index without path should fail when no project root found', () => {
         const storagePath = join(temp_dir, 'custom-index.json');
-        const result = runCli(`--storage-path ${storagePath} index`);
+        // Run from temp_dir so find_project_root() won't find .unity-agentic/ or Assets/
+        const result = runCli(`--storage-path ${storagePath} index`, temp_dir);
 
         // Should fail gracefully (no Unity project found)
         expect(result.exitCode).not.toBe(0);
