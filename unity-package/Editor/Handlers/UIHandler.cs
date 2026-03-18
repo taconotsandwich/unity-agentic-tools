@@ -1,0 +1,876 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Threading.Tasks;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
+using UnityAgenticTools.Refs;
+
+namespace UnityAgenticTools.Server
+{
+    public class UIHandler : IRequestHandler
+    {
+        public string MethodPrefix => "editor.ui.";
+
+        public async Task<object> HandleAsync(string method, Dictionary<string, object> parameters)
+        {
+            var action = method.Substring(MethodPrefix.Length);
+
+            switch (action)
+            {
+                case "snapshot":
+                    return await TakeSnapshot(parameters);
+                case "interact":
+                    return await Interact(parameters);
+                case "query":
+                    return await Query(parameters);
+                case "wait":
+                    return await Wait(parameters);
+                default:
+                    throw new InvalidOperationException($"Unknown UI action: {action}");
+            }
+        }
+
+        // --- Snapshot ---
+
+        private async Task<object> TakeSnapshot(Dictionary<string, object> parameters)
+        {
+            return await EditorWebSocketServer.RunOnMainThread(() =>
+            {
+                RefManager.ClearUI();
+
+                var elements = new List<UIElementInfo>();
+
+                // Walk uGUI
+                try
+                {
+                    elements.AddRange(UIWalker.WalkUGUI());
+                }
+                catch (InvalidOperationException)
+                {
+                    // No EventSystem - not an error for snapshot, just means no uGUI
+                }
+
+                // Walk UI Toolkit
+                elements.AddRange(UIWalker.WalkUIToolkit());
+
+                var items = new List<object>();
+                foreach (var elem in elements)
+                {
+                    var item = new Dictionary<string, object>
+                    {
+                        { "ref", elem.Ref },
+                        { "type", elem.Type },
+                        { "name", elem.Name },
+                        { "interactable", elem.Interactable },
+                        { "source", elem.Source }
+                    };
+
+                    if (!string.IsNullOrEmpty(elem.Label))
+                        item["label"] = elem.Label;
+
+                    if (!string.IsNullOrEmpty(elem.ParentRef))
+                        item["parentRef"] = elem.ParentRef;
+
+                    if (elem.ScreenRect.width > 0 || elem.ScreenRect.height > 0)
+                    {
+                        item["rect"] = new Dictionary<string, object>
+                        {
+                            { "x", Mathf.RoundToInt(elem.ScreenRect.x) },
+                            { "y", Mathf.RoundToInt(elem.ScreenRect.y) },
+                            { "w", Mathf.RoundToInt(elem.ScreenRect.width) },
+                            { "h", Mathf.RoundToInt(elem.ScreenRect.height) }
+                        };
+                    }
+
+                    items.Add(item);
+                }
+
+                return new Dictionary<string, object>
+                {
+                    { "refCount", RefManager.GetUIRefCount() },
+                    { "elements", items.ToArray() }
+                };
+            });
+        }
+
+        // --- Interact ---
+
+        private async Task<object> Interact(Dictionary<string, object> parameters)
+        {
+            if (!parameters.TryGetValue("ref", out var refObj) || !(refObj is string refStr))
+                throw new ArgumentException("Missing required parameter: ref");
+
+            if (!parameters.TryGetValue("action", out var actionObj) || !(actionObj is string interactAction))
+                throw new ArgumentException("Missing required parameter: action");
+
+            return await EditorWebSocketServer.RunOnMainThread(() =>
+            {
+                if (!RefManager.TryResolve(refStr, out var entry, out var kind))
+                    throw new ArgumentException($"Stale or invalid ref '{refStr}'. Run ui-snapshot to refresh refs.");
+
+                if (kind != RefKind.UI)
+                    throw new ArgumentException($"Ref '{refStr}' is not a UI ref. Use @uN refs from ui-snapshot.");
+
+                // UI Toolkit path
+                if (entry.InstanceId == 0 && !string.IsNullOrEmpty(entry.TreePath))
+                {
+                    return InteractUIToolkit(entry.TreePath, interactAction, parameters, refStr);
+                }
+
+                // uGUI path
+                var obj = EditorUtility.InstanceIDToObject(entry.InstanceId);
+                if (obj == null)
+                    throw new ArgumentException($"Ref '{refStr}' points to a destroyed element. Run ui-snapshot to refresh.");
+
+                var component = obj as Component;
+                if (component == null)
+                    throw new ArgumentException($"Ref '{refStr}' resolved to {obj.GetType().Name}, not a UI component.");
+
+                return InteractUGUI(component, interactAction, parameters, refStr);
+            });
+        }
+
+        private static object InteractUGUI(Component component, string action, Dictionary<string, object> parameters, string refStr)
+        {
+            switch (action)
+            {
+                case "click":
+                {
+                    var selectable = component as Selectable ?? component.GetComponent<Selectable>();
+                    if (selectable == null)
+                        throw new ArgumentException($"Ref '{refStr}' is not a clickable element.");
+
+                    if (!selectable.interactable)
+                        throw new ArgumentException($"Element '{refStr}' is not interactable (disabled).");
+
+                    // Use ExecuteEvents for proper event chain
+                    var go = selectable.gameObject;
+                    ExecuteEvents.Execute(go, new PointerEventData(EventSystem.current), ExecuteEvents.pointerClickHandler);
+
+                    // Also invoke onClick for Button
+                    if (selectable is Button btn)
+                        btn.onClick.Invoke();
+
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "ref", refStr },
+                        { "action", "click" }
+                    };
+                }
+
+                case "fill":
+                {
+                    if (!parameters.TryGetValue("text", out var textObj) || !(textObj is string text))
+                        throw new ArgumentException("Missing required parameter: text");
+
+                    if (component is InputField inputField)
+                    {
+                        inputField.text = text;
+                        inputField.onValueChanged.Invoke(text);
+                        inputField.onEndEdit.Invoke(text);
+                    }
+                    else
+                    {
+                        SetTMPInputFieldText(component, text, clear: true);
+                    }
+
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "ref", refStr },
+                        { "action", "fill" },
+                        { "text", text }
+                    };
+                }
+
+                case "type":
+                {
+                    if (!parameters.TryGetValue("text", out var textObj) || !(textObj is string text))
+                        throw new ArgumentException("Missing required parameter: text");
+
+                    if (component is InputField inputField)
+                    {
+                        inputField.text += text;
+                        inputField.onValueChanged.Invoke(inputField.text);
+                    }
+                    else
+                    {
+                        SetTMPInputFieldText(component, text, clear: false);
+                    }
+
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "ref", refStr },
+                        { "action", "type" },
+                        { "text", text }
+                    };
+                }
+
+                case "toggle":
+                {
+                    if (!(component is Toggle) && component.GetComponent<Toggle>() == null)
+                        throw new ArgumentException($"Ref '{refStr}' is not a Toggle.");
+
+                    var toggle = component as Toggle ?? component.GetComponent<Toggle>();
+                    toggle.isOn = !toggle.isOn;
+
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "ref", refStr },
+                        { "action", "toggle" },
+                        { "isOn", toggle.isOn }
+                    };
+                }
+
+                case "slider":
+                {
+                    if (!parameters.TryGetValue("value", out var valObj))
+                        throw new ArgumentException("Missing required parameter: value");
+
+                    float value = Convert.ToSingle(valObj);
+
+                    if (!(component is Slider) && component.GetComponent<Slider>() == null)
+                        throw new ArgumentException($"Ref '{refStr}' is not a Slider.");
+
+                    var slider = component as Slider ?? component.GetComponent<Slider>();
+                    slider.value = value;
+
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "ref", refStr },
+                        { "action", "slider" },
+                        { "value", slider.value }
+                    };
+                }
+
+                case "select":
+                {
+                    if (!parameters.TryGetValue("option", out var optObj) || !(optObj is string option))
+                        throw new ArgumentException("Missing required parameter: option");
+
+                    bool byIndex = false;
+                    if (parameters.TryGetValue("byIndex", out var biObj) && biObj is bool bi)
+                        byIndex = bi;
+
+                    return SelectDropdown(component, option, byIndex, refStr);
+                }
+
+                case "scroll":
+                {
+                    var scrollRect = component as ScrollRect ?? component.GetComponent<ScrollRect>();
+                    if (scrollRect == null)
+                        throw new ArgumentException($"Ref '{refStr}' is not a ScrollRect.");
+
+                    string direction = "down";
+                    if (parameters.TryGetValue("direction", out var dirObj) && dirObj is string dir)
+                        direction = dir;
+
+                    float amount = 0.1f;
+                    if (parameters.TryGetValue("amount", out var amtObj))
+                        amount = Convert.ToSingle(amtObj);
+
+                    var pos = scrollRect.normalizedPosition;
+                    switch (direction.ToLowerInvariant())
+                    {
+                        case "up": pos.y = Mathf.Clamp01(pos.y + amount); break;
+                        case "down": pos.y = Mathf.Clamp01(pos.y - amount); break;
+                        case "left": pos.x = Mathf.Clamp01(pos.x - amount); break;
+                        case "right": pos.x = Mathf.Clamp01(pos.x + amount); break;
+                    }
+                    scrollRect.normalizedPosition = pos;
+
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "ref", refStr },
+                        { "action", "scroll" },
+                        { "normalizedPosition", new Dictionary<string, object> { { "x", pos.x }, { "y", pos.y } } }
+                    };
+                }
+
+                case "focus":
+                {
+                    var selectable = component as Selectable ?? component.GetComponent<Selectable>();
+                    if (selectable != null)
+                    {
+                        selectable.Select();
+                        return new Dictionary<string, object>
+                        {
+                            { "success", true },
+                            { "ref", refStr },
+                            { "action", "focus" }
+                        };
+                    }
+
+                    throw new ArgumentException($"Ref '{refStr}' is not a focusable element.");
+                }
+
+                default:
+                    throw new ArgumentException($"Unknown interaction: {action}. Use: click, fill, type, toggle, slider, select, scroll, focus");
+            }
+        }
+
+        private static void SetTMPInputFieldText(Component component, string text, bool clear)
+        {
+            // TMP_InputField via reflection
+            var type = component.GetType();
+            if (type.Name != "TMP_InputField")
+                throw new ArgumentException($"Element is {type.Name}, not an InputField.");
+
+            var textProp = type.GetProperty("text", BindingFlags.Public | BindingFlags.Instance);
+            if (textProp == null)
+                throw new ArgumentException("Cannot access text property on TMP_InputField.");
+
+            if (clear)
+            {
+                textProp.SetValue(component, text);
+            }
+            else
+            {
+                var current = textProp.GetValue(component) as string ?? "";
+                textProp.SetValue(component, current + text);
+            }
+
+            // Invoke onValueChanged
+            var eventProp = type.GetField("onValueChanged", BindingFlags.Public | BindingFlags.Instance);
+            if (eventProp != null)
+            {
+                var evt = eventProp.GetValue(component);
+                var invoke = evt?.GetType().GetMethod("Invoke", new[] { typeof(string) });
+                invoke?.Invoke(evt, new object[] { textProp.GetValue(component) });
+            }
+        }
+
+        private static object SelectDropdown(Component component, string option, bool byIndex, string refStr)
+        {
+            // Standard Dropdown
+            if (component is Dropdown dropdown)
+            {
+                if (byIndex)
+                {
+                    dropdown.value = int.Parse(option);
+                }
+                else
+                {
+                    int idx = dropdown.options.FindIndex(o => o.text == option);
+                    if (idx < 0)
+                        throw new ArgumentException($"Option '{option}' not found. Available: {string.Join(", ", dropdown.options.ConvertAll(o => o.text))}");
+                    dropdown.value = idx;
+                }
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "ref", refStr },
+                    { "action", "select" },
+                    { "selectedIndex", dropdown.value },
+                    { "selectedText", dropdown.options[dropdown.value].text }
+                };
+            }
+
+            // TMP_Dropdown via reflection
+            var type = component.GetType();
+            if (type.Name == "TMP_Dropdown")
+            {
+                var valueProp = type.GetProperty("value", BindingFlags.Public | BindingFlags.Instance);
+                var optionsProp = type.GetProperty("options", BindingFlags.Public | BindingFlags.Instance);
+
+                if (byIndex)
+                {
+                    valueProp.SetValue(component, int.Parse(option));
+                }
+                else
+                {
+                    var options = optionsProp.GetValue(component) as System.Collections.IList;
+                    int idx = -1;
+                    for (int i = 0; i < options.Count; i++)
+                    {
+                        var textProp = options[i].GetType().GetProperty("text", BindingFlags.Public | BindingFlags.Instance);
+                        if (textProp != null && (string)textProp.GetValue(options[i]) == option)
+                        {
+                            idx = i;
+                            break;
+                        }
+                    }
+                    if (idx < 0)
+                        throw new ArgumentException($"Option '{option}' not found in TMP_Dropdown.");
+                    valueProp.SetValue(component, idx);
+                }
+
+                return new Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "ref", refStr },
+                    { "action", "select" }
+                };
+            }
+
+            throw new ArgumentException($"Ref '{refStr}' is not a Dropdown.");
+        }
+
+        // --- UI Toolkit Interaction ---
+
+        private static object InteractUIToolkit(string treePath, string action, Dictionary<string, object> parameters, string refStr)
+        {
+            var element = ResolveUIToolkitElement(treePath);
+            if (element == null)
+                throw new ArgumentException($"Ref '{refStr}' could not be resolved. Run ui-snapshot to refresh.");
+
+            var type = element.GetType();
+            var typeName = type.Name;
+
+            switch (action)
+            {
+                case "click":
+                {
+                    // Send ClickEvent via reflection
+                    var clickEventType = FindType("UnityEngine.UIElements.ClickEvent");
+                    if (clickEventType != null)
+                    {
+                        var panelProp = type.GetProperty("panel", BindingFlags.Public | BindingFlags.Instance);
+                        var panel = panelProp?.GetValue(element);
+
+                        // For Button, use InvokeClicked reflection or simulate
+                        var clickedField = type.GetField("clicked", BindingFlags.Public | BindingFlags.Instance | BindingFlags.NonPublic);
+                        if (clickedField != null)
+                        {
+                            var action2 = clickedField.GetValue(element) as Action;
+                            action2?.Invoke();
+                        }
+                        else
+                        {
+                            // Try SendEvent approach
+                            var sendEvent = type.GetMethod("SendEvent", BindingFlags.Public | BindingFlags.Instance);
+                            if (sendEvent != null)
+                            {
+                                var evt = Activator.CreateInstance(clickEventType);
+                                sendEvent.Invoke(element, new[] { evt });
+                            }
+                        }
+                    }
+
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "ref", refStr },
+                        { "action", "click" },
+                        { "source", "UIToolkit" }
+                    };
+                }
+
+                case "fill":
+                case "type":
+                {
+                    if (!parameters.TryGetValue("text", out var textObj) || !(textObj is string text))
+                        throw new ArgumentException("Missing required parameter: text");
+
+                    var valueProp = type.GetProperty("value", BindingFlags.Public | BindingFlags.Instance);
+                    if (valueProp == null || valueProp.PropertyType != typeof(string))
+                        throw new ArgumentException($"Ref '{refStr}' does not support text input.");
+
+                    if (action == "fill")
+                    {
+                        valueProp.SetValue(element, text);
+                    }
+                    else
+                    {
+                        var current = valueProp.GetValue(element) as string ?? "";
+                        valueProp.SetValue(element, current + text);
+                    }
+
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "ref", refStr },
+                        { "action", action },
+                        { "text", text },
+                        { "source", "UIToolkit" }
+                    };
+                }
+
+                case "toggle":
+                {
+                    var valueProp = type.GetProperty("value", BindingFlags.Public | BindingFlags.Instance);
+                    if (valueProp == null || valueProp.PropertyType != typeof(bool))
+                        throw new ArgumentException($"Ref '{refStr}' is not a toggle.");
+
+                    bool current = (bool)valueProp.GetValue(element);
+                    valueProp.SetValue(element, !current);
+
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "ref", refStr },
+                        { "action", "toggle" },
+                        { "isOn", !current },
+                        { "source", "UIToolkit" }
+                    };
+                }
+
+                case "slider":
+                {
+                    if (!parameters.TryGetValue("value", out var valObj))
+                        throw new ArgumentException("Missing required parameter: value");
+
+                    var valueProp = type.GetProperty("value", BindingFlags.Public | BindingFlags.Instance);
+                    if (valueProp == null)
+                        throw new ArgumentException($"Ref '{refStr}' is not a slider.");
+
+                    if (valueProp.PropertyType == typeof(int))
+                        valueProp.SetValue(element, Convert.ToInt32(valObj));
+                    else
+                        valueProp.SetValue(element, Convert.ToSingle(valObj));
+
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "ref", refStr },
+                        { "action", "slider" },
+                        { "value", valueProp.GetValue(element) },
+                        { "source", "UIToolkit" }
+                    };
+                }
+
+                case "select":
+                {
+                    if (!parameters.TryGetValue("option", out var optObj) || !(optObj is string option))
+                        throw new ArgumentException("Missing required parameter: option");
+
+                    var valueProp = type.GetProperty("value", BindingFlags.Public | BindingFlags.Instance);
+                    if (valueProp != null && valueProp.PropertyType == typeof(string))
+                    {
+                        valueProp.SetValue(element, option);
+                    }
+
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "ref", refStr },
+                        { "action", "select" },
+                        { "source", "UIToolkit" }
+                    };
+                }
+
+                case "focus":
+                {
+                    var focusMethod = type.GetMethod("Focus", BindingFlags.Public | BindingFlags.Instance);
+                    focusMethod?.Invoke(element, null);
+
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "ref", refStr },
+                        { "action", "focus" },
+                        { "source", "UIToolkit" }
+                    };
+                }
+
+                case "scroll":
+                {
+                    string direction = "down";
+                    if (parameters.TryGetValue("direction", out var dirObj) && dirObj is string dir)
+                        direction = dir;
+
+                    float amount = 100f;
+                    if (parameters.TryGetValue("amount", out var amtObj))
+                        amount = Convert.ToSingle(amtObj);
+
+                    var scrollOffsetProp = type.GetProperty("scrollOffset", BindingFlags.Public | BindingFlags.Instance);
+                    if (scrollOffsetProp != null)
+                    {
+                        var offset = (Vector2)scrollOffsetProp.GetValue(element);
+                        switch (direction.ToLowerInvariant())
+                        {
+                            case "up": offset.y -= amount; break;
+                            case "down": offset.y += amount; break;
+                            case "left": offset.x -= amount; break;
+                            case "right": offset.x += amount; break;
+                        }
+                        scrollOffsetProp.SetValue(element, offset);
+                    }
+
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "ref", refStr },
+                        { "action", "scroll" },
+                        { "source", "UIToolkit" }
+                    };
+                }
+
+                default:
+                    throw new ArgumentException($"Unknown interaction: {action}");
+            }
+        }
+
+        private static object ResolveUIToolkitElement(string treePath)
+        {
+            // treePath format: "{docInstanceId}/path/to/element"
+            int slashIdx = treePath.IndexOf('/');
+            if (slashIdx < 0) return null;
+
+            string docIdStr = treePath.Substring(0, slashIdx);
+            string path = treePath.Substring(slashIdx + 1);
+
+            if (!int.TryParse(docIdStr, out int docInstanceId)) return null;
+
+            var docObj = EditorUtility.InstanceIDToObject(docInstanceId);
+            if (docObj == null) return null;
+
+            var docType = docObj.GetType();
+            var rootProp = docType.GetProperty("rootVisualElement", BindingFlags.Public | BindingFlags.Instance);
+            if (rootProp == null) return null;
+
+            var root = rootProp.GetValue(docObj);
+            if (root == null) return null;
+
+            // Walk the path segments to find the element
+            // For now, use Q<VisualElement>(name) approach
+            var queryMethod = root.GetType().GetMethod("Q", new[] { typeof(string), typeof(string) });
+            if (queryMethod == null) return null;
+
+            // Try to find by the last segment name
+            var segments = path.Split('/');
+            var lastName = segments[segments.Length - 1];
+
+            // Strip the index suffix if present (e.g., "Button:2" -> "Button")
+            int colonIdx = lastName.LastIndexOf(':');
+            if (colonIdx > 0)
+                lastName = lastName.Substring(0, colonIdx);
+
+            return queryMethod.Invoke(root, new object[] { lastName, null });
+        }
+
+        // --- Query ---
+
+        private async Task<object> Query(Dictionary<string, object> parameters)
+        {
+            if (!parameters.TryGetValue("ref", out var refObj) || !(refObj is string refStr))
+                throw new ArgumentException("Missing required parameter: ref");
+
+            if (!parameters.TryGetValue("query", out var queryObj) || !(queryObj is string query))
+                throw new ArgumentException("Missing required parameter: query");
+
+            return await EditorWebSocketServer.RunOnMainThread(() =>
+            {
+                if (!RefManager.TryResolve(refStr, out var entry, out var kind))
+                    throw new ArgumentException($"Stale or invalid ref '{refStr}'. Run ui-snapshot to refresh refs.");
+
+                // For UI Toolkit elements
+                if (entry.InstanceId == 0 && !string.IsNullOrEmpty(entry.TreePath))
+                {
+                    var element = ResolveUIToolkitElement(entry.TreePath);
+                    if (element == null)
+                        throw new ArgumentException($"Ref '{refStr}' could not be resolved. Run ui-snapshot to refresh.");
+
+                    return QueryUIToolkitElement(element, query, refStr);
+                }
+
+                // For uGUI
+                var obj = EditorUtility.InstanceIDToObject(entry.InstanceId);
+                if (obj == null)
+                    throw new ArgumentException($"Ref '{refStr}' points to a destroyed element. Run ui-snapshot to refresh.");
+
+                var component = obj as Component;
+                if (component == null)
+                    throw new ArgumentException($"Ref '{refStr}' resolved to {obj.GetType().Name}, not a UI component.");
+
+                switch (query)
+                {
+                    case "text":
+                    {
+                        string text = UIWalker.GetChildTextPublic(component.transform);
+                        return (object)new Dictionary<string, object>
+                        {
+                            { "ref", refStr },
+                            { "text", text ?? "" }
+                        };
+                    }
+
+                    case "value":
+                    {
+                        return GetUGUIValue(component, refStr);
+                    }
+
+                    default:
+                        throw new ArgumentException($"Unknown UI query: {query}. Use: text, value");
+                }
+            });
+        }
+
+        private static object GetUGUIValue(Component component, string refStr)
+        {
+            if (component is Toggle toggle)
+                return new Dictionary<string, object> { { "ref", refStr }, { "value", toggle.isOn } };
+
+            if (component is Slider slider)
+                return new Dictionary<string, object> { { "ref", refStr }, { "value", slider.value }, { "min", slider.minValue }, { "max", slider.maxValue } };
+
+            if (component is InputField inputField)
+                return new Dictionary<string, object> { { "ref", refStr }, { "value", inputField.text } };
+
+            if (component is Dropdown dropdown)
+                return new Dictionary<string, object>
+                {
+                    { "ref", refStr },
+                    { "selectedIndex", dropdown.value },
+                    { "selectedText", dropdown.options.Count > dropdown.value ? dropdown.options[dropdown.value].text : "" }
+                };
+
+            if (component is Scrollbar scrollbar)
+                return new Dictionary<string, object> { { "ref", refStr }, { "value", scrollbar.value } };
+
+            // TMP variants
+            var typeName = component.GetType().Name;
+            if (typeName == "TMP_InputField")
+            {
+                var textProp = component.GetType().GetProperty("text", BindingFlags.Public | BindingFlags.Instance);
+                return new Dictionary<string, object> { { "ref", refStr }, { "value", textProp?.GetValue(component) ?? "" } };
+            }
+
+            return new Dictionary<string, object> { { "ref", refStr }, { "value", null }, { "note", "Element type does not have a readable value" } };
+        }
+
+        private static object QueryUIToolkitElement(object element, string query, string refStr)
+        {
+            var type = element.GetType();
+
+            switch (query)
+            {
+                case "text":
+                {
+                    var textProp = type.GetProperty("text", BindingFlags.Public | BindingFlags.Instance);
+                    var text = textProp?.GetValue(element) as string ?? "";
+                    return new Dictionary<string, object> { { "ref", refStr }, { "text", text } };
+                }
+
+                case "value":
+                {
+                    var valueProp = type.GetProperty("value", BindingFlags.Public | BindingFlags.Instance);
+                    object val = valueProp?.GetValue(element);
+                    return new Dictionary<string, object> { { "ref", refStr }, { "value", val } };
+                }
+
+                default:
+                    throw new ArgumentException($"Unknown UI query: {query}. Use: text, value");
+            }
+        }
+
+        // --- Wait ---
+
+        private async Task<object> Wait(Dictionary<string, object> parameters)
+        {
+            if (!parameters.TryGetValue("condition", out var condObj) || !(condObj is string condition))
+                throw new ArgumentException("Missing required parameter: condition");
+
+            int timeoutMs = 10000;
+            if (parameters.TryGetValue("timeout", out var toObj))
+                timeoutMs = Convert.ToInt32(toObj);
+
+            switch (condition)
+            {
+                case "ui":
+                {
+                    if (!parameters.TryGetValue("ref", out var refObj) || !(refObj is string refStr))
+                        throw new ArgumentException("Missing required parameter: ref");
+
+                    return await WaitConditionRunner.WaitForCondition(
+                        () => IsUIElementActive(refStr),
+                        timeoutMs,
+                        $"UI element {refStr} to become active");
+                }
+
+                case "ui-gone":
+                {
+                    if (!parameters.TryGetValue("ref", out var refObj) || !(refObj is string refStr))
+                        throw new ArgumentException("Missing required parameter: ref");
+
+                    return await WaitConditionRunner.WaitForCondition(
+                        () => !IsUIElementActive(refStr),
+                        timeoutMs,
+                        $"UI element {refStr} to deactivate");
+                }
+
+                case "scene":
+                {
+                    if (!parameters.TryGetValue("name", out var nameObj) || !(nameObj is string sceneName))
+                        throw new ArgumentException("Missing required parameter: name");
+
+                    return await WaitConditionRunner.WaitForCondition(
+                        () => UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == sceneName,
+                        timeoutMs,
+                        $"scene '{sceneName}' to load");
+                }
+
+                case "log":
+                {
+                    if (!parameters.TryGetValue("text", out var textObj) || !(textObj is string text))
+                        throw new ArgumentException("Missing required parameter: text");
+
+                    return await WaitConditionRunner.WaitForLog(text, timeoutMs);
+                }
+
+                case "compile":
+                {
+                    return await WaitConditionRunner.WaitForCondition(
+                        () => !EditorApplication.isCompiling,
+                        timeoutMs,
+                        "compilation to finish");
+                }
+
+                case "delay":
+                {
+                    int delayMs = 1000;
+                    if (parameters.TryGetValue("ms", out var msObj))
+                        delayMs = Convert.ToInt32(msObj);
+
+                    await Task.Delay(delayMs);
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "waited", delayMs }
+                    };
+                }
+
+                default:
+                    throw new ArgumentException($"Unknown wait condition: {condition}. Use: ui, ui-gone, scene, log, compile, delay");
+            }
+        }
+
+        private static bool IsUIElementActive(string refStr)
+        {
+            if (!RefManager.TryResolve(refStr, out var entry, out _))
+                return false;
+
+            if (entry.InstanceId == 0) return false; // UI Toolkit resolution would need re-walk
+
+            var obj = EditorUtility.InstanceIDToObject(entry.InstanceId);
+            if (obj == null) return false;
+
+            if (obj is Component comp) return comp.gameObject.activeInHierarchy;
+            if (obj is GameObject go) return go.activeInHierarchy;
+            return false;
+        }
+
+        private static Type FindType(string fullName)
+        {
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try
+                {
+                    var t = asm.GetType(fullName);
+                    if (t != null) return t;
+                }
+                catch { }
+            }
+            return null;
+        }
+    }
+}

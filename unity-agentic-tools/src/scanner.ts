@@ -13,6 +13,12 @@ let nativeModuleError: string | null = null;
 let nativeWalkProjectFiles: ((projectPath: string, extensions: string[], excludeDirs?: string[] | null) => string[]) | null = null;
 let nativeGrepProject: ((options: unknown) => unknown) | null = null;
 let nativeBuildGuidCache: ((projectRoot: string) => unknown) | null = null;
+let nativeExtractCsharpTypes: ((path: string) => Array<{ name: string; kind: string; namespace: string | null; filePath: string; guid: string | null }>) | null = null;
+let nativeBuildTypeRegistry: ((projectRoot: string, includePackages?: boolean | null, includeDlls?: boolean | null) => Array<{ name: string; kind: string; namespace: string | null; filePath: string; guid: string | null }>) | null = null;
+let nativeExtractDllTypes: ((path: string) => Array<{ name: string; kind: string; namespace: string | null; filePath: string; guid: string | null }>) | null = null;
+let nativeBuildPackageGuidCache: ((projectRoot: string) => unknown) | null = null;
+let nativeExtractSerializedFields: ((path: string) => Array<{ name: string; kind: string; namespace: string | null; baseClass: string | null; fields: Array<{ name: string; typeName: string; hasSerializeField: boolean; hasSerializeReference: boolean; isPublic: boolean; ownerType: string }> }>) | null = null;
+let nativeExtractDllFields: ((path: string) => Array<{ name: string; kind: string; namespace: string | null; baseClass: string | null; fields: Array<{ name: string; typeName: string; hasSerializeField: boolean; hasSerializeReference: boolean; isPublic: boolean; ownerType: string }> }>) | null = null;
 
 try {
   const scriptDir = process.argv[1]
@@ -37,6 +43,12 @@ try {
   nativeWalkProjectFiles = (rustModule.walkProjectFiles as typeof nativeWalkProjectFiles) || null;
   nativeGrepProject = (rustModule.grepProject as typeof nativeGrepProject) || null;
   nativeBuildGuidCache = (rustModule.buildGuidCache as typeof nativeBuildGuidCache) || null;
+  nativeExtractCsharpTypes = (rustModule.extractCsharpTypes as typeof nativeExtractCsharpTypes) || null;
+  nativeBuildTypeRegistry = (rustModule.buildTypeRegistry as typeof nativeBuildTypeRegistry) || null;
+  nativeExtractDllTypes = (rustModule.extractDllTypes as typeof nativeExtractDllTypes) || null;
+  nativeBuildPackageGuidCache = (rustModule.buildPackageGuidCache as typeof nativeBuildPackageGuidCache) || null;
+  nativeExtractSerializedFields = (rustModule.extractSerializedFields as typeof nativeExtractSerializedFields) || null;
+  nativeExtractDllFields = (rustModule.extractDllFields as typeof nativeExtractDllFields) || null;
 } catch (err) {
   nativeModuleError =
     `Failed to load native Rust module.\n` +
@@ -93,6 +105,14 @@ export class UnityScanner {
   }
 
   /**
+   * Scan scene for GO metadata (name, tag, layer) without component/hierarchy extraction.
+   * Faster than scan_scene_with_components for tag/layer-only filtering.
+   */
+  scan_scene_metadata(file: string): GameObjectWithComponents[] {
+    return this.scanner.scanSceneMetadata(file);
+  }
+
+  /**
    * Find GameObjects and PrefabInstances by name pattern
    */
   find_by_name(file: string, pattern: string, fuzzy: boolean = true): FindResult[] {
@@ -134,10 +154,11 @@ export class UnityScanner {
   }
 
   /**
-   * Read a .asset file (ScriptableObject) and return its root objects with properties
+   * Read a .asset file (ScriptableObject) and return its root objects with properties.
+   * When decode_mesh is true (default), Mesh assets get hex data decoded into structured arrays.
    */
-  read_asset(file: string): AssetObject[] {
-    return this.scanner.readAsset(file);
+  read_asset(file: string, decode_mesh?: boolean): AssetObject[] {
+    return this.scanner.readAsset(file, decode_mesh);
   }
 }
 
@@ -160,4 +181,46 @@ export function getNativeGrepProject(): typeof nativeGrepProject {
  */
 export function getNativeBuildGuidCache(): typeof nativeBuildGuidCache {
   return nativeBuildGuidCache;
+}
+
+/**
+ * Get native extract_csharp_types if available, or null
+ */
+export function getNativeExtractCsharpTypes(): typeof nativeExtractCsharpTypes {
+  return nativeExtractCsharpTypes;
+}
+
+/**
+ * Get native build_type_registry if available, or null
+ */
+export function getNativeBuildTypeRegistry(): typeof nativeBuildTypeRegistry {
+  return nativeBuildTypeRegistry;
+}
+
+/**
+ * Get native extract_dll_types if available, or null
+ */
+export function getNativeExtractDllTypes(): typeof nativeExtractDllTypes {
+  return nativeExtractDllTypes;
+}
+
+/**
+ * Get native build_package_guid_cache if available, or null
+ */
+export function getNativeBuildPackageGuidCache(): typeof nativeBuildPackageGuidCache {
+  return nativeBuildPackageGuidCache;
+}
+
+/**
+ * Get native extract_serialized_fields if available, or null
+ */
+export function getNativeExtractSerializedFields(): typeof nativeExtractSerializedFields {
+  return nativeExtractSerializedFields;
+}
+
+/**
+ * Get native extract_dll_fields if available, or null
+ */
+export function getNativeExtractDllFields(): typeof nativeExtractDllFields {
+  return nativeExtractDllFields;
 }

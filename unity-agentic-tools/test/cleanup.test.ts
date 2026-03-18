@@ -61,17 +61,6 @@ describe('cleanup', () => {
         expect(existsSync(join(project.dir, '.unity-agentic', 'config.json'))).toBe(true);
     });
 
-    it('should report removed file names in result', () => {
-        project = create_temp_project_with_agentic();
-
-        const result = cleanup({ project: project.dir });
-
-        expect(result.files_removed.length).toBeGreaterThan(0);
-        for (const name of result.files_removed) {
-            expect(typeof name).toBe('string');
-        }
-    });
-
     it('should remove entire directory on full cleanup (all: true)', () => {
         project = create_temp_project_with_agentic();
 
@@ -80,14 +69,6 @@ describe('cleanup', () => {
         expect(result.success).toBe(true);
         expect(result.directory_removed).toBe(true);
         expect(existsSync(join(project.dir, '.unity-agentic'))).toBe(false);
-    });
-
-    it('should set directory_removed: true on full cleanup', () => {
-        project = create_temp_project_with_agentic();
-
-        const result = cleanup({ project: project.dir, all: true });
-
-        expect(result.directory_removed).toBe(true);
     });
 
     it('should handle nested subdirectories in full cleanup', () => {

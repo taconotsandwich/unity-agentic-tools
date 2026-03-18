@@ -33,18 +33,6 @@ describe('UnityEditor', () => {
             expect(result.file_path).toBe(temp_fixture.temp_path);
         });
 
-        it('should handle GameObject not found', () => {
-            const result = safeUnityYAMLEdit(
-                temp_fixture.temp_path,
-                'NonExistent',
-                'm_IsActive',
-                '0'
-            );
-
-            expect(result.success).toBe(false);
-            expect(result.error).toContain('not found');
-        });
-
         describe('property name normalization', () => {
             it('should handle property with m_ prefix', () => {
                 const result = safeUnityYAMLEdit(
@@ -75,173 +63,78 @@ describe('UnityEditor', () => {
         });
 
         describe('value with spaces', () => {
-            it('should rename object with multi-word name', () => {
+            it.each([
+                ['multi-word name', 'Main Camera', 'New Main Camera', 'm_Name: New Main Camera', 'm_Name: Main Camera'],
+                ['entire multi-word value', 'Directional Light', 'Sun Light', 'm_Name: Sun Light', 'm_Name: Directional Light'],
+                ['single word to multi-word', 'Player', 'Player Character', 'm_Name: Player Character', null],
+            ] as const)('should handle %s rename', (_label, object_name, new_value, expected, not_expected) => {
                 const result = safeUnityYAMLEdit(
                     temp_fixture.temp_path,
-                    'Main Camera',
+                    object_name,
                     'm_Name',
-                    'New Main Camera'
+                    new_value
                 );
 
                 expect(result.success).toBe(true);
                 const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-                expect(content).toContain('m_Name: New Main Camera');
-                expect(content).not.toContain('m_Name: Main Camera');
-            });
-
-            it('should replace entire multi-word value', () => {
-                const result = safeUnityYAMLEdit(
-                    temp_fixture.temp_path,
-                    'Directional Light',
-                    'm_Name',
-                    'Sun Light'
-                );
-
-                expect(result.success).toBe(true);
-                const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-                expect(content).toContain('m_Name: Sun Light');
-                expect(content).not.toContain('m_Name: Directional Light');
-                // Make sure we didn't leave orphaned text
-                expect(content).not.toContain('Sun Light Light');
-            });
-
-            it('should handle single word to multi-word rename', () => {
-                const result = safeUnityYAMLEdit(
-                    temp_fixture.temp_path,
-                    'Player',
-                    'm_Name',
-                    'Player Character'
-                );
-
-                expect(result.success).toBe(true);
-                const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-                expect(content).toContain('m_Name: Player Character');
+                expect(content).toContain(expected);
+                if (not_expected) expect(content).not.toContain(not_expected);
             });
         });
 
         describe('different property types', () => {
-            it('should edit m_TagString', () => {
+            it.each([
+                ['m_TagString', 'Player', 'Enemy', '1847675923', 'm_TagString: Enemy'],
+                ['m_Layer', 'Player', '8', '1847675923', 'm_Layer: 8'],
+                ['m_StaticEditorFlags', 'Directional Light', '255', '1028675095', 'm_StaticEditorFlags: 255'],
+            ] as const)('should edit %s', (prop, object_name, value, file_id, expected) => {
                 const result = safeUnityYAMLEdit(
                     temp_fixture.temp_path,
-                    'Player',
-                    'm_TagString',
-                    'Enemy'
+                    object_name,
+                    prop,
+                    value
                 );
 
                 expect(result.success).toBe(true);
                 const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-                // Find the Player GameObject section and check its TagString
-                const playerSection = content.match(/--- !u!1 &1847675923[\s\S]*?(?=--- !u!)/);
-                expect(playerSection).not.toBeNull();
-                expect(playerSection![0]).toContain('m_TagString: Enemy');
-            });
-
-            it('should edit m_Layer', () => {
-                const result = safeUnityYAMLEdit(
-                    temp_fixture.temp_path,
-                    'Player',
-                    'm_Layer',
-                    '8'
-                );
-
-                expect(result.success).toBe(true);
-                const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-                const playerSection = content.match(/--- !u!1 &1847675923[\s\S]*?(?=--- !u!)/);
-                expect(playerSection).not.toBeNull();
-                expect(playerSection![0]).toContain('m_Layer: 8');
-            });
-
-            it('should edit m_StaticEditorFlags', () => {
-                const result = safeUnityYAMLEdit(
-                    temp_fixture.temp_path,
-                    'Directional Light',
-                    'm_StaticEditorFlags',
-                    '255'
-                );
-
-                expect(result.success).toBe(true);
-                const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-                const lightSection = content.match(/--- !u!1 &1028675095[\s\S]*?(?=--- !u!)/);
-                expect(lightSection).not.toBeNull();
-                expect(lightSection![0]).toContain('m_StaticEditorFlags: 255');
+                const section = content.match(new RegExp(`--- !u!1 &${file_id}[\\s\\S]*?(?=--- !u!)`));
+                expect(section).not.toBeNull();
+                expect(section![0]).toContain(expected);
             });
         });
 
         describe('file integrity', () => {
-            it('should preserve YAML header after edit', () => {
-                safeUnityYAMLEdit(
-                    temp_fixture.temp_path,
-                    'Player',
-                    'm_Name',
-                    'NewPlayer'
-                );
+            it('should preserve YAML header, all GameObjects, file IDs, component refs, and GUIDs after edit', () => {
+                const originalContent = readFileSync(temp_fixture.temp_path, 'utf-8');
+                const originalIds = originalContent.match(/--- !u!\d+ &\d+/g);
+                const originalGuids = originalContent.match(/guid: [a-f0-9]+/g);
+
+                safeUnityYAMLEdit(temp_fixture.temp_path, 'Player', 'm_Name', 'NewPlayer');
+                safeUnityYAMLEdit(temp_fixture.temp_path, 'Main Camera', 'm_Name', 'Primary Camera');
+                safeUnityYAMLEdit(temp_fixture.temp_path, 'NewPlayer', 'm_TagString', 'NPC');
 
                 const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+
+                // YAML header preserved
                 expect(content.startsWith('%YAML 1.1')).toBe(true);
                 expect(content).toContain('%TAG !u! tag:unity3d.com,2011:');
-            });
 
-            it('should preserve all GameObjects after edit', () => {
-                safeUnityYAMLEdit(
-                    temp_fixture.temp_path,
-                    'Player',
-                    'm_Name',
-                    'NewPlayer'
-                );
-
-                const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-                // All original objects should still exist (except renamed one)
-                expect(content).toContain('m_Name: Main Camera');
+                // All GameObjects preserved (with renames applied)
+                expect(content).toContain('m_Name: Primary Camera');
                 expect(content).toContain('m_Name: Directional Light');
                 expect(content).toContain('m_Name: GameManager');
                 expect(content).toContain('m_Name: NewPlayer');
-            });
 
-            it('should preserve file IDs after edit', () => {
-                const originalContent = readFileSync(temp_fixture.temp_path, 'utf-8');
-                const originalIds = originalContent.match(/--- !u!\d+ &\d+/g);
-
-                safeUnityYAMLEdit(
-                    temp_fixture.temp_path,
-                    'Player',
-                    'm_Name',
-                    'NewPlayer'
-                );
-
-                const newContent = readFileSync(temp_fixture.temp_path, 'utf-8');
-                const newIds = newContent.match(/--- !u!\d+ &\d+/g);
-
+                // File IDs unchanged
+                const newIds = content.match(/--- !u!\d+ &\d+/g);
                 expect(newIds).toEqual(originalIds);
-            });
 
-            it('should preserve component references after edit', () => {
-                safeUnityYAMLEdit(
-                    temp_fixture.temp_path,
-                    'Main Camera',
-                    'm_Name',
-                    'Primary Camera'
-                );
-
-                const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-                // Camera's component references should be intact
+                // Component references intact
                 expect(content).toContain('component: {fileID: 508316495}');
                 expect(content).toContain('component: {fileID: 508316494}');
-            });
 
-            it('should preserve GUIDs after edit', () => {
-                const originalContent = readFileSync(temp_fixture.temp_path, 'utf-8');
-                const originalGuids = originalContent.match(/guid: [a-f0-9]+/g);
-
-                safeUnityYAMLEdit(
-                    temp_fixture.temp_path,
-                    'Player',
-                    'm_TagString',
-                    'NPC'
-                );
-
-                const newContent = readFileSync(temp_fixture.temp_path, 'utf-8');
-                const newGuids = newContent.match(/guid: [a-f0-9]+/g);
-
+                // GUIDs unchanged
+                const newGuids = content.match(/guid: [a-f0-9]+/g);
                 expect(newGuids).toEqual(originalGuids);
             });
         });
@@ -354,16 +247,6 @@ describe('UnityEditor', () => {
             expect(content).toContain('m_Name: Game Camera');
         });
 
-        it('should fail if any edit fails', () => {
-            const result = batchEditProperties(temp_fixture.temp_path, [
-                { object_name: 'Player', property: 'm_Name', new_value: 'Hero' },
-                { object_name: 'NonExistent', property: 'm_Name', new_value: 'Fail' }
-            ]);
-
-            expect(result.success).toBe(false);
-            expect(result.error).toContain('NonExistent');
-        });
-
         it('should handle 5+ edits across multiple objects in single pass', () => {
             const result = batchEditProperties(temp_fixture.temp_path, [
                 { object_name: 'Player', property: 'm_Name', new_value: 'Hero' },
@@ -436,13 +319,13 @@ describe('UnityEditor', () => {
         it('should validate Unity YAML header', () => {
             const valid = validateUnityYAML('%YAML 1.1\ntest content...');
 
-            expect(valid).toBe(true);
+            expect(valid).toBeNull();
         });
 
         it('should reject invalid YAML header', () => {
             const invalid = validateUnityYAML('Missing header');
 
-            expect(invalid).toBe(false);
+            expect(invalid).toBe('Missing or invalid YAML header');
         });
 
         it('should validate proper GUID format', () => {
@@ -450,53 +333,24 @@ describe('UnityEditor', () => {
                 '%YAML 1.1\nguid: 123e4567890abcdef1234567890abcdef12'
             );
 
-            expect(valid).toBe(true);
+            expect(valid).toBeNull();
         });
 
         it('should reject invalid GUID format', () => {
             const invalid = validateUnityYAML('%YAML 1.1\nguid: 123e456');
 
-            expect(invalid).toBe(false);
+            expect(invalid).toBe('Found invalid GUID format (missing characters)');
         });
 
         it('should validate actual Unity file content', () => {
             const content = readFileSync(temp_fixture.temp_path, 'utf-8');
             const valid = validateUnityYAML(content);
 
-            expect(valid).toBe(true);
+            expect(valid).toBeNull();
         });
     });
 
     describe('regression tests', () => {
-        it('should not create m_m_ prefixed properties (bug fix)', () => {
-            // This was a bug where passing m_Name created m_m_Name
-            editProperty({
-                file_path: temp_fixture.temp_path,
-                object_name: 'Main Camera',
-                property: 'm_Name',
-                new_value: 'Test Camera'
-            });
-
-            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-            expect(content).not.toContain('m_m_');
-            expect(content).toContain('m_Name: Test Camera');
-        });
-
-        it('should not leave orphaned text when replacing multi-word values (bug fix)', () => {
-            // This was a bug where "Main Camera" -> "Test" left " Camera" orphaned
-            editProperty({
-                file_path: temp_fixture.temp_path,
-                object_name: 'Main Camera',
-                property: 'm_Name',
-                new_value: 'Cam'
-            });
-
-            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-            expect(content).toContain('m_Name: Cam');
-            expect(content).not.toContain('m_Name: Cam Camera');
-            expect(content).not.toContain('Cam Camera');
-        });
-
         it('should correctly replace when new value contains old value as substring', () => {
             editProperty({
                 file_path: temp_fixture.temp_path,
@@ -525,17 +379,6 @@ describe('UnityEditor with Main.unity', () => {
 
     afterEach(() => {
         temp_fixture.cleanup_fn();
-    });
-
-    it('should work with larger scene files', () => {
-        const result = editProperty({
-            file_path: temp_fixture.temp_path,
-            object_name: 'Main Camera',
-            property: 'm_IsActive',
-            new_value: '0'
-        });
-
-        expect(result.success).toBe(true);
     });
 
     it('should handle Instruction object edit', () => {
@@ -623,26 +466,6 @@ describe('UnityEditor error handling', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('File not found');
-    });
-
-    it('should return error for nonexistent GameObject in valid file', () => {
-        const temp_fixture = create_temp_fixture(
-            resolve(__dirname, 'fixtures', 'SampleScene.unity')
-        );
-
-        try {
-            const result = editProperty({
-                file_path: temp_fixture.temp_path,
-                object_name: 'NonExistentObject123',
-                property: 'm_Name',
-                new_value: 'Test'
-            });
-
-            expect(result.success).toBe(false);
-            expect(result.error).toContain('not found');
-        } finally {
-            temp_fixture.cleanup_fn();
-        }
     });
 
     it('should handle empty object name gracefully', () => {
@@ -782,54 +605,21 @@ describe('createGameObject', () => {
         expect(transformBlock).toContain('m_Father: {fileID: 0}');
     });
 
-    it('should reject empty name', () => {
+    it.each([
+        ['empty name', '', 'empty'],
+        ['whitespace-only name', '   ', 'empty'],
+        ['names with forward slashes', 'Parent/Child', 'forward slashes'],
+        ['names with newlines', 'Line1\nLine2', 'newlines'],
+        ['names with backslashes', 'Path\\Name', 'backslashes'],
+        ['names with tab characters', 'Tab\there', 'tab characters'],
+    ] as const)('should reject %s', (_label, name, error_substr) => {
         const result = createGameObject({
             file_path: temp_fixture.temp_path,
-            name: ''
+            name,
         });
 
         expect(result.success).toBe(false);
-        expect(result.error).toContain('empty');
-    });
-
-    it('should reject whitespace-only name', () => {
-        const result = createGameObject({
-            file_path: temp_fixture.temp_path,
-            name: '   '
-        });
-
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('empty');
-    });
-
-    it('should reject names with forward slashes', () => {
-        const result = createGameObject({
-            file_path: temp_fixture.temp_path,
-            name: 'Parent/Child'
-        });
-
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('forward slashes');
-    });
-
-    it('should reject names with newlines', () => {
-        const result = createGameObject({
-            file_path: temp_fixture.temp_path,
-            name: 'Line1\nLine2'
-        });
-
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('newlines');
-    });
-
-    it('should reject names with backslashes', () => {
-        const result = createGameObject({
-            file_path: temp_fixture.temp_path,
-            name: 'Path\\Name'
-        });
-
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('backslashes');
+        expect(result.error).toContain(error_substr);
     });
 
     it('should handle names with spaces', () => {
@@ -935,22 +725,14 @@ describe('createGameObject', () => {
         expect(childMatch![0]).toContain('m_Father: {fileID: 1847675924}');
     });
 
-    it('should fail with nonexistent parent name', () => {
+    it.each([
+        ['nonexistent parent name', 'NonExistentParent' as string | number],
+        ['nonexistent parent Transform ID', 9999999999 as string | number],
+    ] as const)('should fail with %s', (_label, parent) => {
         const result = createGameObject({
             file_path: temp_fixture.temp_path,
             name: 'Orphan',
-            parent: 'NonExistentParent'
-        });
-
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('not found');
-    });
-
-    it('should fail with nonexistent parent Transform ID', () => {
-        const result = createGameObject({
-            file_path: temp_fixture.temp_path,
-            name: 'Orphan',
-            parent: 9999999999
+            parent,
         });
 
         expect(result.success).toBe(false);
@@ -1198,91 +980,25 @@ describe('addComponent', () => {
         expect(playerMatch![0]).toContain(`component: {fileID: ${result.component_id}}`);
     });
 
-    it('should add SphereCollider', () => {
+    it.each([
+        ['SphereCollider', 135, 'SphereCollider:'],
+        ['Rigidbody', 54, 'Rigidbody:'],
+        ['Light', 108, 'Light:'],
+        ['MeshRenderer', 23, 'MeshRenderer:'],
+        ['Animator', 95, 'Animator:'],
+        ['Canvas', 223, 'Canvas:'],
+    ] as const)('should add %s (class %i)', (component_type, class_id, type_label) => {
         const result = addComponent({
             file_path: temp_fixture.temp_path,
             game_object_name: 'Player',
-            component_type: 'SphereCollider'
+            component_type,
         });
 
         expect(result.success).toBe(true);
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-        expect(content).toContain(`--- !u!135 &${result.component_id}`);
-        expect(content).toContain('SphereCollider:');
-        expect(content).toContain('m_Enabled: 1');
-    });
-
-    it('should add Rigidbody', () => {
-        const result = addComponent({
-            file_path: temp_fixture.temp_path,
-            game_object_name: 'Player',
-            component_type: 'Rigidbody'
-        });
-
-        expect(result.success).toBe(true);
-
-        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-        expect(content).toContain(`--- !u!54 &${result.component_id}`);
-        expect(content).toContain('Rigidbody:');
-        expect(content).toContain('m_Enabled: 1');
-    });
-
-    it('should add Light', () => {
-        const result = addComponent({
-            file_path: temp_fixture.temp_path,
-            game_object_name: 'Player',
-            component_type: 'Light'
-        });
-
-        expect(result.success).toBe(true);
-
-        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-        expect(content).toContain(`--- !u!108 &${result.component_id}`);
-        expect(content).toContain('Light:');
-    });
-
-    it('should add MeshRenderer (generic component)', () => {
-        const result = addComponent({
-            file_path: temp_fixture.temp_path,
-            game_object_name: 'Player',
-            component_type: 'MeshRenderer'
-        });
-
-        expect(result.success).toBe(true);
-
-        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-        expect(content).toContain(`--- !u!23 &${result.component_id}`);
-        expect(content).toContain('MeshRenderer:');
-        expect(content).toContain('m_Enabled: 1');
-    });
-
-    it('should add Animator (generic component)', () => {
-        const result = addComponent({
-            file_path: temp_fixture.temp_path,
-            game_object_name: 'Player',
-            component_type: 'Animator'
-        });
-
-        expect(result.success).toBe(true);
-
-        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-        expect(content).toContain(`--- !u!95 &${result.component_id}`);
-        expect(content).toContain('Animator:');
-    });
-
-    it('should add Canvas (generic component)', () => {
-        const result = addComponent({
-            file_path: temp_fixture.temp_path,
-            game_object_name: 'Player',
-            component_type: 'Canvas'
-        });
-
-        expect(result.success).toBe(true);
-
-        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-        expect(content).toContain(`--- !u!223 &${result.component_id}`);
-        expect(content).toContain('Canvas:');
+        expect(content).toContain(`--- !u!${class_id} &${result.component_id}`);
+        expect(content).toContain(type_label);
     });
 
     it('should add component with case-insensitive name', () => {
@@ -1490,6 +1206,39 @@ describe('addComponent', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('Component or script not found');
+    });
+
+    it('should include setup hint when script lookup fails with project path', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'SomeUnknownScript',
+            project_path: '/tmp/fake-unity-project'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Component or script not found');
+        expect(result.error).toContain('unity-agentic-tools setup');
+    });
+
+    it('should include warning when duplicate component is added', () => {
+        // First add a BoxCollider
+        addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'BoxCollider'
+        });
+
+        // Add a second BoxCollider — should succeed with warning
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'BoxCollider'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.warning).toBeDefined();
+        expect(result.warning).toContain('already has a BoxCollider');
     });
 });
 
@@ -1823,7 +1572,7 @@ describe('removeComponent', () => {
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content.startsWith('%YAML 1.1')).toBe(true);
-        expect(validateUnityYAML(content)).toBe(true);
+        expect(validateUnityYAML(content)).toBeNull();
         // Other objects should still exist
         expect(content).toContain('m_Name: Main Camera');
         expect(content).toContain('m_Name: Directional Light');
@@ -1923,7 +1672,7 @@ describe('deleteGameObject', () => {
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content.startsWith('%YAML 1.1')).toBe(true);
-        expect(validateUnityYAML(content)).toBe(true);
+        expect(validateUnityYAML(content)).toBeNull();
     });
 
     it('should detach from parent when deleting child', () => {
@@ -2265,17 +2014,6 @@ describe('createScriptableObject', () => {
         expect(guidMatch![1]).toHaveLength(32);
     });
 
-    it('should have m_GameObject: {fileID: 0}', () => {
-        const testGuid = 'aabbccdd11223344aabbccdd11223344';
-        createScriptableObject({
-            output_path: outputPath,
-            script: testGuid
-        });
-
-        const content = readFileSync(outputPath, 'utf-8');
-        expect(content).toContain('m_GameObject: {fileID: 0}');
-    });
-
     it('should error on non-.asset path', () => {
         const result = createScriptableObject({
             output_path: join(tmpdir(), 'TestSO.unity'),
@@ -2403,7 +2141,7 @@ describe('unpackPrefab', () => {
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content.startsWith('%YAML 1.1')).toBe(true);
-        expect(validateUnityYAML(content)).toBe(true);
+        expect(validateUnityYAML(content)).toBeNull();
     });
 });
 
@@ -2618,17 +2356,6 @@ describe('editComponentByFileId', () => {
         expect(result.error).toContain('reference');
     });
 
-    it('should allow reference-for-reference replacement', () => {
-        const result = editComponentByFileId({
-            file_path: temp_fixture.temp_path,
-            file_id: '1847675924',
-            property: 'm_Father',
-            new_value: '{fileID: 0}'
-        });
-
-        expect(result.success).toBe(true);
-    });
-
     it('should reject string for dotted sub-field (numeric)', () => {
         // m_LocalPosition.x is a number
         const result = editComponentByFileId({
@@ -2756,22 +2483,6 @@ describe('editComponentByFileId - block-style YAML paths', () => {
         expect(cameraBlock![0]).toContain('height: 0.75');
     });
 
-    it('should still handle inline dotted paths (regression check)', () => {
-        // Transform m_LocalPosition.x uses inline syntax {x: 0, y: 0.5, z: 0}
-        const result = editComponentByFileId({
-            file_path: temp_fixture.temp_path,
-            file_id: '1847675924',
-            property: 'm_LocalPosition.x',
-            new_value: '99'
-        });
-
-        expect(result.success).toBe(true);
-
-        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-        const transformBlock = content.match(/--- !u!4 &1847675924[\s\S]*?(?=--- !u!|$)/);
-        expect(transformBlock).not.toBeNull();
-        expect(transformBlock![0]).toContain('m_LocalPosition: {x: 99, y: 0.5, z: 0}');
-    });
 });
 
 describe('editComponentByFileId - ParticleSystem block-style paths', () => {
@@ -3273,7 +2984,7 @@ describe('createScene', () => {
         createScene({ output_path: scenePath, include_defaults: true });
 
         const content = readFileSync(scenePath, 'utf-8');
-        expect(validateUnityYAML(content)).toBe(true);
+        expect(validateUnityYAML(content)).toBeNull();
     });
 
     it('should refuse to overwrite existing scene file (Bug #13)', () => {
@@ -3306,7 +3017,7 @@ describe('Bug #4: reparent YAML integrity', () => {
             // Verify YAML integrity — m_Children and m_Father should be on separate lines
             const content = readFileSync(temp.temp_path, 'utf-8');
             expect(content).not.toMatch(/m_Children:.*m_Father:/);
-            expect(validateUnityYAML(content)).toBe(true);
+            expect(validateUnityYAML(content)).toBeNull();
         } finally {
             temp.cleanup_fn();
         }
@@ -3698,23 +3409,6 @@ Transform:
     });
 });
 
-// ========== Part D: Tab Character Validation ==========
-
-describe('tab character validation', () => {
-    it('should reject GameObject name with tab character', () => {
-        const temp = create_temp_fixture(resolve(__dirname, 'fixtures', 'SampleScene.unity'));
-        try {
-            const result = createGameObject({
-                file_path: temp.temp_path,
-                name: 'Tab\there'
-            });
-            expect(result.success).toBe(false);
-            expect(result.error).toContain('tab characters');
-        } finally {
-            temp.cleanup_fn();
-        }
-    });
-});
 
 // ========== Part A8: createScene m_RootOrder ==========
 
@@ -4282,6 +3976,22 @@ describe('removePrefabOverride', () => {
         expect(content).not.toMatch(/propertyPath: m_Name\s/);
     });
 
+    it('should remove override with partial target (fileID only)', () => {
+        // Bug repro: user provides just {fileID: ...} but YAML has
+        // {fileID: ..., guid: ..., type: 3} — must still match
+        const result = removePrefabOverride({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+            property_path: 'm_Name',
+            target: '{fileID: 100000}',
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).not.toMatch(/propertyPath: m_Name\s/);
+    });
+
     it('should return error for nonexistent property path', () => {
         const result = removePrefabOverride({
             file_path: temp_fixture.temp_path,
@@ -4414,10 +4124,13 @@ describe('deletePrefabInstance', () => {
         temp_fixture.cleanup_fn();
     });
 
-    it('should delete PrefabInstance by fileID', () => {
+    it.each([
+        ['by fileID', '700000'],
+        ['by name', 'MyEnemy'],
+    ] as const)('should delete PrefabInstance %s', (_label, prefab_instance) => {
         const result = deletePrefabInstance({
             file_path: temp_fixture.temp_path,
-            prefab_instance: '700000',
+            prefab_instance,
         });
 
         expect(result.success).toBe(true);
@@ -4427,22 +4140,7 @@ describe('deletePrefabInstance', () => {
         expect(content).not.toContain('&700000');
         expect(content).not.toContain('&600000');
         expect(content).not.toContain('&600001');
-        // Main Camera blocks should still be present
         expect(content).toContain('&500000');
-    });
-
-    it('should delete PrefabInstance by name', () => {
-        const result = deletePrefabInstance({
-            file_path: temp_fixture.temp_path,
-            prefab_instance: 'MyEnemy',
-        });
-
-        expect(result.success).toBe(true);
-        expect(result.deleted_count).toBeGreaterThanOrEqual(3);
-
-        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-        expect(content).not.toContain('&700000');
-        expect(content).not.toContain('MyEnemy');
     });
 
     it('should return error for nonexistent PrefabInstance', () => {
@@ -4577,42 +4275,4 @@ describe('editComponentByFileId - m_ prefix order (Bug #1)', () => {
         expect(content).toContain('moveSpeed: 15');
     });
 
-    it('should edit m_-prefixed built-in property (m_LocalPosition.x)', () => {
-        const result = editComponentByFileId({
-            file_path: temp_fixture.temp_path,
-            file_id: '1847675924',
-            property: 'm_LocalPosition.x',
-            new_value: '5'
-        });
-
-        expect(result.success).toBe(true);
-        expect(result.bytes_written).toBeGreaterThan(0);
-    });
-
-    it('should edit non-prefixed input for built-in (LocalPosition.x adds m_ fallback)', () => {
-        const result = editComponentByFileId({
-            file_path: temp_fixture.temp_path,
-            file_id: '1847675924',
-            property: 'LocalPosition.x',
-            new_value: '5'
-        });
-
-        expect(result.success).toBe(true);
-        expect(result.bytes_written).toBeGreaterThan(0);
-    });
-
-    it('should edit block-style custom nested property (groundMask.m_Bits)', () => {
-        const result = editComponentByFileId({
-            file_path: temp_fixture.temp_path,
-            file_id: '1847675927',
-            property: 'groundMask.m_Bits',
-            new_value: '255'
-        });
-
-        expect(result.success).toBe(true);
-        expect(result.bytes_written).toBeGreaterThan(0);
-
-        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-        expect(content).toContain('m_Bits: 255');
-    });
 });

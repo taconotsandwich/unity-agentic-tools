@@ -41,13 +41,22 @@ fn truncate_line(s: &str, max_bytes: usize) -> String {
 fn extension_map(file_type: &str) -> Vec<&'static str> {
     match file_type {
         "cs" => vec![".cs"],
-        "yaml" => vec![".yaml", ".yml", ".unity", ".prefab", ".asset"],
+        "yaml" => vec![
+            ".yaml", ".yml", ".unity", ".prefab", ".asset",
+            ".mat", ".anim", ".controller", ".overrideController",
+            ".mask", ".mixer", ".lighting", ".preset", ".signal",
+            ".playable", ".renderTexture", ".flare", ".guiskin",
+            ".terrainlayer", ".cubemap",
+        ],
         "unity" => vec![".unity"],
         "prefab" => vec![".prefab"],
         "asset" => vec![".asset"],
+        "mat" => vec![".mat"],
+        "anim" => vec![".anim"],
+        "controller" => vec![".controller"],
         _ => vec![
-            ".cs", ".unity", ".prefab", ".asset", ".yaml", ".yml",
-            ".txt", ".json", ".xml", ".shader", ".cginc", ".hlsl",
+            ".cs", ".unity", ".prefab", ".asset", ".mat", ".anim", ".controller",
+            ".yaml", ".yml", ".txt", ".json", ".xml", ".shader", ".cginc", ".hlsl",
             ".compute", ".asmdef", ".asmref",
         ],
     }
@@ -364,6 +373,64 @@ pub fn build_guid_cache(project_root: String) -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
+// ========== Package GUID Cache ==========
+
+/// Build a GUID cache for Library/PackageCache/ contents.
+///
+/// Scans `Library/PackageCache/` for `.meta` files and returns
+/// `{ guid: relative_path }` just like `build_guid_cache` does for Assets/.
+/// Returns a separate cache so project assets and package assets stay distinct.
+#[napi]
+pub fn build_package_guid_cache(project_root: String) -> serde_json::Value {
+    let root = PathBuf::from(&project_root);
+    let package_cache = root.join("Library").join("PackageCache");
+
+    if !package_cache.is_dir() {
+        return serde_json::Value::Object(serde_json::Map::new());
+    }
+
+    let meta_files: Vec<PathBuf> = WalkDir::new(&package_cache)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_type().is_file()
+                && e.path()
+                    .extension()
+                    .map(|ext| ext == "meta")
+                    .unwrap_or(false)
+        })
+        .map(|e| e.into_path())
+        .collect();
+
+    let guid_regex = regex::Regex::new(r"(?m)^guid:\s*([a-f0-9]{32})").unwrap();
+
+    let pairs: Vec<(String, String)> = meta_files
+        .par_iter()
+        .filter_map(|meta_path| {
+            let content = common::read_unity_file(meta_path).ok()?;
+            let caps = guid_regex.captures(&content)?;
+            let guid = caps.get(1)?.as_str().to_string();
+
+            let asset_str = meta_path.to_string_lossy();
+            let asset_no_meta = &asset_str[..asset_str.len() - 5];
+            let rel = Path::new(asset_no_meta)
+                .strip_prefix(&root)
+                .ok()?
+                .to_string_lossy()
+                .to_string();
+
+            Some((guid, rel))
+        })
+        .collect();
+
+    let mut map = serde_json::Map::new();
+    for (guid, path) in pairs {
+        map.insert(guid, serde_json::Value::String(path));
+    }
+
+    serde_json::Value::Object(map)
+}
+
 // ========== Tests ==========
 
 #[cfg(test)]
@@ -483,6 +550,27 @@ mod tests {
         assert!(exts.contains(&".unity"), "Should include .unity");
         assert!(exts.contains(&".prefab"), "Should include .prefab");
         assert!(exts.contains(&".asset"), "Should include .asset");
+        assert!(exts.contains(&".mat"), "yaml should include .mat");
+        assert!(exts.contains(&".anim"), "yaml should include .anim");
+        assert!(exts.contains(&".controller"), "yaml should include .controller");
+    }
+
+    #[test]
+    fn test_mat_extension_map() {
+        let exts = extension_map("mat");
+        assert!(exts.contains(&".mat"), "Should include .mat");
+    }
+
+    #[test]
+    fn test_anim_extension_map() {
+        let exts = extension_map("anim");
+        assert!(exts.contains(&".anim"), "Should include .anim");
+    }
+
+    #[test]
+    fn test_controller_extension_map() {
+        let exts = extension_map("controller");
+        assert!(exts.contains(&".controller"), "Should include .controller");
     }
 
     #[test]

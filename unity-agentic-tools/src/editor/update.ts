@@ -465,7 +465,9 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
         file_path,
         file_id,
         class_id: classId,
-        bytes_written: 0
+        bytes_written: 0,
+        no_change: true,
+        message: 'Property already has the requested value'
       };
     }
     return {
@@ -512,10 +514,10 @@ export function editPrefabOverride(options: EditPrefabOverrideOptions): EditPref
         return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
     }
 
-    // Find the PrefabInstance block (class 1001)
-    const targetBlock = doc.find_by_file_id(prefab_instance);
-    if (!targetBlock || targetBlock.class_id !== 1001) {
-        return { success: false, file_path, error: `PrefabInstance with fileID ${prefab_instance} not found` };
+    // Find the PrefabInstance block (class 1001) — supports fileID or name
+    const targetBlock = findPrefabInstanceBlock(doc, prefab_instance);
+    if (!targetBlock) {
+        return { success: false, file_path, error: `PrefabInstance "${prefab_instance}" not found` };
     }
 
     // Find existing modification entry by propertyPath
@@ -569,6 +571,15 @@ export function editPrefabOverride(options: EditPrefabOverrideOptions): EditPref
             success: false,
             file_path,
             error: `Cannot infer target for new override "${property_path}". Provide --target (e.g., "{fileID: 400000, guid: ..., type: 3}").`
+        };
+    }
+
+    // Validate target format: must be a Unity object reference like {fileID: N, ...}
+    if (!/^\{fileID:\s*-?\d+/.test(targetRef)) {
+        return {
+            success: false,
+            file_path,
+            error: `Invalid target reference "${targetRef}". Expected format: {fileID: N, guid: ..., type: T}`
         };
     }
 
@@ -1063,14 +1074,35 @@ export function editArray(options: ArrayEditOptions): ArrayEditResult {
       if (value === undefined) {
         return { success: false, file_path, error: 'value is required for insert action' };
       }
-      targetBlock.insert_array_element(array_property, index ?? 0, value);
+      const ok = targetBlock.insert_array_element(array_property, index ?? 0, value);
+      if (!ok) {
+        const len = targetBlock.get_array_length(array_property);
+        if (len < 0) {
+          return { success: false, file_path, error: `Array property "${array_property}" not found in component ${file_id}` };
+        }
+        return { success: false, file_path, error: `Index ${index ?? 0} out of bounds for "${array_property}" (array length: ${len})` };
+      }
     } else if (action === 'append') {
       if (value === undefined) {
         return { success: false, file_path, error: 'value is required for append action' };
       }
-      targetBlock.insert_array_element(array_property, -1, value);
+      const ok = targetBlock.insert_array_element(array_property, -1, value);
+      if (!ok) {
+        const len = targetBlock.get_array_length(array_property);
+        if (len < 0) {
+          return { success: false, file_path, error: `Array property "${array_property}" not found in component ${file_id}` };
+        }
+        return { success: false, file_path, error: `Failed to append to "${array_property}"` };
+      }
     } else if (action === 'remove') {
-      targetBlock.remove_array_element(array_property, index ?? 0);
+      const ok = targetBlock.remove_array_element(array_property, index ?? 0);
+      if (!ok) {
+        const len = targetBlock.get_array_length(array_property);
+        if (len < 0) {
+          return { success: false, file_path, error: `Array property "${array_property}" not found in component ${file_id}` };
+        }
+        return { success: false, file_path, error: `Index ${index ?? 0} out of bounds for "${array_property}" (array length: ${len})` };
+      }
     } else {
       return { success: false, file_path, error: `Invalid action "${action}". Must be insert, append, or remove.` };
     }
@@ -1132,7 +1164,7 @@ export function batchEditComponentProperties(
     };
   }
 
-  // For each edit: find block by file_id, call block.set_property(property, new_value)
+  // For each edit: find block by file_id, resolve property name (matching editComponentByFileId logic)
   for (const edit of edits) {
     const targetBlock = doc.find_by_file_id(edit.file_id);
     if (!targetBlock) {
@@ -1143,22 +1175,35 @@ export function batchEditComponentProperties(
       };
     }
 
-    // Normalize property name
-    const normalizedProperty = edit.property.startsWith('m_') ? edit.property : 'm_' + edit.property;
+    // Align property resolution with editComponentByFileId:
+    // 1. exactProperty = user's original input
+    // 2. prefixedProperty = with m_ prepended to root segment (handles dot-notation)
+    const exactProperty = edit.property;
+    let prefixedProperty: string;
+    if (edit.property.includes('.') || edit.property.includes('Array')) {
+      const rootSegment = edit.property.split('.')[0];
+      prefixedProperty = rootSegment.startsWith('m_') ? edit.property : 'm_' + edit.property;
+    } else {
+      prefixedProperty = edit.property.startsWith('m_') ? edit.property : 'm_' + edit.property;
+    }
 
-    // Try to set the property
-    const modified = targetBlock.set_property(normalizedProperty, edit.new_value, '{fileID: 0}');
+    // Try exact property first (custom MonoBehaviour fields), then m_-prefixed (built-in Unity)
+    let modified = targetBlock.set_property(exactProperty, edit.new_value, '{fileID: 0}');
+    if (!modified && exactProperty !== prefixedProperty) {
+      modified = targetBlock.set_property(prefixedProperty, edit.new_value, '{fileID: 0}');
+    }
     if (!modified) {
-      // Try without prefix
-      const withoutPrefix = edit.property.startsWith('m_') ? edit.property.slice(2) : edit.property;
-      const modified2 = targetBlock.set_property(withoutPrefix, edit.new_value, '{fileID: 0}');
-      if (!modified2) {
-        return {
-          success: false,
-          file_path: filePath,
-          error: `Property "${edit.property}" not found in component ${edit.file_id}`
-        };
+      // Check if property exists but value already matches (no-op)
+      const currentValue = targetBlock.get_property(exactProperty)
+        ?? (exactProperty !== prefixedProperty ? targetBlock.get_property(prefixedProperty) : null);
+      if (currentValue !== null) {
+        continue; // Value already set, skip without error
       }
+      return {
+        success: false,
+        file_path: filePath,
+        error: `Property "${edit.property}" not found in component ${edit.file_id}`
+      };
     }
   }
 
@@ -1205,16 +1250,31 @@ export function removePrefabOverride(options: RemovePrefabOverrideOptions): Remo
   // In the block's raw text, find the 4-line entry matching property_path (and optionally target)
   const escapedPath = property_path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+  // Build a regex to match the 4-line modification entry.
+  // Use flexible whitespace (\s*) instead of hardcoded indentation.
+  // When --target is provided, match by fileID rather than exact string,
+  // because the YAML target may include guid and type fields beyond what
+  // the user supplies (e.g., user gives {fileID: 123} but YAML has
+  // {fileID: 123, guid: abc..., type: 3}).
   let entryPattern: RegExp;
   if (target) {
-    const escapedTarget = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    entryPattern = new RegExp(
-      `    - target: ${escapedTarget}\\s*\\n      propertyPath: ${escapedPath}\\s*\\n      value: [^\\n]*\\s*\\n      objectReference: [^\\n]*\\n`,
-      'm'
-    );
+    const fileIdMatch = target.match(/fileID:\s*(-?\d+)/);
+    if (fileIdMatch) {
+      const fileId = fileIdMatch[1];
+      entryPattern = new RegExp(
+        `[ \\t]*- target:\\s*\\{fileID:\\s*${fileId}[^}]*\\}\\s*\\n\\s*propertyPath:\\s*${escapedPath}\\s*\\n\\s*value:[^\\n]*\\n\\s*objectReference:[^\\n]*\\n?`,
+        'm'
+      );
+    } else {
+      const escapedTarget = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      entryPattern = new RegExp(
+        `[ \\t]*- target:\\s*${escapedTarget}\\s*\\n\\s*propertyPath:\\s*${escapedPath}\\s*\\n\\s*value:[^\\n]*\\n\\s*objectReference:[^\\n]*\\n?`,
+        'm'
+      );
+    }
   } else {
     entryPattern = new RegExp(
-      `    - target: \\{[^}]+\\}\\s*\\n      propertyPath: ${escapedPath}\\s*\\n      value: [^\\n]*\\s*\\n      objectReference: [^\\n]*\\n`,
+      `[ \\t]*- target:\\s*\\{[^}]+\\}\\s*\\n\\s*propertyPath:\\s*${escapedPath}\\s*\\n\\s*value:[^\\n]*\\n\\s*objectReference:[^\\n]*\\n?`,
       'm'
     );
   }
@@ -1258,6 +1318,11 @@ export function addRemovedComponent(options: PrefabSubArrayOptions): PrefabSubAr
 
   if (!existsSync(file_path)) {
     return { success: false, file_path, error: `File not found: ${file_path}` };
+  }
+
+  // Validate component_ref format: must be a Unity object reference like {fileID: N, guid: G, type: T}
+  if (!/^\{fileID:\s*-?\d+/.test(component_ref)) {
+    return { success: false, file_path, error: `Invalid component reference "${component_ref}". Expected format: {fileID: N, guid: ..., type: T}` };
   }
 
   let doc: UnityDocument;
@@ -1364,6 +1429,11 @@ export function addRemovedGameObject(options: PrefabSubArrayOptions): PrefabSubA
 
   if (!existsSync(file_path)) {
     return { success: false, file_path, error: `File not found: ${file_path}` };
+  }
+
+  // Validate gameobject ref format: must be a Unity object reference like {fileID: N, guid: G, type: T}
+  if (!/^\{fileID:\s*-?\d+/.test(component_ref)) {
+    return { success: false, file_path, error: `Invalid GameObject reference "${component_ref}". Expected format: {fileID: N, guid: ..., type: T}` };
   }
 
   let doc: UnityDocument;

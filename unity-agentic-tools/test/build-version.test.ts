@@ -56,24 +56,14 @@ describe('parse_version', () => {
 });
 
 describe('is_unity6_or_later', () => {
-    it('should return false for Unity 2022', () => {
-        const version = parse_version('2022.3.13f1');
-        expect(is_unity6_or_later(version)).toBe(false);
-    });
-
-    it('should return false for Unity 2023', () => {
-        const version = parse_version('2023.2.0f1');
-        expect(is_unity6_or_later(version)).toBe(false);
-    });
-
-    it('should return true for Unity 6', () => {
-        const version = parse_version('6000.0.23f1');
-        expect(is_unity6_or_later(version)).toBe(true);
-    });
-
-    it('should return true for Unity 6.1', () => {
-        const version = parse_version('6000.1.0f1');
-        expect(is_unity6_or_later(version)).toBe(true);
+    it.each([
+        ['2022.3.13f1', false],
+        ['2023.2.0f1', false],
+        ['6000.0.23f1', true],
+        ['6000.1.0f1', true],
+    ])('should return %s -> %s', (versionString, expected) => {
+        const version = parse_version(versionString);
+        expect(is_unity6_or_later(version)).toBe(expected);
     });
 });
 

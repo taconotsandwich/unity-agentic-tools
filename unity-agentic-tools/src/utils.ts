@@ -1,4 +1,4 @@
-import { writeFileSync, renameSync, existsSync, unlinkSync } from 'fs';
+import { writeFileSync, renameSync, existsSync, unlinkSync, accessSync, constants as fsConstants } from 'fs';
 import { resolve, dirname, join } from 'path';
 
 /**
@@ -11,6 +11,7 @@ export function find_unity_project_root(startDir?: string): string | null {
 
     while (dir !== root) {
         if (existsSync(join(dir, '.unity-agentic'))) return dir;
+        if (existsSync(join(dir, 'Assets')) && existsSync(join(dir, 'ProjectSettings'))) return dir;
         if (existsSync(join(dir, 'Assets'))) return dir;
         const parent = dirname(dir);
         if (parent === dir) break;
@@ -31,6 +32,19 @@ export interface AtomicWriteResult {
  * Atomic write: write to temp file, then rename to prevent partial writes.
  */
 export function atomicWrite(filePath: string, content: string): AtomicWriteResult {
+    // Check file write permission if the file already exists
+    if (existsSync(filePath)) {
+        try {
+            accessSync(filePath, fsConstants.W_OK);
+        } catch {
+            return {
+                success: false,
+                file_path: filePath,
+                error: `Permission denied: ${filePath} is not writable`
+            };
+        }
+    }
+
     const tmpPath = `${filePath}.tmp`;
 
     try {
@@ -73,6 +87,14 @@ export function atomicWrite(filePath: string, content: string): AtomicWriteResul
 }
 
 /**
+ * Check if a pattern matches everything (wildcard-all).
+ * Patterns like "*", ".", "**" mean "all objects" — not a real filter.
+ */
+export function is_match_all(pattern: string): boolean {
+    return pattern === '*' || pattern === '.' || pattern === '**' || pattern === '.*';
+}
+
+/**
  * Match a string against a glob pattern (* and ? wildcards) or exact equality.
  * Case-insensitive. If the pattern has no glob chars, does exact equality.
  */
@@ -83,6 +105,29 @@ export function glob_match(pattern: string, text: string): boolean {
     const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
     const regex_str = escaped.replace(/\*/g, '.*').replace(/\?/g, '.');
     return new RegExp(`^${regex_str}$`, 'i').test(text);
+}
+
+/**
+ * Convert a glob pattern to a RegExp for matching against file paths.
+ * Handles ** (match across directories), * (match within one segment), ? (single char).
+ * Without wildcards, performs case-insensitive substring match.
+ * Unlike glob_match, this is designed for path filtering (no anchoring, path-aware).
+ */
+export function path_glob_to_regex(pattern: string): RegExp {
+    if (!pattern.includes('*') && !pattern.includes('?')) {
+        // No wildcards: substring match
+        const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(escaped, 'i');
+    }
+    // Escape regex-special chars (not * and ?)
+    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    // Replace ** first (via placeholder to avoid double-replacement), then *
+    const regex_str = escaped
+        .replace(/\*\*/g, '\0GLOBSTAR\0')
+        .replace(/\*/g, '[^/\\\\]*')
+        .replace(/\0GLOBSTAR\0/g, '.*')
+        .replace(/\?/g, '.');
+    return new RegExp(regex_str, 'i');
 }
 
 /**
@@ -149,9 +194,23 @@ export function validate_file_path(file_path: string, operation: 'read' | 'write
         return 'Path traversal (..) is not allowed in relative paths for security reasons.';
     }
 
-    // Reject Packages/ writes in relative paths (read-only in Unity)
-    if (operation === 'write' && !isAbsolute && normalized.startsWith('Packages/')) {
-        return 'Cannot write to Packages/ directory (read-only in Unity).';
+    // Reject writes to read-only Unity directories
+    if (operation === 'write') {
+        // Library/PackageCache is immutable (absolute or relative)
+        if (normalized.includes('/Library/PackageCache/') || normalized.startsWith('Library/PackageCache/')) {
+            return 'Cannot write to Library/PackageCache/ (immutable package cache).';
+        }
+
+        // Packages/ directory is read-only in Unity (check via path segments)
+        const segments = normalized.split('/');
+        const pkgIdx = segments.indexOf('Packages');
+        if (pkgIdx >= 0) {
+            // Don't block paths under Assets/ that happen to contain a "Packages" folder
+            const assetsIdx = segments.indexOf('Assets');
+            if (assetsIdx < 0 || assetsIdx > pkgIdx) {
+                return 'Cannot write to Packages/ directory (read-only in Unity).';
+            }
+        }
     }
 
     return null; // Valid

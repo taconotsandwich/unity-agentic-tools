@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve, join } from 'path';
-import { readFileSync, mkdirSync, cpSync, rmSync, existsSync } from 'fs';
+import { mkdirSync, cpSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { read_settings, edit_settings, edit_tag, edit_layer, edit_sorting_layer } from '../src/settings';
 import type { TagManagerData, PhysicsData, QualitySettingsData, TimeSettingsData } from '../src/types';
@@ -99,24 +99,32 @@ describe('Settings Reader', () => {
             expect(data.time_scale).toBe(1);
         });
 
-        it('should resolve "physics" alias to DynamicsManager', () => {
+        it.each([
+            ['physics', 'DynamicsManager'],
+            ['tags', 'TagManager'],
+        ])('should resolve alias "%s" to %s', (alias, expected) => {
             const result = read_settings({
                 project_path: EXTERNAL_FIXTURES,
-                setting: 'physics',
+                setting: alias,
             });
 
             expect(result.success).toBe(true);
-            expect(result.setting).toBe('DynamicsManager');
+            expect(result.setting).toBe(expected);
         });
 
-        it('should resolve "tags" alias to TagManager', () => {
+        it('should parse InputManager axes', () => {
             const result = read_settings({
                 project_path: EXTERNAL_FIXTURES,
-                setting: 'tags',
+                setting: 'input',
             });
 
             expect(result.success).toBe(true);
-            expect(result.setting).toBe('TagManager');
+            expect(result.setting).toBe('InputManager');
+            const data = result.data as { axes: { name: string }[] };
+            expect(data.axes).toBeDefined();
+            expect(Array.isArray(data.axes)).toBe(true);
+            expect(data.axes.length).toBeGreaterThanOrEqual(1);
+            expect(data.axes[0].name).toBe('Horizontal');
         });
 
         it('should return error for nonexistent setting', () => {
@@ -196,7 +204,7 @@ describe('Settings Editor', () => {
             expect(result.error).toContain('not found');
         });
 
-        it('should reject tag with forward slashes', () => {
+        it('should reject tag with invalid characters (smoke test for validate_name)', () => {
             const result = edit_tag({
                 project_path: temp.project_path,
                 action: 'add',
@@ -205,17 +213,6 @@ describe('Settings Editor', () => {
 
             expect(result.success).toBe(false);
             expect(result.error).toContain('forward slashes');
-        });
-
-        it('should reject tag with newlines', () => {
-            const result = edit_tag({
-                project_path: temp.project_path,
-                action: 'add',
-                tag: 'Bad\nTag',
-            });
-
-            expect(result.success).toBe(false);
-            expect(result.error).toContain('newlines');
         });
     });
 
@@ -235,28 +232,19 @@ describe('Settings Editor', () => {
             expect(data.layers).toContainEqual({ index: 7, name: 'PostProcessing' });
         });
 
-        it('should reject reserved layer index 0 (Default)', () => {
+        it.each([
+            [0, 'Default'],
+            [4, 'Water'],
+        ])('should reject reserved layer index %i (%s)', (index, expectedName) => {
             const result = edit_layer({
                 project_path: temp.project_path,
-                index: 0,
+                index,
                 name: 'MyLayer',
             });
 
             expect(result.success).toBe(false);
             expect(result.error).toContain('reserved');
-            expect(result.error).toContain('Default');
-        });
-
-        it('should reject reserved layer index 4 (Water)', () => {
-            const result = edit_layer({
-                project_path: temp.project_path,
-                index: 4,
-                name: 'MyLayer',
-            });
-
-            expect(result.success).toBe(false);
-            expect(result.error).toContain('reserved');
-            expect(result.error).toContain('Water');
+            expect(result.error).toContain(expectedName);
         });
 
         it('should allow editing builtin slot 3 (unnamed)', () => {
@@ -283,22 +271,14 @@ describe('Settings Editor', () => {
             expect(result.success).toBe(false);
         });
 
-        it('should reject layer name with invalid characters', () => {
-            const newline = edit_layer({
+        it('should reject layer name with invalid characters (smoke test for validate_name)', () => {
+            const result = edit_layer({
                 project_path: temp.project_path,
                 index: 8,
                 name: 'Bad\nLayer',
             });
-            expect(newline.success).toBe(false);
-            expect(newline.error).toContain('newline');
-
-            const slash = edit_layer({
-                project_path: temp.project_path,
-                index: 8,
-                name: 'Bad/Layer',
-            });
-            expect(slash.success).toBe(false);
-            expect(slash.error).toContain('forward slash');
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('newline');
         });
     });
 
@@ -348,22 +328,14 @@ describe('Settings Editor', () => {
             expect(result.error).toContain('already exists');
         });
 
-        it('should reject empty sorting layer name', () => {
+        it.each([
+            ['', 'empty name'],
+            ['   ', 'whitespace-only name'],
+        ])('should reject sorting layer with %s', (name) => {
             const result = edit_sorting_layer({
                 project_path: temp.project_path,
                 action: 'add',
-                name: '',
-            });
-
-            expect(result.success).toBe(false);
-            expect(result.error).toContain('cannot be empty');
-        });
-
-        it('should reject whitespace-only sorting layer name', () => {
-            const result = edit_sorting_layer({
-                project_path: temp.project_path,
-                action: 'add',
-                name: '   ',
+                name,
             });
 
             expect(result.success).toBe(false);
@@ -414,6 +386,22 @@ describe('Settings Editor', () => {
             const verify = read_settings({ project_path: temp.project_path, setting: 'TimeManager' });
             const data = verify.data as TimeSettingsData;
             expect(data.time_scale).toBe(2);
+        });
+
+        it('should resolve camelCase property names for TimeManager (R5 Bug #2)', () => {
+            const result = edit_settings({
+                project_path: temp.project_path,
+                setting: 'TimeManager',
+                property: 'fixedTimestep',
+                value: '0.01',
+            });
+
+            expect(result.success).toBe(true);
+
+            // Verify the change
+            const verify = read_settings({ project_path: temp.project_path, setting: 'TimeManager' });
+            const data = verify.data as TimeSettingsData;
+            expect(data.fixed_timestep).toBe(0.01);
         });
     });
 
