@@ -173,6 +173,18 @@ describe('DocStorage', () => {
         expect(results[0].id).toBe('dense');
     });
 
+    it('should find results for multi-word queries where terms appear separately (R5 Bug #3)', async () => {
+        const storage = makeStorage();
+        await storage.storeChunk(makeChunk('mw1', 'How to configure physics gravity in Unity project settings'));
+        await storage.storeChunk(makeChunk('mw2', 'Unity animation controller setup guide'));
+        await storage.storeChunk(makeChunk('mw3', 'Unrelated content about cooking recipes'));
+
+        const results = await storage.keywordSearch('configure physics gravity');
+
+        expect(results.length).toBeGreaterThanOrEqual(1);
+        expect(results[0].id).toBe('mw1');
+    });
+
     it('should sort results by score descending', async () => {
         const storage = makeStorage();
         // "unity development" has higher overlap with query "unity development"

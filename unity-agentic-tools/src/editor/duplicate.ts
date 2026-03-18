@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'fs';
+import { existsSync } from 'fs';
 import * as path from 'path';
 import type {
     DuplicateGameObjectOptions, DuplicateGameObjectResult,
@@ -8,6 +8,7 @@ import { find_unity_project_root } from '../utils';
 import { getNativeBuildGuidCache } from '../scanner';
 import { UnityDocument } from './unity-document';
 import type { UnityBlock } from './unity-block';
+import { load_guid_cache_for_file } from '../guid-cache';
 
 // ========== Private Helpers ==========
 
@@ -166,6 +167,21 @@ export function duplicateGameObject(options: DuplicateGameObjectOptions): Duplic
     doc.add_child_to_parent(fatherId, newTransformId);
   }
 
+  // Detect duplicate names among cloned children vs all scene GOs
+  const warnings: string[] = [];
+  const allGoBlocks = doc.find_by_class_id(1);
+  const sceneNameCounts = new Map<string, number>();
+  for (const block of allGoBlocks) {
+    const n = block.get_property('m_Name') || '';
+    sceneNameCounts.set(n, (sceneNameCounts.get(n) || 0) + 1);
+  }
+  for (const cloned of clonedObjects) {
+    const count = sceneNameCounts.get(cloned.name) || 0;
+    if (count >= 2) {
+      warnings.push(`Duplicate name "${cloned.name}" now appears ${count} times in scene. Use fileID ${cloned.file_id} to target this clone.`);
+    }
+  }
+
   if (!doc.validate()) {
     return { success: false, file_path, error: 'Validation failed after duplicating GameObject' };
   }
@@ -181,7 +197,8 @@ export function duplicateGameObject(options: DuplicateGameObjectOptions): Duplic
     game_object_id: idMap.get(goFileId) ? parseInt(idMap.get(goFileId)!, 10) : undefined,
     transform_id: newTransformId ? parseInt(newTransformId, 10) : undefined,
     total_duplicated: allOldIds.size,
-    cloned_objects: clonedObjects
+    cloned_objects: clonedObjects,
+    warnings: warnings.length > 0 ? warnings : undefined,
   };
 }
 
@@ -244,17 +261,10 @@ export function unpackPrefab(options: UnpackPrefabOptions): UnpackPrefabResult {
   let sourcePrefabPath: string | null = null;
 
   if (project_path) {
-    const cachePath = path.join(project_path, '.unity-agentic', 'guid-cache.json');
-    if (existsSync(cachePath)) {
-      try {
-        const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
-        if (cache[sourcePrefabGuid]) {
-          const cachedPath = cache[sourcePrefabGuid];
-          sourcePrefabPath = path.isAbsolute(cachedPath)
-            ? cachedPath
-            : path.join(project_path, cachedPath);
-        }
-      } catch { /* ignore */ }
+    const guidCache = load_guid_cache_for_file(file_path, project_path);
+    if (guidCache) {
+      const resolvedPath = guidCache.resolve_absolute(sourcePrefabGuid);
+      if (resolvedPath) sourcePrefabPath = resolvedPath;
     }
   }
 

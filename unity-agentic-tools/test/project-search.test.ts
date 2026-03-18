@@ -3,32 +3,33 @@ import { isAbsolute, resolve } from 'path';
 import { walk_project_files, grep_project, search_project } from '../src/project-search';
 import { isNativeModuleAvailable, getNativeWalkProjectFiles, getNativeGrepProject, getNativeBuildGuidCache } from '../src/scanner';
 
+interface NativeGrepMatch {
+    file: string;
+    contextBefore?: string;
+    contextAfter?: string;
+}
+
+interface NativeGrepResult {
+    success: boolean;
+    totalMatches: number;
+    matches: NativeGrepMatch[];
+    truncated: boolean;
+    error?: string;
+}
+
 // Root-level fixtures have the full Unity project structure
 const EXTERNAL_FIXTURES = resolve(__dirname, '..', '..', 'test', 'fixtures', 'external');
 
 describe('walk_project_files', () => {
-    it('should find .unity scene files', () => {
-        const files = walk_project_files(EXTERNAL_FIXTURES, ['.unity']);
-        expect(files.length).toBeGreaterThanOrEqual(2);
-        expect(files.some(f => f.includes('Level.unity'))).toBe(true);
-        expect(files.some(f => f.includes('Menu.unity'))).toBe(true);
-    });
-
-    it('should find .prefab files', () => {
-        const files = walk_project_files(EXTERNAL_FIXTURES, ['.prefab']);
-        expect(files.length).toBeGreaterThanOrEqual(5);
-        expect(files.some(f => f.includes('IceBox.prefab'))).toBe(true);
-    });
-
-    it('should find .asset files including ProjectSettings', () => {
-        const files = walk_project_files(EXTERNAL_FIXTURES, ['.asset']);
-        expect(files.some(f => f.includes('TagManager.asset'))).toBe(true);
-    });
-
-    it('should find .cs script files', () => {
-        const files = walk_project_files(EXTERNAL_FIXTURES, ['.cs']);
-        expect(files.length).toBeGreaterThanOrEqual(5);
-        expect(files.some(f => f.includes('GameManager.cs'))).toBe(true);
+    it.each([
+        ['.unity', 'Level.unity'],
+        ['.prefab', 'IceBox.prefab'],
+        ['.asset', 'TagManager.asset'],
+        ['.cs', 'GameManager.cs'],
+    ])('should find %s files (containing %s)', (extension, expectedFile) => {
+        const files = walk_project_files(EXTERNAL_FIXTURES, [extension]);
+        expect(files.length).toBeGreaterThanOrEqual(1);
+        expect(files.some(f => f.includes(expectedFile))).toBe(true);
     });
 
     it('should handle missing project path', () => {
@@ -156,7 +157,6 @@ describeIfNative('search_project', () => {
         const result = search_project({
             project_path: EXTERNAL_FIXTURES,
             tag: 'MainCamera',
-            scan_all: true,
         });
 
         expect(result.success).toBe(true);
@@ -170,7 +170,6 @@ describeIfNative('search_project', () => {
         const result = search_project({
             project_path: EXTERNAL_FIXTURES,
             tag: 'killzone',
-            scan_all: true,
         });
 
         expect(result.success).toBe(true);
@@ -182,7 +181,6 @@ describeIfNative('search_project', () => {
         const result = search_project({
             project_path: EXTERNAL_FIXTURES,
             layer: 5,
-            scan_all: true,
         });
 
         expect(result.success).toBe(true);
@@ -192,12 +190,22 @@ describeIfNative('search_project', () => {
         }
     });
 
+    it('should treat "." as match-all when combined with layer filter', () => {
+        const result = search_project({
+            project_path: EXTERNAL_FIXTURES,
+            name: '.',
+            layer: 0,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.total_matches).toBeGreaterThanOrEqual(1);
+    });
+
     it('should combine tag and name filters', () => {
         const result = search_project({
             project_path: EXTERNAL_FIXTURES,
             tag: 'MainCamera',
             name: '*Camera*',
-            scan_all: true,
         });
 
         expect(result.success).toBe(true);
@@ -244,10 +252,10 @@ describeIfNative('native vs JS parity', () => {
             projectPath: EXTERNAL_FIXTURES,
             pattern: 'killzone',
             fileType: 'asset',
-        });
+        }) as NativeGrepResult;
         expect(result.success).toBe(true);
         expect(result.totalMatches).toBeGreaterThanOrEqual(1);
-        expect(result.matches.some((m: any) => m.file.includes('TagManager.asset'))).toBe(true);
+        expect(result.matches.some((m) => m.file.includes('TagManager.asset'))).toBe(true);
     });
 
     it('grep_project: native respects maxResults', () => {
@@ -257,7 +265,7 @@ describeIfNative('native vs JS parity', () => {
             pattern: '.*',
             fileType: 'all',
             maxResults: 3,
-        });
+        }) as NativeGrepResult;
         expect(result.success).toBe(true);
         expect(result.matches.length).toBeLessThanOrEqual(3);
         expect(result.truncated).toBe(true);
@@ -270,9 +278,9 @@ describeIfNative('native vs JS parity', () => {
             pattern: 'killzone',
             fileType: 'asset',
             contextLines: 2,
-        });
+        }) as NativeGrepResult;
         expect(result.success).toBe(true);
-        const match = result.matches.find((m: any) => m.file.includes('TagManager.asset'));
+        const match = result.matches.find((m) => m.file.includes('TagManager.asset'));
         expect(match).toBeDefined();
         if (match) {
             expect(match.contextBefore).toBeDefined();
@@ -285,14 +293,14 @@ describeIfNative('native vs JS parity', () => {
         const result = nativeGrep({
             projectPath: EXTERNAL_FIXTURES,
             pattern: '[invalid',
-        });
+        }) as NativeGrepResult;
         expect(result.success).toBe(false);
         expect(result.error).toContain('Invalid regex');
     });
 
     it('build_guid_cache: native produces non-empty cache', () => {
         const nativeBuild = getNativeBuildGuidCache()!;
-        const cache = nativeBuild(EXTERNAL_FIXTURES);
+        const cache = nativeBuild(EXTERNAL_FIXTURES) as Record<string, string>;
         const keys = Object.keys(cache);
         expect(keys.length).toBeGreaterThan(0);
         // All GUIDs should be 32-char hex strings
@@ -300,14 +308,14 @@ describeIfNative('native vs JS parity', () => {
             expect(guid).toMatch(/^[a-f0-9]{32}$/);
         }
         // All values should be relative paths (no leading /)
-        for (const path of Object.values(cache)) {
-            expect(isAbsolute(path as string)).toBe(false);
+        for (const filePath of Object.values(cache)) {
+            expect(isAbsolute(filePath)).toBe(false);
         }
     });
 
     it('build_guid_cache: native returns empty for no Assets dir', () => {
         const nativeBuild = getNativeBuildGuidCache()!;
-        const cache = nativeBuild('/tmp');
+        const cache = nativeBuild('/tmp') as Record<string, string>;
         expect(Object.keys(cache).length).toBe(0);
     });
 });

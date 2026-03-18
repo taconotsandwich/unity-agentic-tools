@@ -158,10 +158,13 @@ export class UnityDocument {
         const transform_ids: string[] = [];
 
         for (const go of game_objects) {
-            // First component listed is always the Transform
-            const match = go.raw.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(\d+)\}/);
-            if (match) {
-                transform_ids.push(match[1]);
+            const comp_matches = go.raw.matchAll(/component:[ \t]*\{fileID:[ \t]*(\d+)\}/g);
+            for (const cm of comp_matches) {
+                const comp_block = this.find_by_file_id(cm[1]);
+                if (comp_block && (comp_block.class_id === 4 || comp_block.class_id === 224)) {
+                    transform_ids.push(cm[1]);
+                    break;
+                }
             }
         }
 
@@ -212,12 +215,17 @@ export class UnityDocument {
             if (block.class_id === 4) {
                 return block;
             }
+            if (block.class_id === 224) {
+                return block;
+            }
             if (block.class_id === 1) {
-                // It's a GO, find its transform
-                const match = block.raw.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(\d+)\}/);
-                if (match) {
-                    const transform = this.find_by_file_id(match[1]);
-                    if (transform) return transform;
+                // It's a GO, find its Transform/RectTransform among components
+                const comp_matches = block.raw.matchAll(/component:[ \t]*\{fileID:[ \t]*(\d+)\}/g);
+                for (const cm of comp_matches) {
+                    const comp_block = this.find_by_file_id(cm[1]);
+                    if (comp_block && (comp_block.class_id === 4 || comp_block.class_id === 224)) {
+                        return comp_block;
+                    }
                 }
                 return { error: `Transform for GameObject fileID ${name_or_id} not found` };
             }
@@ -621,6 +629,103 @@ export class UnityDocument {
             return entries ? entries.length : 0;
         }
         return 0;
+    }
+
+    /**
+     * Rewrite the m_Children array on a parent Transform to match the given order.
+     * Returns true if the parent was found and updated.
+     */
+    reorder_children(parent_id: string, ordered_child_ids: string[]): boolean {
+        const parent = this.find_by_file_id(parent_id);
+        if (!parent || parent.class_id !== 4) return false;
+
+        let raw = parent.raw;
+        const new_children = ordered_child_ids.map(id => `  - {fileID: ${id}}`).join('\n');
+
+        // Multiline m_Children block (ends before m_Father)
+        const multiline = /m_Children:\n(?:[ \t]*-[^\n]*\n)*/;
+        if (multiline.test(raw)) {
+            raw = raw.replace(multiline, `m_Children:\n${new_children}\n`);
+            parent.replace_raw(raw);
+            return true;
+        }
+
+        // Inline format: m_Children: [] or m_Children: [{...}]
+        const inline = /m_Children:\s*\[.*?\]/;
+        if (inline.test(raw)) {
+            raw = raw.replace(inline, `m_Children:\n${new_children}`);
+            parent.replace_raw(raw);
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Physically reorder entity block groups in the document.
+     * Each transform maps to an entity (GameObject + its components).
+     * Blocks for each entity are moved to appear in the given order,
+     * inserted at the position of the first entity's blocks.
+     */
+    reorder_entities(ordered_transform_ids: string[]): void {
+        // Collect entity block IDs for each transform
+        const entity_groups: string[][] = [];
+        for (const transform_id of ordered_transform_ids) {
+            const transform = this.find_by_file_id(transform_id);
+            if (!transform) continue;
+
+            const go_match = transform.raw.match(/m_GameObject:\s*\{fileID:\s*(\d+)\}/);
+            if (!go_match) continue;
+            const go_id = go_match[1];
+            const go = this.find_by_file_id(go_id);
+            if (!go) continue;
+
+            // Collect all component IDs from the GO
+            const comp_ids: string[] = [];
+            const comp_matches = go.raw.matchAll(/component:\s*\{fileID:\s*(\d+)\}/g);
+            for (const m of comp_matches) {
+                comp_ids.push(m[1]);
+            }
+
+            // Entity group: GO first, then all components (Transform is among them)
+            entity_groups.push([go_id, ...comp_ids]);
+        }
+
+        const all_entity_ids = new Set(entity_groups.flat());
+        if (all_entity_ids.size === 0) return;
+
+        // Find the position of the first entity block
+        let insert_pos = -1;
+        for (let i = 0; i < this._blocks.length; i++) {
+            if (all_entity_ids.has(this._blocks[i].file_id)) {
+                insert_pos = i;
+                break;
+            }
+        }
+        if (insert_pos === -1) return;
+
+        // Remove all entity blocks, preserving them in a map
+        const removed = new Map<string, UnityBlock>();
+        this._blocks = this._blocks.filter(b => {
+            if (all_entity_ids.has(b.file_id)) {
+                removed.set(b.file_id, b);
+                return false;
+            }
+            return true;
+        });
+
+        // Re-insert in desired order at the insertion position
+        const ordered_blocks: UnityBlock[] = [];
+        for (const group of entity_groups) {
+            for (const id of group) {
+                const block = removed.get(id);
+                if (block) ordered_blocks.push(block);
+            }
+        }
+
+        this._blocks.splice(insert_pos, 0, ...ordered_blocks);
+        this._rebuild_index();
+        this._structure_dirty = true;
     }
 
     // ─── ID Management ─────────────────────────────────────────────────

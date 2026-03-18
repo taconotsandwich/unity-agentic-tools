@@ -46,6 +46,9 @@ const SETTING_ALIASES: Record<string, string> = {
     projectsettings: 'ProjectSettings',
     navmesh: 'NavMeshAreas',
     navmeshareas: 'NavMeshAreas',
+    build: 'EditorBuildSettings',
+    editorbuild: 'EditorBuildSettings',
+    editorbuildsettings: 'EditorBuildSettings',
 };
 
 /**
@@ -196,8 +199,57 @@ function parse_time_manager(content: string): TimeSettingsData {
     };
 }
 
-function parse_generic_asset(content: string): Record<string, any> {
-    const result: Record<string, any> = {};
+interface InputAxis {
+    name: string;
+    descriptive_name: string;
+    descriptive_negative_name: string;
+    negative_button: string;
+    positive_button: string;
+    alt_negative_button: string;
+    alt_positive_button: string;
+    gravity: number;
+    dead: number;
+    sensitivity: number;
+    snap: boolean;
+    invert: boolean;
+    type: number;
+    axis: number;
+    joy_num: number;
+}
+
+function parse_input_manager(content: string): { axes: InputAxis[] } {
+    const axes: InputAxis[] = [];
+    const entries = content.split(/\n  - serializedVersion:/);
+    for (let i = 1; i < entries.length; i++) {
+        const block = entries[i];
+        const field = (key: string): string => {
+            const re = new RegExp(`^\\s*${key}:[ \\t]*(.*)$`, 'm');
+            const m = re.exec(block);
+            return m ? m[1].trim() : '';
+        };
+        axes.push({
+            name: field('m_Name'),
+            descriptive_name: field('descriptiveName'),
+            descriptive_negative_name: field('descriptiveNegativeName'),
+            negative_button: field('negativeButton'),
+            positive_button: field('positiveButton'),
+            alt_negative_button: field('altNegativeButton'),
+            alt_positive_button: field('altPositiveButton'),
+            gravity: parseFloat(field('gravity') || '0'),
+            dead: parseFloat(field('dead') || '0'),
+            sensitivity: parseFloat(field('sensitivity') || '0'),
+            snap: field('snap') === '1',
+            invert: field('invert') === '1',
+            type: parseInt(field('type') || '0', 10),
+            axis: parseInt(field('axis') || '0', 10),
+            joy_num: parseInt(field('joyNum') || '0', 10),
+        });
+    }
+    return { axes };
+}
+
+function parse_generic_asset(content: string): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
 
     // Extract simple key: value pairs from the main block
     const lines = content.split('\n');
@@ -205,7 +257,7 @@ function parse_generic_asset(content: string): Record<string, any> {
         const match = line.match(/^\s{2}(\w[\w\s]*\w|\w+):\s*(.+)$/);
         if (match) {
             const key = match[1];
-            let value: any = match[2].trim();
+            let value: string | number = match[2].trim();
 
             // Try parsing as number
             if (/^-?\d+(\.\d+)?$/.test(value)) {
@@ -268,6 +320,9 @@ export function read_settings(options: ReadSettingsOptions): ReadSettingsResult 
         case 'TimeManager':
             data = parse_time_manager(content);
             break;
+        case 'InputManager':
+            data = parse_input_manager(content);
+            break;
         default:
             data = parse_generic_asset(content);
             break;
@@ -289,6 +344,17 @@ export function read_settings(options: ReadSettingsOptions): ReadSettingsResult 
  */
 export function edit_settings(options: EditSettingsOptions): EditSettingsResult {
     const { project_path, setting, property, value } = options;
+
+    // Basic validation on --set value
+    if (value === undefined || value === null) {
+        return {
+            success: false,
+            project_path,
+            setting,
+            error: 'Value cannot be empty. Provide a valid value with --value.',
+        };
+    }
+
     const file_path = resolve_setting_path(project_path, setting);
 
     if (!existsSync(file_path)) {
@@ -329,18 +395,27 @@ export function edit_settings(options: EditSettingsOptions): EditSettingsResult 
             if (pascalPattern.test(content)) {
                 content = content.replace(pascalPattern, `$1${value}`);
             } else {
-                // Try with space-separated names (TimeManager uses "Fixed Timestep")
-                const spacedName = property.replace(/_/g, ' ').replace(/(^| )([a-z])/g, (_: string, sp: string, c: string) => sp + c.toUpperCase());
-                const spacedPattern = new RegExp(`(^\\s*${spacedName}:\\s*)(.*)$`, 'm');
-                if (spacedPattern.test(content)) {
-                    content = content.replace(spacedPattern, `$1${value}`);
+                // Try camelCase decomposition: fixedTimestep -> Fixed Timestep
+                const camelSpaced = property
+                    .replace(/([a-z])([A-Z])/g, '$1 $2')
+                    .replace(/(^| )([a-z])/g, (_: string, sp: string, c: string) => sp + c.toUpperCase());
+                const camelSpacedPattern = new RegExp(`(^\\s*${camelSpaced}:\\s*)(.*)$`, 'm');
+                if (camelSpacedPattern.test(content)) {
+                    content = content.replace(camelSpacedPattern, `$1${value}`);
                 } else {
-                    return {
-                        success: false,
-                        project_path,
-                        setting,
-                        error: `Property "${property}" not found in ${setting}`,
-                    };
+                    // Try with space-separated names from snake_case (TimeManager uses "Fixed Timestep")
+                    const spacedName = property.replace(/_/g, ' ').replace(/(^| )([a-z])/g, (_: string, sp: string, c: string) => sp + c.toUpperCase());
+                    const spacedPattern = new RegExp(`(^\\s*${spacedName}:\\s*)(.*)$`, 'm');
+                    if (spacedPattern.test(content)) {
+                        content = content.replace(spacedPattern, `$1${value}`);
+                    } else {
+                        return {
+                            success: false,
+                            project_path,
+                            setting,
+                            error: `Property "${property}" not found in ${setting}`,
+                        };
+                    }
                 }
             }
         }
@@ -649,7 +724,8 @@ export function edit_sorting_layer(options: SortingLayerEditOptions): EditSettin
         // Find end of m_SortingLayers section and append before the next top-level key
         const sortingEnd = content.match(/(m_SortingLayers:\s*\n(?:\s+-\s+name:[\s\S]*?(?=\n[^\s]|\n*$)))/);
         if (sortingEnd) {
-            content = content.replace(sortingEnd[1], sortingEnd[1] + newEntry);
+            // The lookahead stops before the trailing newline, so we must add one
+            content = content.replace(sortingEnd[1], sortingEnd[1] + '\n' + newEntry);
         } else {
             // Fallback: append before end of file
             content = content.trimEnd() + '\n' + newEntry;

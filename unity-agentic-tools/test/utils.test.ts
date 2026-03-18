@@ -2,20 +2,13 @@ import { describe, expect, it, afterEach } from 'vitest';
 import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { generateGuid, atomicWrite, validate_name } from '../src/utils';
+import { generateGuid, atomicWrite, validate_name, path_glob_to_regex } from '../src/utils';
 
 describe('generateGuid', () => {
     it('should return a 32-character lowercase hex string', () => {
         const guid = generateGuid();
         expect(guid).toMatch(/^[0-9a-f]{32}$/);
         expect(guid).toHaveLength(32);
-    });
-
-    it('should only contain valid hex characters', () => {
-        for (let i = 0; i < 10; i++) {
-            const guid = generateGuid();
-            expect(guid).toMatch(/^[0-9a-f]+$/);
-        }
     });
 
     it('should generate unique values across 100 calls', () => {
@@ -71,7 +64,7 @@ describe('atomicWrite', () => {
         const dir = makeTempDir();
         const filePath = join(dir, 'utf8.txt');
         // Each emoji is 4 bytes in UTF-8
-        const content = 'hello 🌍🎮';
+        const content = 'hello \u{1F30D}\u{1F3AE}';
 
         const result = atomicWrite(filePath, content);
 
@@ -125,7 +118,7 @@ describe('validate_name', () => {
     });
 
     it('should accept Unicode names', () => {
-        expect(validate_name('敵キャラ', 'Test')).toBeNull();
+        expect(validate_name('\u6575\u30AD\u30E3\u30E9', 'Test')).toBeNull();
         expect(validate_name('Spieler', 'Test')).toBeNull();
     });
 
@@ -155,5 +148,49 @@ describe('validate_name', () => {
     it('should include the label in error messages', () => {
         const result = validate_name('Bad/Name', 'Tag name');
         expect(result).toContain('Tag name');
+    });
+});
+
+describe('path_glob_to_regex', () => {
+    it('should match ** glob across directory separators', () => {
+        const re = path_glob_to_regex('**/*.cs');
+        expect(re.test('Assets/Scripts/Player.cs')).toBe(true);
+        expect(re.test('Assets/Deep/Nested/Dir/File.cs')).toBe(true);
+        expect(re.test('Player.cs')).toBe(false); // no directory prefix to match **/
+    });
+
+    it('should match * glob within a single directory segment', () => {
+        const re = path_glob_to_regex('Assets/*.cs');
+        expect(re.test('Assets/Player.cs')).toBe(true);
+        expect(re.test('Assets/Scripts/Player.cs')).toBe(false); // * does not cross /
+    });
+
+    it('should handle ? as single-character wildcard', () => {
+        const re = path_glob_to_regex('Player?.cs');
+        expect(re.test('Assets/Player1.cs')).toBe(true);
+        expect(re.test('Assets/PlayerAB.cs')).toBe(false);
+    });
+
+    it('should do substring match when no wildcards present', () => {
+        const re = path_glob_to_regex('Editor');
+        expect(re.test('Assets/Editor/Foo.cs')).toBe(true);
+        expect(re.test('Assets/Scripts/Player.cs')).toBe(false);
+    });
+
+    it('should be case-insensitive', () => {
+        const re = path_glob_to_regex('**/*.CS');
+        expect(re.test('Assets/player.cs')).toBe(true);
+    });
+
+    it('should escape regex special chars in the pattern', () => {
+        const re = path_glob_to_regex('file(1).txt');
+        expect(re.test('Assets/file(1).txt')).toBe(true);
+        expect(re.test('Assets/fileX1Y.txt')).toBe(false); // ( ) are literal, not groups
+    });
+
+    it('should not crash on patterns that are invalid regex', () => {
+        // This was the original bug: **/*.cs passed as raw RegExp crashes
+        expect(() => path_glob_to_regex('**/*.cs')).not.toThrow();
+        expect(() => path_glob_to_regex('**/+*.cs')).not.toThrow();
     });
 });

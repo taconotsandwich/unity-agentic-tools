@@ -1,6 +1,6 @@
 [package]
 name = "unity-file-tools"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "High-performance Unity YAML parser with napi-rs bindings"
@@ -22,6 +22,9 @@ walkdir = "2"
 
 # Parsing
 regex = "1.11"
+
+# PE / .NET DLL parsing
+goblin = "0.9"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

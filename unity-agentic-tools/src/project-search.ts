@@ -1,7 +1,7 @@
 import { readdirSync, statSync, readFileSync, existsSync } from 'fs';
 import * as path from 'path';
 import { UnityScanner, isNativeModuleAvailable, getNativeWalkProjectFiles, getNativeGrepProject } from './scanner';
-import { glob_match } from './utils';
+import { glob_match, is_match_all } from './utils';
 import type {
     ProjectSearchOptions,
     ProjectSearchResult,
@@ -117,10 +117,13 @@ function walk_project_files_js(
         }
     }
 
-    // Walk from Assets/ if it exists, otherwise from project root
+    // Walk from Assets/ if it exists, otherwise walk project_path directly
+    // (handles both project-root paths and subdirectory paths like Assets/Subdir/)
     const assetsDir = path.join(project_path, 'Assets');
     if (existsSync(assetsDir)) {
         walk(assetsDir);
+    } else {
+        walk(project_path);
     }
 
     // Also check ProjectSettings/ for .asset files
@@ -188,6 +191,67 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
         };
     }
 
+    // Extension map for asset file types (non-scene/prefab)
+    const ASSET_TYPE_EXTENSIONS: Record<string, string[]> = {
+        mat: ['.mat'],
+        anim: ['.anim'],
+        controller: ['.controller'],
+        asset: ['.asset'],
+    };
+
+    // For asset types (mat, anim, controller, asset), use simple file walk + name matching
+    const isAssetType = file_type in ASSET_TYPE_EXTENSIONS;
+    if (isAssetType) {
+        const extensions = ASSET_TYPE_EXTENSIONS[file_type];
+        const files = walk_project_files(project_path, extensions);
+        const matches: ProjectSearchMatch[] = [];
+
+        for (const file of files) {
+            const relPath = path.relative(project_path, file);
+            const fileName = path.basename(file, path.extname(file));
+
+            // Apply name filter if specified
+            if (name) {
+                const nameLower = name.toLowerCase();
+                const hasWildcard = name.includes('*') || name.includes('?');
+                if (hasWildcard) {
+                    if (!glob_match(name, fileName)) continue;
+                } else if (exact) {
+                    if (fileName !== name) continue;
+                } else {
+                    if (!fileName.toLowerCase().includes(nameLower)) continue;
+                }
+            }
+
+            // Try to extract m_Name from the first ~20 lines for display
+            let display_name = fileName;
+            try {
+                const content = readFileSync(file, 'utf-8');
+                const nameMatch = /^\s*m_Name:\s*(.+)$/m.exec(content.slice(0, 2000));
+                if (nameMatch) display_name = nameMatch[1].trim();
+            } catch { /* use filename */ }
+
+            matches.push({
+                file: relPath,
+                game_object: display_name,
+                file_id: '0',
+            });
+
+            if (max_matches !== undefined && matches.length >= max_matches) break;
+        }
+
+        return {
+            success: true,
+            project_path,
+            total_files_scanned: files.length,
+            total_matches: matches.length,
+            cursor: 0,
+            truncated: max_matches !== undefined && matches.length >= max_matches,
+            matches,
+        };
+    }
+
+    // Scene/prefab types require the native scanner
     if (!isNativeModuleAvailable()) {
         return {
             success: false,
@@ -201,7 +265,7 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
         };
     }
 
-    // Determine extensions to scan
+    // Determine extensions to scan (scene/prefab types use the scanner)
     const extensions: string[] = [];
     if (file_type === 'scene' || file_type === 'all') extensions.push('.unity');
     if (file_type === 'prefab' || file_type === 'all') extensions.push('.prefab');
@@ -215,17 +279,39 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
         try {
             let gameObjects;
 
-            // Need full GO data when filtering by tag, layer, or component
-            const needFullData = !!(component || tag || layer !== undefined);
+            // Three-path search strategy:
+            // 1. Name-only: find_by_name (fast — regex match, no block extraction)
+            // 2. Tag/layer without component: scan_scene_metadata (medium — GO block only)
+            // 3. Component filter: scan_scene_with_components (slow — full extraction)
+            const needComponents = !!component;
+            const needMetadata = !!(tag || layer !== undefined);
 
-            if (name && !needFullData) {
-                // Use name search (exact when --exact, fuzzy/substring otherwise)
+            if (name && !needMetadata && !needComponents) {
+                // Fast path: name search only
                 gameObjects = scanner.find_by_name(file, name, !exact);
-            } else if (needFullData) {
-                // Need full GO data for tag/layer/component filtering
+            } else if (needComponents) {
+                // Slow path: need full component data
                 gameObjects = scanner.scan_scene_with_components(file);
                 // If name filter is also specified, post-filter by name
-                if (name) {
+                if (name && !is_match_all(name)) {
+                    const nameLower = name.toLowerCase();
+                    const hasWildcard = name.includes('*') || name.includes('?');
+                    gameObjects = gameObjects.filter((go: GameObjectWithComponents) => {
+                        if (!go.name) return false;
+                        if (hasWildcard) {
+                            return glob_match(name, go.name);
+                        }
+                        if (exact) {
+                            return go.name === name;
+                        }
+                        return go.name.toLowerCase().includes(nameLower);
+                    });
+                }
+            } else if (needMetadata) {
+                // Medium path: tag/layer only — no component extraction
+                gameObjects = scanner.scan_scene_metadata(file);
+                // If name filter is also specified, post-filter by name
+                if (name && !is_match_all(name)) {
                     const nameLower = name.toLowerCase();
                     const hasWildcard = name.includes('*') || name.includes('?');
                     gameObjects = gameObjects.filter((go: GameObjectWithComponents) => {
@@ -404,11 +490,24 @@ function grep_project_js(options: ProjectGrepOptions): ProjectGrepResult {
     // Determine extensions
     const EXTENSION_MAP: Record<string, string[]> = {
         cs: ['.cs'],
-        yaml: ['.yaml', '.yml', '.unity', '.prefab', '.asset'],
+        yaml: [
+            '.yaml', '.yml', '.unity', '.prefab', '.asset',
+            '.mat', '.anim', '.controller', '.overrideController',
+            '.mask', '.mixer', '.lighting', '.preset', '.signal',
+            '.playable', '.renderTexture', '.flare', '.guiskin',
+            '.terrainlayer', '.cubemap',
+        ],
         unity: ['.unity'],
         prefab: ['.prefab'],
         asset: ['.asset'],
-        all: ['.cs', '.unity', '.prefab', '.asset', '.yaml', '.yml', '.txt', '.json', '.xml', '.shader', '.cginc', '.hlsl', '.compute', '.asmdef', '.asmref'],
+        mat: ['.mat'],
+        anim: ['.anim'],
+        controller: ['.controller'],
+        all: [
+            '.cs', '.unity', '.prefab', '.asset', '.mat', '.anim', '.controller',
+            '.yaml', '.yml', '.txt', '.json', '.xml', '.shader', '.cginc', '.hlsl',
+            '.compute', '.asmdef', '.asmref',
+        ],
     };
 
     const extensions = EXTENSION_MAP[file_type] || EXTENSION_MAP.all;

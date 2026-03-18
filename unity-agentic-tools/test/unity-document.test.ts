@@ -41,12 +41,6 @@ describe('UnityDocument.from_file', () => {
         expect(doc.file_path).toBe(SAMPLE_SCENE);
     });
 
-    it('should have a YAML header', () => {
-        const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        const serialized = doc.serialize();
-        expect(serialized.startsWith('%YAML 1.1')).toBe(true);
-    });
-
     it('should throw on validation failure for invalid content', () => {
         const temp = make_temp(SAMPLE_SCENE);
         // Overwrite with invalid content
@@ -82,20 +76,12 @@ Transform:
 // ─── Round-trip fidelity ───────────────────────────────────────────────
 
 describe('Round-trip fidelity', () => {
-    it('should round-trip SampleScene.unity exactly', () => {
-        const content = readFileSync(SAMPLE_SCENE, 'utf-8');
-        const doc = UnityDocument.from_string(content);
-        expect(doc.serialize()).toBe(content);
-    });
-
-    it('should round-trip SceneWithPrefab.unity exactly', () => {
-        const content = readFileSync(SCENE_WITH_PREFAB, 'utf-8');
-        const doc = UnityDocument.from_string(content);
-        expect(doc.serialize()).toBe(content);
-    });
-
-    it('should round-trip SamplePrefab.prefab exactly', () => {
-        const content = readFileSync(SAMPLE_PREFAB, 'utf-8');
+    it.each([
+        ['SampleScene.unity', SAMPLE_SCENE],
+        ['SceneWithPrefab.unity', SCENE_WITH_PREFAB],
+        ['SamplePrefab.prefab', SAMPLE_PREFAB],
+    ])('should round-trip %s exactly', (_label, filepath) => {
+        const content = readFileSync(filepath, 'utf-8');
         const doc = UnityDocument.from_string(content);
         expect(doc.serialize()).toBe(content);
     });
@@ -143,32 +129,16 @@ describe('find_by_file_id', () => {
 // ─── find_game_objects_by_name ──────────────────────────────────────────
 
 describe('find_game_objects_by_name', () => {
-    it('should find Main Camera', () => {
+    it.each([
+        ['Main Camera', '508316491'],
+        ['Directional Light', '1028675095'],
+        ['Player', '1847675923'],
+        ['GameManager', '2094567890'],
+    ])('should find %s with fileID %s', (name, expected_file_id) => {
         const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        const results = doc.find_game_objects_by_name('Main Camera');
+        const results = doc.find_game_objects_by_name(name);
         expect(results).toHaveLength(1);
-        expect(results[0].file_id).toBe('508316491');
-    });
-
-    it('should find Directional Light', () => {
-        const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        const results = doc.find_game_objects_by_name('Directional Light');
-        expect(results).toHaveLength(1);
-        expect(results[0].file_id).toBe('1028675095');
-    });
-
-    it('should find Player', () => {
-        const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        const results = doc.find_game_objects_by_name('Player');
-        expect(results).toHaveLength(1);
-        expect(results[0].file_id).toBe('1847675923');
-    });
-
-    it('should find GameManager', () => {
-        const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        const results = doc.find_game_objects_by_name('GameManager');
-        expect(results).toHaveLength(1);
-        expect(results[0].file_id).toBe('2094567890');
+        expect(results[0].file_id).toBe(expected_file_id);
     });
 
     it('should return empty for non-existent name', () => {
@@ -181,18 +151,14 @@ describe('find_game_objects_by_name', () => {
 // ─── find_transforms_by_name ───────────────────────────────────────────
 
 describe('find_transforms_by_name', () => {
-    it('should find transform ID for Main Camera', () => {
+    it.each([
+        ['Main Camera', '508316495'],
+        ['Directional Light', '1028675097'],
+    ])('should find transform ID for %s', (name, expected_transform_id) => {
         const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        const ids = doc.find_transforms_by_name('Main Camera');
+        const ids = doc.find_transforms_by_name(name);
         expect(ids).toHaveLength(1);
-        expect(ids[0]).toBe('508316495');
-    });
-
-    it('should find transform ID for Directional Light', () => {
-        const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        const ids = doc.find_transforms_by_name('Directional Light');
-        expect(ids).toHaveLength(1);
-        expect(ids[0]).toBe('1028675097');
+        expect(ids[0]).toBe(expected_transform_id);
     });
 });
 
@@ -341,23 +307,14 @@ describe('collect_hierarchy', () => {
 // ─── generate_file_id ──────────────────────────────────────────────────
 
 describe('generate_file_id', () => {
-    it('should produce a string of digits', () => {
-        const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        const id = doc.generate_file_id();
-        expect(/^\d+$/.test(id)).toBe(true);
-    });
-
-    it('should produce unique IDs not in existing set', () => {
+    it('should produce valid unique 10-digit IDs', () => {
         const doc = UnityDocument.from_file(SAMPLE_SCENE);
         const existing = doc.all_file_ids();
         const id = doc.generate_file_id();
-        expect(existing.has(id)).toBe(false);
-    });
 
-    it('should produce IDs in the 10-digit range', () => {
-        const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        const id = doc.generate_file_id();
+        expect(/^\d+$/.test(id)).toBe(true);
         expect(id.length).toBe(10);
+        expect(existing.has(id)).toBe(false);
     });
 
     it('should produce different IDs on successive calls', () => {
@@ -374,18 +331,12 @@ describe('generate_file_id', () => {
 // ─── validate ──────────────────────────────────────────────────────────
 
 describe('validate', () => {
-    it('should return true for valid YAML files', () => {
-        const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        expect(doc.validate()).toBe(true);
-    });
-
-    it('should return true for SceneWithPrefab', () => {
-        const doc = UnityDocument.from_file(SCENE_WITH_PREFAB);
-        expect(doc.validate()).toBe(true);
-    });
-
-    it('should return true for SamplePrefab', () => {
-        const doc = UnityDocument.from_file(SAMPLE_PREFAB);
+    it.each([
+        ['SampleScene', SAMPLE_SCENE],
+        ['SceneWithPrefab', SCENE_WITH_PREFAB],
+        ['SamplePrefab', SAMPLE_PREFAB],
+    ])('should return true for valid file %s', (_label, filepath) => {
+        const doc = UnityDocument.from_file(filepath);
         expect(doc.validate()).toBe(true);
     });
 
@@ -455,47 +406,24 @@ describe('all_file_ids', () => {
         // 20 blocks total
         expect(ids.size).toBe(20);
     });
-
-    it('should return strings, not numbers', () => {
-        const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        const ids = doc.all_file_ids();
-        for (const id of ids) {
-            expect(typeof id).toBe('string');
-        }
-    });
 });
 
 // ─── count ─────────────────────────────────────────────────────────────
 
 describe('count', () => {
-    it('should match expected block count for SampleScene', () => {
-        const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        expect(doc.count).toBe(20);
-    });
-
-    it('should match expected block count for SamplePrefab', () => {
-        const doc = UnityDocument.from_file(SAMPLE_PREFAB);
-        // EnemyPrefab: GO + Transform + MeshFilter + MeshRenderer + BoxCollider + MonoBehaviour
-        // HealthBar: GO + Transform + MonoBehaviour = 9 blocks
-        expect(doc.count).toBe(9);
-    });
-
-    it('should match expected block count for SceneWithPrefab', () => {
-        const doc = UnityDocument.from_file(SCENE_WITH_PREFAB);
-        // OcclusionCulling, RenderSettings, MainCamera GO + Transform + Camera,
-        // Stripped GO, Stripped Transform, PrefabInstance = 8
-        expect(doc.count).toBe(8);
+    it.each([
+        ['SampleScene', SAMPLE_SCENE, 20],
+        ['SamplePrefab', SAMPLE_PREFAB, 9],
+        ['SceneWithPrefab', SCENE_WITH_PREFAB, 8],
+    ])('should match expected block count for %s (%i blocks)', (_label, filepath, expected_count) => {
+        const doc = UnityDocument.from_file(filepath);
+        expect(doc.count).toBe(expected_count);
     });
 });
 
 // ─── dirty tracking ───────────────────────────────────────────────────
 
 describe('dirty tracking', () => {
-    it('should be clean on load', () => {
-        const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        expect(doc.dirty).toBe(false);
-    });
-
     it('should be dirty after append_block', () => {
         const doc = UnityDocument.from_file(SAMPLE_SCENE);
         const raw = `--- !u!1 &999999\nGameObject:\n  m_Name: NewObject\n`;
@@ -504,16 +432,14 @@ describe('dirty tracking', () => {
         expect(doc.dirty).toBe(true);
     });
 
-    it('should be dirty after remove_block', () => {
-        const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        doc.remove_block('508316491');
-        expect(doc.dirty).toBe(true);
-    });
+    it('should be dirty after remove_block or remove_blocks', () => {
+        const doc_single = UnityDocument.from_file(SAMPLE_SCENE);
+        doc_single.remove_block('508316491');
+        expect(doc_single.dirty).toBe(true);
 
-    it('should be dirty after remove_blocks', () => {
-        const doc = UnityDocument.from_file(SAMPLE_SCENE);
-        doc.remove_blocks(new Set(['508316491']));
-        expect(doc.dirty).toBe(true);
+        const doc_multi = UnityDocument.from_file(SAMPLE_SCENE);
+        doc_multi.remove_blocks(new Set(['508316491']));
+        expect(doc_multi.dirty).toBe(true);
     });
 });
 

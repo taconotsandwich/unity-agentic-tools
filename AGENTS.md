@@ -4,77 +4,56 @@ This document provides essential guidelines for agentic coding tools working in 
 
 ## Project Overview
 
-TypeScript CLI providing token-efficient Unity file manipulation utilities for Claude Code.
-
-**Core Structure:**
-- `unity-agentic-tools/src/` - TypeScript source code
-- `unity-agentic-tools/dist/` - Compiled JavaScript output (built by Bun)
-- `unity-agentic-tools/test/` - TypeScript tests
-- `doc-indexer/` - Documentation indexing module
+TypeScript CLI + native Rust backend providing token-efficient Unity file manipulation utilities. 125 commands across 4 CRUD groups (`create`, `read`, `update`, `delete`), a live editor bridge (49 subcommands), and 8 top-level utilities.
 
 ## Quick Setup
 
-**Install CLI globally:**
+**From source:**
 ```bash
-npm install -g unity-agentic-tools
+bun install && bun run build:rust && bun run build
 ```
 
 ## Build/Test Commands
 
-### Building
 ```bash
-bun run build
-```
-
-### Running Tests
-```bash
-bun run test
-```
-
-### Watch Mode
-```bash
-bun run dev
+bun run build:rust        # Rebuild Rust native module (after .rs changes)
+bun run build             # Build TypeScript
+bun run test              # Unit tests (882 TS + 173 Rust)
+bun run test:integration  # CLI integration tests
+bun run type-check        # tsc --noEmit
 ```
 
 ## Code Style Guidelines
 
-### TypeScript Style
-- Use 4 spaces for indentation
-- Maximum line length: 100 characters
-- Use `interface` for object shapes
-- Use `type` for unions/primitives
+### TypeScript
+- 4 spaces indentation
+- `interface` for object shapes, `type` for unions/primitives
 - Explicit return types for public methods
+- Never use `any` -- use proper types, generics, or `unknown`
 
 ### Naming Conventions
 - Classes/Interfaces: PascalCase (`UnityScanner`, `GameObject`)
 - Functions/Methods: snake_case (`scan_scene`, `find_by_name`)
 - Constants: UPPER_SNAKE_CASE (`MAX_CHUNK_SIZE`)
-- Private methods: single underscore prefix (`_parse_object`)
 
-### File Organization
-- One class per file
-- Export primary class
-- Keep utilities separate
+## Architecture
 
-## CLI Commands Reference
+```
+unity-agentic-tools/src/   TypeScript CLI source (Commander.js)
+unity-agentic-tools/test/  Vitest tests (882 tests)
+rust-core/                 Native Rust module via napi-rs (173 tests)
+doc-indexer/               Documentation indexing module
+unity-package/             Unity Editor bridge (C# UPM package)
+```
 
-All commands use `bun unity-agentic-tools/dist/cli.js <command>`:
-- `read scene <file>` - List GameObject hierarchy (`--properties` for values, `--summary` for counts)
-- `read gameobject <file> <id>` - Get single object by name or file ID (`-c <type>` for component filter)
-- `read scriptable-object <file>` - Read .asset file
-- `read settings <project> -s <name>` - Read project settings
-- `read build <project>` - Read build settings
-- `create gameobject|scene|component|build|...` - Create Unity objects
-- `update gameobject|transform|component|build|prefab|...` - Modify properties
-- `delete gameobject|component|build|prefab` - Remove objects
-- `search <file> <pattern>` - Find GameObjects by name in a file
-- `search <project> -n <pattern>` - Search across scenes/prefabs
-- `grep <project> <regex>` - Regex search across project files
-- `clone <file> <name>` - Duplicate a GameObject and its hierarchy
-- `version <project>` - Read Unity project version
-- `docs <query>` - Search Unity documentation (auto-indexes)
+- Workspaces: root package.json has `"workspaces": ["rust-core", "unity-agentic-tools", "doc-indexer"]`
+- CRUD groups built in `cmd-create.ts`, `cmd-read.ts`, `cmd-update.ts`, `cmd-delete.ts`
+- Editor bridge: `cmd-editor.ts` (CLI) + `editor-client.ts` (WebSocket transport)
+- Scanner: `scanner.ts` tries `../native/index.js` first, falls back to workspace `require('unity-file-tools')`
 
-## Claude Code Integration
+## Testing
 
-The Claude Code plugin (hooks, skills, manifest) lives in a separate repository:
-https://github.com/taconotsandwich/unity-agentic-tools-claude-plugin
+- Run `bun run test` after any TypeScript or Rust change
+- Run `bun run test:integration` for end-to-end CLI verification
+- `test/fixtures/external/` is a git submodule -- CI needs `submodules: true`
+- Unity YAML regex: always use `[ \t]*` (not `\s*`) between keys and values to avoid newline bleed
