@@ -11,16 +11,16 @@ static LAYER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"m_Layer:\s*(\d+)").unwrap()
 });
 static FATHER_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"m_Father:\s*\{fileID:\s*(\d+)\}").unwrap()
+    Regex::new(r"m_Father:\s*\{fileID:\s*(-?\d+)\}").unwrap()
 });
 static CHILDREN_SECTION_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"m_Children:[\s\S]*?\[[\s\S]*?\]").unwrap()
 });
 static CHILD_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\{fileID:\s*(\d+)\}").unwrap()
+    Regex::new(r"\{fileID:\s*(-?\d+)\}").unwrap()
 });
 static COMP_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"component:\s*\{fileID:\s*(\d+)\}").unwrap()
+    Regex::new(r"component:\s*\{fileID:\s*(-?\d+)\}").unwrap()
 });
 
 /// Extract a block from content by header

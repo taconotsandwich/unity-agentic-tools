@@ -200,6 +200,69 @@ describe('require_unique_game_object', () => {
         expect(result).toHaveProperty('error');
         expect((result as { error: string }).error).toContain('not a GameObject');
     });
+
+    it('should find GameObject by negative fileID', () => {
+        const content = `%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!1 &-6804560824838403692\nGameObject:\n  m_Name: NegativeIdObj\n  m_IsActive: 1\n  m_Component:\n  - component: {fileID: -100}\n`;
+        const doc = UnityDocument.from_string(content);
+        const result = doc.require_unique_game_object('-6804560824838403692');
+        expect(result).not.toHaveProperty('error');
+        expect((result as UnityBlock).file_id).toBe('-6804560824838403692');
+    });
+});
+
+// ─── negative fileID support ──────────────────────────────────────────
+
+describe('negative fileID support', () => {
+    const NEG_CONTENT = [
+        '%YAML 1.1',
+        '%TAG !u! tag:unity3d.com,2011:',
+        '--- !u!1 &100',
+        'GameObject:',
+        '  m_Component:',
+        '  - component: {fileID: -6804560824838403692}',
+        '  m_Name: QuantumEntity',
+        '  m_IsActive: 1',
+        '--- !u!114 &-6804560824838403692',
+        'MonoBehaviour:',
+        '  m_Enabled: 1',
+        '  m_GameObject: {fileID: 100}',
+        '',
+    ].join('\n');
+
+    it('should parse blocks with negative fileID anchors', () => {
+        const doc = UnityDocument.from_string(NEG_CONTENT);
+        const block = doc.find_by_file_id('-6804560824838403692');
+        expect(block).not.toBeNull();
+        expect(block!.class_id).toBe(114);
+    });
+
+    it('should find negative fileID component refs in find_transforms_by_name', () => {
+        const doc = UnityDocument.from_string(NEG_CONTENT);
+        // The first component ref is negative — it should be found
+        const block = doc.find_by_file_id('100');
+        expect(block).not.toBeNull();
+        expect(block!.raw).toContain('fileID: -6804560824838403692');
+    });
+
+    it('should extract negative fileID refs via extract_file_id_refs', () => {
+        const doc = UnityDocument.from_string(NEG_CONTENT);
+        const goBlock = doc.find_by_file_id('100');
+        expect(goBlock).not.toBeNull();
+        const refs = goBlock!.extract_file_id_refs();
+        expect(refs).toContain('-6804560824838403692');
+    });
+
+    it('should round-trip content with negative fileIDs', () => {
+        const doc = UnityDocument.from_string(NEG_CONTENT);
+        expect(doc.serialize()).toBe(NEG_CONTENT);
+    });
+
+    it('should remove blocks with negative fileIDs', () => {
+        const doc = UnityDocument.from_string(NEG_CONTENT);
+        doc.remove_blocks(new Set(['-6804560824838403692']));
+        expect(doc.find_by_file_id('-6804560824838403692')).toBeNull();
+        expect(doc.dirty).toBe(true);
+    });
 });
 
 // ─── require_unique_transform ──────────────────────────────────────────

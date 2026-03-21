@@ -41,7 +41,7 @@ function parseVector(str: string): { x: number; y: number; z: number } {
 function resolve_transform_id(scanner: UnityScanner, file: string, identifier: string): { transform_id: number } | { error: string } {
     // Check for duplicate names before inspect
     let resolved_id = identifier;
-    if (!/^\d+$/.test(identifier)) {
+    if (!/^-?\d+$/.test(identifier)) {
         const matches = scanner.find_by_name(file, identifier, false);
         if (matches.length > 1) {
             const ids = matches.map((m: FindResult) => m.fileId).join(', ');
@@ -64,7 +64,7 @@ function resolve_transform_id(scanner: UnityScanner, file: string, identifier: s
 
     // If inspect didn't find a GameObject (e.g. the ID is already a Transform fileID),
     // return numeric identifiers as-is for direct Transform lookup
-    if (/^\d+$/.test(identifier)) {
+    if (/^-?\d+$/.test(identifier)) {
         return { transform_id: parseInt(identifier, 10) };
     }
 

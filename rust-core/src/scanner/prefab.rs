@@ -8,7 +8,7 @@ pub fn extract_prefab_instances(
     content: &str,
     guid_cache: &HashMap<String, String>,
 ) -> Vec<PrefabInstanceInfo> {
-    let header_re = Regex::new(r"--- !u!1001 &(\d+)\s*\n").expect("Invalid regex");
+    let header_re = Regex::new(r"--- !u!1001 &(-?\d+)\s*\n").expect("Invalid regex");
 
     header_re
         .captures_iter(content)
@@ -86,7 +86,7 @@ pub fn extract_modifications(block: &str) -> Vec<PrefabModification> {
     let mut modifications = Vec::new();
     let lines: Vec<&str> = block.lines().collect();
 
-    let target_re = Regex::new(r"fileID:\s*(\d+)").expect("Invalid regex");
+    let target_re = Regex::new(r"fileID:\s*(-?\d+)").expect("Invalid regex");
     let guid_re = Regex::new(r"guid:\s*([a-f0-9]{32})").expect("Invalid regex");
     let value_re = Regex::new(r"^\s*value:\s*(.*)$").expect("Invalid regex");
     let property_re = Regex::new(r"^\s*propertyPath:\s*(.+)$").expect("Invalid regex");

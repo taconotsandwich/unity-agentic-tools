@@ -535,7 +535,7 @@ export class UnityBlock {
      */
     extract_file_id_refs(): string[] {
         const refs: string[] = [];
-        const pattern = /\{fileID:\s*(\d+)/g;
+        const pattern = /\{fileID:\s*(-?\d+)/g;
 
         // Skip the header line
         const first_newline = this._raw.indexOf('\n');

@@ -49,7 +49,7 @@ impl UnityYamlParser {
         // Use \n (not \s*\n) after fileID to reject stripped blocks like "--- !u!1 &123 stripped"
         // which lack m_Name/m_IsActive and cause the lazy .*? to bleed into the next block
         let pattern_str = format!(
-            r"(?s)--- !u!{} &(\d+)\nGameObject:\s*\n.*?m_Name:\s*([^\n]*).*?m_IsActive:\s*(\d)",
+            r"(?s)--- !u!{} &(-?\d+)\nGameObject:\s*\n.*?m_Name:\s*([^\n]*).*?m_IsActive:\s*(\d)",
             config.gameobject_class_id
         );
         let pattern = Regex::new(&pattern_str).expect("Invalid regex pattern");
@@ -88,7 +88,7 @@ impl UnityYamlParser {
 
     /// Parse component references from a GameObject block
     pub fn parse_component_refs(go_block: &str) -> Vec<String> {
-        let pattern = Regex::new(r"component:\s*\{fileID:\s*(\d+)\}")
+        let pattern = Regex::new(r"component:\s*\{fileID:\s*(-?\d+)\}")
             .expect("Invalid regex");
 
         pattern

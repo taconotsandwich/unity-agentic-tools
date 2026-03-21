@@ -48,7 +48,7 @@ export function removeComponent(options: RemoveComponentOptions): RemoveComponen
   }
 
   // Extract m_GameObject from the component block and remove the component reference
-  const goMatch = found.raw.match(/m_GameObject:\s*\{fileID:\s*(\d+)\}/);
+  const goMatch = found.raw.match(/m_GameObject:\s*\{fileID:\s*(-?\d+)\}/);
   if (goMatch) {
     const parentGoId = goMatch[1];
     const goBlock = doc.find_by_file_id(parentGoId);
@@ -113,7 +113,7 @@ export function deleteGameObject(options: DeleteGameObjectOptions): DeleteGameOb
 
   // Collect all component fileIDs from the GO
   const componentIds = new Set<string>();
-  const compMatches = goBlock.raw.matchAll(/component:\s*\{fileID:\s*(\d+)\}/g);
+  const compMatches = goBlock.raw.matchAll(/component:\s*\{fileID:\s*(-?\d+)\}/g);
   for (const cm of compMatches) {
     componentIds.add(cm[1]);
   }
@@ -126,7 +126,7 @@ export function deleteGameObject(options: DeleteGameObjectOptions): DeleteGameOb
     const block = doc.find_by_file_id(compId);
     if (block && block.class_id === 4) {
       transformId = compId;
-      const fatherMatch = block.raw.match(/m_Father:\s*\{fileID:\s*(\d+)\}/);
+      const fatherMatch = block.raw.match(/m_Father:\s*\{fileID:\s*(-?\d+)\}/);
       if (fatherMatch) {
         fatherId = fatherMatch[1];
       }

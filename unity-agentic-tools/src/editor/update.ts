@@ -125,7 +125,7 @@ function isAncestor(doc: UnityDocument, childTransformId: string, candidateAnces
     const block = doc.find_by_file_id(currentId);
     if (!block || block.class_id !== 4) break;
 
-    const fatherMatch = block.raw.match(/m_Father:\s*\{fileID:\s*(\d+)\}/);
+    const fatherMatch = block.raw.match(/m_Father:\s*\{fileID:\s*(-?\d+)\}/);
     currentId = fatherMatch ? fatherMatch[1] : '0';
   }
 
@@ -143,7 +143,7 @@ function resolveTransformByGameObjectId(doc: UnityDocument, gameObjectFileId: st
   }
 
   // Extract first component ref from m_Component -- in Unity, the Transform is always first
-  const componentMatch = found.raw.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(\d+)\}/);
+  const componentMatch = found.raw.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(-?\d+)\}/);
   if (!componentMatch) {
     return { error: `GameObject fileID ${gameObjectFileId} has no Transform component` };
   }
@@ -251,7 +251,7 @@ export function safeUnityYAMLEdit(
   let targetBlock: UnityBlock | null = null;
 
   // If objectName is all digits, look up by fileID directly
-  if (/^\d+$/.test(objectName)) {
+  if (/^-?\d+$/.test(objectName)) {
     targetBlock = doc.find_by_file_id(objectName);
     if (!targetBlock) {
       return {
@@ -421,7 +421,7 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
   const classId = targetBlock.class_id;
 
   // Validate same-file fileID references (no guid = same file). Allow {fileID: 0} (null ref).
-  const sameFileRefMatch = new_value.match(/^\{fileID:\s*(\d+)\}$/);
+  const sameFileRefMatch = new_value.match(/^\{fileID:\s*(-?\d+)\}$/);
   if (sameFileRefMatch) {
     const refId = sameFileRefMatch[1];
     if (refId !== '0' && !doc.find_by_file_id(refId)) {
@@ -905,7 +905,7 @@ export function reparentGameObject(options: ReparentGameObjectOptions): Reparent
   // Find the child's Transform ID
   // Auto-detect numeric strings as fileIDs (consistent with update gameobject behavior)
   let childTransformId: string;
-  if (by_id || /^\d+$/.test(object_name)) {
+  if (by_id || /^-?\d+$/.test(object_name)) {
     if (isNaN(parseInt(object_name, 10))) {
       return { success: false, file_path, error: `Invalid fileID: "${object_name}" — expected a numeric value` };
     }
@@ -928,14 +928,14 @@ export function reparentGameObject(options: ReparentGameObjectOptions): Reparent
     return { success: false, file_path, error: `Transform ${childTransformId} not found` };
   }
 
-  const fatherMatch = childBlock.raw.match(/m_Father:\s*\{fileID:\s*(\d+)\}/);
+  const fatherMatch = childBlock.raw.match(/m_Father:\s*\{fileID:\s*(-?\d+)\}/);
   const oldParentTransformId = fatherMatch ? fatherMatch[1] : '0';
 
   // Resolve new parent
   // Auto-detect numeric strings as fileIDs (consistent with update gameobject behavior)
   let newParentTransformId = '0';
   if (new_parent.toLowerCase() !== 'root') {
-    if (by_id || /^\d+$/.test(new_parent)) {
+    if (by_id || /^-?\d+$/.test(new_parent)) {
       if (isNaN(parseInt(new_parent, 10))) {
         return { success: false, file_path, error: `Invalid parent fileID: "${new_parent}" — expected a numeric value, or "root"` };
       }
