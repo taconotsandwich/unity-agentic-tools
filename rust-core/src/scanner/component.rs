@@ -8,7 +8,7 @@ use super::parser::BlockIndex;
 
 // Cached regexes — compiled once, reused across all calls
 static COMP_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"component:\s*\{fileID:\s*(\d+)\}").unwrap()
+    Regex::new(r"component:\s*\{fileID:\s*(-?\d+)\}").unwrap()
 });
 static TYPE_NAME_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^([A-Za-z][A-Za-z0-9_]*):").unwrap()
@@ -88,7 +88,7 @@ fn extract_single_component_with_config(
     config: &ComponentConfig,
 ) -> Option<Component> {
     // Find the component block header
-    let header_pattern = format!(r"--- !u!(\d+) &{}\s*\n.*?([A-Za-z][A-Za-z0-9_]*):", file_id);
+    let header_pattern = format!(r"--- !u!(\d+) &{}\s*\n.*?([A-Za-z][A-Za-z0-9_]*):", regex::escape(file_id));
     let header_re = Regex::new(&header_pattern).ok()?;
     let caps = header_re.captures(content)?;
 
@@ -108,7 +108,7 @@ fn extract_single_component_with_config(
     // For script containers (MonoBehaviour-like), try to extract script GUID
     if config.is_script_container(class_id) {
         let script_pattern = format!(
-            r"--- !u!{} &{}[\s\S]*?{}:\s*\{{fileID:\s*\d+,\s*guid:\s*([a-f0-9]{{32}})",
+            r"--- !u!{} &{}[\s\S]*?{}:\s*\{{fileID:\s*-?\d+,\s*guid:\s*([a-f0-9]{{32}})",
             class_id,
             file_id,
             regex::escape(&config.script_field)
@@ -190,7 +190,7 @@ fn extract_single_component_indexed(
     // For script containers, extract script GUID from block (not full content)
     if config.is_script_container(class_id) {
         let script_pattern = format!(
-            r"{}:\s*\{{fileID:\s*\d+,\s*guid:\s*([a-f0-9]{{32}})",
+            r"{}:\s*\{{fileID:\s*-?\d+,\s*guid:\s*([a-f0-9]{{32}})",
             regex::escape(&config.script_field)
         );
         if let Ok(script_re) = Regex::new(&script_pattern) {
@@ -899,5 +899,40 @@ Font:
         assert_eq!(second.get("GlyphIndex").unwrap().as_str().unwrap(), "55");
 
         assert_eq!(record.get("FeatureLookupFlags").unwrap().as_str().unwrap(), "0");
+    }
+
+    #[test]
+    fn test_extract_properties_negative_file_id() {
+        let content = "--- !u!114 &-6804560824838403692\nMonoBehaviour:\n  m_ObjectHideFlags: 0\n  m_Enabled: 1\n  Prototype:\n    MaxHealth: 500\n    Speed: 12.5\n";
+        let props = extract_properties(content, "-6804560824838403692", 114, &HashMap::new());
+        let obj = props.as_object().unwrap();
+        assert!(obj.contains_key("Enabled"), "Should find Enabled property");
+        let proto = obj.get("Prototype").unwrap().as_object().unwrap();
+        assert_eq!(proto.get("MaxHealth").unwrap().as_str().unwrap(), "500");
+        assert_eq!(proto.get("Speed").unwrap().as_str().unwrap(), "12.5");
+    }
+
+    #[test]
+    fn test_extract_components_negative_file_id() {
+        let content = "\
+--- !u!1 &100\nGameObject:\n  m_Component:\n  - component: {fileID: -999}\n  m_Name: TestObj\n  m_IsActive: 1\n\
+--- !u!114 &-999\nMonoBehaviour:\n  m_Enabled: 1\n  m_Script: {fileID: 11500000, guid: aabbccdd11223344aabbccdd11223344, type: 3}\n  Prototype:\n    MaxHealth: 42\n";
+        let cache = HashMap::new();
+        let components = extract_components(content, "100", &cache);
+        assert_eq!(components.len(), 1, "Should find the component with negative fileID");
+        assert_eq!(components[0].file_id, "-999");
+    }
+
+    #[test]
+    fn test_parse_all_blocks_negative_file_id() {
+        let content = "\
+--- !u!1 &100\nGameObject:\n  m_Name: TestObj\n\
+--- !u!114 &-6804560824838403692\nMonoBehaviour:\n  m_Enabled: 1\n";
+        let blocks = crate::scanner::parser::UnityYamlParser::parse_all_blocks(content);
+        assert_eq!(blocks.len(), 2);
+        let neg_block = blocks.iter().find(|(_, id, _)| id == "-6804560824838403692");
+        assert!(neg_block.is_some(), "Should find block with negative fileID");
+        let (class_id, _, _) = neg_block.unwrap();
+        assert_eq!(*class_id, 114);
     }
 }

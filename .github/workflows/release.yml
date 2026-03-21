@@ -210,6 +210,9 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
       - name: Wait for npm propagation
         shell: bash
         run: sleep 30

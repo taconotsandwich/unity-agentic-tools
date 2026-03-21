@@ -280,7 +280,9 @@ impl Scanner {
         self.ensure_guid_resolver(&options.file);
 
         // Find target file_id
-        let target_file_id = if identifier.chars().all(|c| c.is_ascii_digit()) {
+        let is_file_id = identifier.chars().all(|c| c.is_ascii_digit())
+            || (identifier.starts_with('-') && identifier.len() > 1 && identifier[1..].chars().all(|c| c.is_ascii_digit()));
+        let target_file_id = if is_file_id {
             identifier.clone()
         } else {
             let matches = self.find_by_name(options.file.clone(), identifier.clone(), false);
@@ -307,7 +309,7 @@ impl Scanner {
             Some(obj) => obj,
             None => {
                 // Check if the ID matches any block (could be a non-GO or stripped GO)
-                let block_pattern = format!("--- !u!(\\d+) &{}(?: stripped)?", target_file_id);
+                let block_pattern = format!("--- !u!(\\d+) &{}(?: stripped)?", regex::escape(&target_file_id));
                 if let Ok(re) = regex::Regex::new(&block_pattern) {
                     if let Some(caps) = re.captures(&content) {
                         let class_id: u32 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
@@ -465,7 +467,7 @@ impl Scanner {
             transform_file_id: Option<String>,
             parent_transform_id: Option<String>,
         }
-        let comp_re = regex::Regex::new(r"component:\s*\{fileID:\s*(\d+)\}").unwrap();
+        let comp_re = regex::Regex::new(r"component:\s*\{fileID:\s*(-?\d+)\}").unwrap();
         let hierarchy_infos: Vec<GoHierarchyInfo> = gameobjects
             .iter()
             .enumerate()

@@ -183,7 +183,7 @@ export function removeBlocks(content: string, fileIdsToRemove: Set<number>): str
       continue;
     }
 
-    const idMatch = blocks[i].match(/^--- !u!\d+ &(\d+)/);
+    const idMatch = blocks[i].match(/^--- !u!\d+ &(-?\d+)/);
     if (idMatch) {
       const blockId = parseInt(idMatch[1], 10);
       if (fileIdsToRemove.has(blockId)) {
@@ -211,7 +211,7 @@ export function removeBlocksByStr(content: string, fileIdsToRemove: Set<string>)
       continue;
     }
 
-    const idMatch = blocks[i].match(/^--- !u!\d+ &(\d+)/);
+    const idMatch = blocks[i].match(/^--- !u!\d+ &(-?\d+)/);
     if (idMatch && fileIdsToRemove.has(idMatch[1])) {
       continue;
     }
@@ -248,7 +248,7 @@ export function collectHierarchy(content: string, transformFileId: number): Set<
   if (!childrenSection) return result;
 
   const childIds: number[] = [];
-  const childIdMatches = childrenSection[0].matchAll(/\{fileID:\s*(\d+)\}/g);
+  const childIdMatches = childrenSection[0].matchAll(/\{fileID:\s*(-?\d+)\}/g);
   for (const m of childIdMatches) {
     const childId = parseInt(m[1], 10);
     if (childId !== 0) childIds.push(childId);
@@ -262,7 +262,7 @@ export function collectHierarchy(content: string, transformFileId: number): Set<
     const childTransformPattern = new RegExp(`^--- !u!4 &${childTransformId}\\b`);
     for (const block of blocks) {
       if (childTransformPattern.test(block)) {
-        const goMatch = block.match(/m_GameObject:\s*\{fileID:\s*(\d+)\}/);
+        const goMatch = block.match(/m_GameObject:\s*\{fileID:\s*(-?\d+)\}/);
         if (goMatch) {
           const goId = parseInt(goMatch[1], 10);
           result.add(goId);
@@ -271,7 +271,7 @@ export function collectHierarchy(content: string, transformFileId: number): Set<
           const goPattern = new RegExp(`^--- !u!1 &${goId}\\b`);
           for (const goBlock of blocks) {
             if (goPattern.test(goBlock)) {
-              const compMatches = goBlock.matchAll(/component:\s*\{fileID:\s*(\d+)\}/g);
+              const compMatches = goBlock.matchAll(/component:\s*\{fileID:\s*(-?\d+)\}/g);
               for (const cm of compMatches) {
                 result.add(parseInt(cm[1], 10));
               }
@@ -301,13 +301,13 @@ export function remapFileIds(blockText: string, idMap: Map<number, number>): str
   let result = blockText;
 
   // Remap header: --- !u!<cls> &<old> -> &<new>
-  result = result.replace(/^(--- !u!\d+ &)(\d+)/, (match, prefix, oldId) => {
+  result = result.replace(/^(--- !u!\d+ &)(-?\d+)/, (match, prefix, oldId) => {
     const id = parseInt(oldId, 10);
     return idMap.has(id) ? `${prefix}${idMap.get(id)}` : match;
   });
 
   // Remap all fileID references (skip fileID: 0)
-  result = result.replace(/(\{fileID:\s*)(\d+)(\})/g, (match, prefix, oldId, suffix) => {
+  result = result.replace(/(\{fileID:\s*)(-?\d+)(\})/g, (match, prefix, oldId, suffix) => {
     const id = parseInt(oldId, 10);
     if (id === 0) return match;
     return idMap.has(id) ? `${prefix}${idMap.get(id)}${suffix}` : match;
@@ -328,7 +328,7 @@ export function findAllGameObjectIdsByName(content: string, objectName: string):
 
   for (const block of blocks) {
     if (block.startsWith('--- !u!1 ') && namePattern.test(block)) {
-      const idMatch = block.match(/^--- !u!1 &(\d+)/);
+      const idMatch = block.match(/^--- !u!1 &(-?\d+)/);
       if (idMatch) {
         ids.push(parseInt(idMatch[1], 10));
       }
@@ -349,7 +349,7 @@ export function findAllTransformIdsByName(content: string, objectName: string): 
 
   for (const block of blocks) {
     if (block.startsWith('--- !u!1 ') && namePattern.test(block)) {
-      const componentMatch = block.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(\d+)\}/);
+      const componentMatch = block.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(-?\d+)\}/);
       if (componentMatch) {
         ids.push(parseInt(componentMatch[1], 10));
       }
@@ -364,8 +364,8 @@ export function findAllTransformIdsByName(content: string, objectName: string): 
  * Returns the single ID or an error string.
  */
 export function requireUniqueGameObject(content: string, objectName: string): { id: number } | { error: string } {
-  // Auto-detect numeric fileID
-  if (/^\d+$/.test(objectName)) {
+  // Auto-detect numeric fileID (including negative IDs from 64-bit unsigned overflow)
+  if (/^-?\d+$/.test(objectName)) {
     const fileId = parseInt(objectName, 10);
     const found = findBlockByFileId(content, fileId);
     if (!found) {

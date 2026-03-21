@@ -68,7 +68,7 @@ function parse_material_yaml(content: string): ParsedMaterial {
     };
 
     // Inline reference pattern: {fileID: 123, guid: abc...(32 hex chars), type: 3}
-    const inline_ref_re = /\{[^}]*fileID:\s*(\d+)[^}]*guid:\s*([a-f0-9]{32})[^}]*\}/;
+    const inline_ref_re = /\{[^}]*fileID:\s*(-?\d+)[^}]*guid:\s*([a-f0-9]{32})[^}]*\}/;
     const color_re = /\{[^}]*r:\s*([\d.e+-]+)[^}]*g:\s*([\d.e+-]+)[^}]*b:\s*([\d.e+-]+)[^}]*a:\s*([\d.e+-]+)[^}]*\}/;
     const scale_offset_re = /\{[^}]*x:\s*([\d.e+-]+)[^}]*y:\s*([\d.e+-]+)[^}]*\}/;
 
@@ -843,7 +843,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
             // Check for duplicate names before inspect
             let resolved_id = object_id;
-            if (!/^\d+$/.test(object_id)) {
+            if (!/^-?\d+$/.test(object_id)) {
                 const matches = getScanner().find_by_name(file, object_id, false);
                 if (matches.length > 1) {
                     const ids = matches.map(m => m.fileId).join(', ');
@@ -862,7 +862,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             });
 
             if (!result) {
-                const label = /^\d+$/.test(object_id) ? 'fileID' : 'name';
+                const label = /^-?\d+$/.test(object_id) ? 'fileID' : 'name';
                 console.log(JSON.stringify({ error: `GameObject with ${label} "${object_id}" not found` }, null, 2));
                 process.exit(1);
             }
@@ -1215,7 +1215,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 const doc = UnityDocument.from_file(file);
                 let block = null;
 
-                if (/^\d+$/.test(prefab_instance)) {
+                if (/^-?\d+$/.test(prefab_instance)) {
                     block = doc.find_by_file_id(prefab_instance);
                     if (block && block.class_id !== 1001) {
                         console.log(JSON.stringify({ error: `fileID ${prefab_instance} is not a PrefabInstance (class ${block.class_id})` }, null, 2));
@@ -1241,10 +1241,10 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 let i = 0;
                 while (i < lines.length) {
                     if (lines[i].trim().startsWith('- target:')) {
-                        const target_match = lines[i].match(/\{fileID:\s*(\d+)/);
+                        const target_match = lines[i].match(/\{fileID:\s*(-?\d+)/);
                         const property_match = i + 1 < lines.length ? lines[i + 1].match(/propertyPath:\s*(.+)/) : null;
                         const value_match = i + 2 < lines.length ? lines[i + 2].match(/value:\s*(.*)/) : null;
-                        const obj_ref_match = i + 3 < lines.length ? lines[i + 3].match(/objectReference:\s*\{fileID:\s*(\d+)/) : null;
+                        const obj_ref_match = i + 3 < lines.length ? lines[i + 3].match(/objectReference:\s*\{fileID:\s*(-?\d+)/) : null;
 
                         if (target_match && property_match) {
                             modifications.push({

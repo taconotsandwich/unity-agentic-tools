@@ -158,7 +158,7 @@ export class UnityDocument {
         const transform_ids: string[] = [];
 
         for (const go of game_objects) {
-            const comp_matches = go.raw.matchAll(/component:[ \t]*\{fileID:[ \t]*(\d+)\}/g);
+            const comp_matches = go.raw.matchAll(/component:[ \t]*\{fileID:[ \t]*(-?\d+)\}/g);
             for (const cm of comp_matches) {
                 const comp_block = this.find_by_file_id(cm[1]);
                 if (comp_block && (comp_block.class_id === 4 || comp_block.class_id === 224)) {
@@ -175,11 +175,11 @@ export class UnityDocument {
 
     /**
      * Require a unique GameObject match by name or fileID.
-     * If name_or_id is all digits, looks up by fileID.
+     * If name_or_id is all digits (optionally negative), looks up by fileID.
      * Otherwise, finds by name.
      */
     require_unique_game_object(name_or_id: string): UnityBlock | { error: string } {
-        if (/^\d+$/.test(name_or_id)) {
+        if (/^-?\d+$/.test(name_or_id)) {
             const block = this.find_by_file_id(name_or_id);
             if (!block) {
                 return { error: `GameObject with fileID ${name_or_id} not found` };
@@ -206,7 +206,7 @@ export class UnityDocument {
      * Returns the Transform block (not the GO).
      */
     require_unique_transform(name_or_id: string): UnityBlock | { error: string } {
-        if (/^\d+$/.test(name_or_id)) {
+        if (/^-?\d+$/.test(name_or_id)) {
             // Could be a Transform fileID directly or a GO fileID
             const block = this.find_by_file_id(name_or_id);
             if (!block) {
@@ -220,7 +220,7 @@ export class UnityDocument {
             }
             if (block.class_id === 1) {
                 // It's a GO, find its Transform/RectTransform among components
-                const comp_matches = block.raw.matchAll(/component:[ \t]*\{fileID:[ \t]*(\d+)\}/g);
+                const comp_matches = block.raw.matchAll(/component:[ \t]*\{fileID:[ \t]*(-?\d+)\}/g);
                 for (const cm of comp_matches) {
                     const comp_block = this.find_by_file_id(cm[1]);
                     if (comp_block && (comp_block.class_id === 4 || comp_block.class_id === 224)) {
@@ -255,7 +255,7 @@ export class UnityDocument {
         // Look for a Transform with m_Father: {fileID: 0}
         for (const block of this._blocks) {
             if (block.class_id === 4 && !block.is_stripped && /m_Father:\s*\{fileID:\s*0\}/.test(block.raw)) {
-                const go_match = block.raw.match(/m_GameObject:\s*\{fileID:\s*(\d+)\}/);
+                const go_match = block.raw.match(/m_GameObject:\s*\{fileID:\s*(-?\d+)\}/);
                 if (go_match) {
                     const go_block = this.find_by_file_id(go_match[1]);
                     if (go_block) {
@@ -518,7 +518,7 @@ export class UnityDocument {
         // Multiline m_Children - append new entry
         if (raw.includes('m_Children:') && !raw.includes(`fileID: ${child_id}`)) {
             raw = raw.replace(
-                /(m_Children:\s*\n(?:\s*-\s*\{fileID:\s*\d+\}\s*\n)*)/,
+                /(m_Children:\s*\n(?:\s*-\s*\{fileID:\s*-?\d+\}\s*\n)*)/,
                 `$1  - {fileID: ${child_id}}\n`
             );
             parent.replace_raw(raw);
@@ -572,7 +572,7 @@ export class UnityDocument {
         if (!children_section) return;
 
         const child_ids: string[] = [];
-        const child_matches = children_section[0].matchAll(/\{fileID:\s*(\d+)\}/g);
+        const child_matches = children_section[0].matchAll(/\{fileID:\s*(-?\d+)\}/g);
         for (const m of child_matches) {
             if (m[1] !== '0') child_ids.push(m[1]);
         }
@@ -583,7 +583,7 @@ export class UnityDocument {
             // Find child Transform to get its GameObject
             const child_transform = this.find_by_file_id(child_transform_id);
             if (child_transform) {
-                const go_match = child_transform.raw.match(/m_GameObject:\s*\{fileID:\s*(\d+)\}/);
+                const go_match = child_transform.raw.match(/m_GameObject:\s*\{fileID:\s*(-?\d+)\}/);
                 if (go_match) {
                     const go_id = go_match[1];
                     result.add(go_id);
@@ -591,7 +591,7 @@ export class UnityDocument {
                     // Find GO block and collect all component fileIDs
                     const go_block = this.find_by_file_id(go_id);
                     if (go_block) {
-                        const comp_matches = go_block.raw.matchAll(/component:\s*\{fileID:\s*(\d+)\}/g);
+                        const comp_matches = go_block.raw.matchAll(/component:\s*\{fileID:\s*(-?\d+)\}/g);
                         for (const cm of comp_matches) {
                             result.add(cm[1]);
                         }
@@ -625,7 +625,7 @@ export class UnityDocument {
 
         const children_match = parent.raw.match(/m_Children:[\s\S]*?(?=\s*m_Father:)/);
         if (children_match) {
-            const entries = children_match[0].match(/\{fileID:\s*\d+\}/g);
+            const entries = children_match[0].match(/\{fileID:\s*-?\d+\}/g);
             return entries ? entries.length : 0;
         }
         return 0;
@@ -674,7 +674,7 @@ export class UnityDocument {
             const transform = this.find_by_file_id(transform_id);
             if (!transform) continue;
 
-            const go_match = transform.raw.match(/m_GameObject:\s*\{fileID:\s*(\d+)\}/);
+            const go_match = transform.raw.match(/m_GameObject:\s*\{fileID:\s*(-?\d+)\}/);
             if (!go_match) continue;
             const go_id = go_match[1];
             const go = this.find_by_file_id(go_id);
@@ -682,7 +682,7 @@ export class UnityDocument {
 
             // Collect all component IDs from the GO
             const comp_ids: string[] = [];
-            const comp_matches = go.raw.matchAll(/component:\s*\{fileID:\s*(\d+)\}/g);
+            const comp_matches = go.raw.matchAll(/component:\s*\{fileID:\s*(-?\d+)\}/g);
             for (const m of comp_matches) {
                 comp_ids.push(m[1]);
             }
