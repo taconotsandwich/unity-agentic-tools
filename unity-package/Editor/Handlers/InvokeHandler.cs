@@ -107,27 +107,48 @@ namespace UnityAgenticTools.Server
             if (string.IsNullOrEmpty(json)) return new string[0];
 
             var result = new List<string>();
-            bool inStr = false;
-            var current = new StringBuilder();
-            for (int i = 0; i < json.Length; i++)
+            int i = 0;
+            while (i < json.Length)
             {
-                char c = json[i];
-                if (c == '"' && (i == 0 || json[i - 1] != '\\'))
+                // skip whitespace and commas between elements
+                while (i < json.Length && (json[i] == ' ' || json[i] == '\t' || json[i] == ',')) i++;
+                if (i >= json.Length) break;
+
+                if (json[i] == '"')
                 {
-                    inStr = !inStr;
-                    continue;
+                    // quoted string element with proper escape handling
+                    i++;
+                    var sb = new StringBuilder();
+                    while (i < json.Length)
+                    {
+                        char c = json[i++];
+                        if (c == '"') break;
+                        if (c == '\\' && i < json.Length)
+                        {
+                            char esc = json[i++];
+                            switch (esc)
+                            {
+                                case '"': sb.Append('"'); break;
+                                case '\\': sb.Append('\\'); break;
+                                case '/': sb.Append('/'); break;
+                                case 'n': sb.Append('\n'); break;
+                                case 'r': sb.Append('\r'); break;
+                                case 't': sb.Append('\t'); break;
+                                default: sb.Append(esc); break;
+                            }
+                        }
+                        else sb.Append(c);
+                    }
+                    result.Add(sb.ToString());
                 }
-                if (c == ',' && !inStr)
+                else
                 {
-                    result.Add(current.ToString().Trim());
-                    current.Clear();
-                    continue;
+                    // unquoted value (number, bool, null)
+                    int start = i;
+                    while (i < json.Length && json[i] != ',') i++;
+                    result.Add(json.Substring(start, i - start).Trim());
                 }
-                if (inStr || (c != ' ' && c != '\t'))
-                    current.Append(c);
             }
-            if (current.Length > 0)
-                result.Add(current.ToString().Trim());
 
             return result.ToArray();
         }

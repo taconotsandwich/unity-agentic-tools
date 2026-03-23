@@ -869,5 +869,95 @@ describe('UnityBlock', () => {
             block.set_property('DirectNested.RawValue', '300');
             expect(block.get_property('DirectNested.RawValue')).toBe('300');
         });
+
+        it('should handle values containing $ metacharacters', () => {
+            const raw = [
+                '--- !u!114 &905\n',
+                'MonoBehaviour:\n',
+                '  m_Name: OldName\n',
+                '  m_Tag: Untagged\n',
+            ].join('');
+            const block = new UnityBlock(raw);
+
+            block.set_property('m_Name', '$1$2$&foo');
+            expect(block.get_property('m_Name')).toBe('$1$2$&foo');
+        });
+
+        it('should quote values containing YAML-special characters', () => {
+            const raw = [
+                '--- !u!114 &907\n',
+                'MonoBehaviour:\n',
+                '  m_Name: OldName\n',
+                '  m_Tag: Untagged\n',
+            ].join('');
+            const block = new UnityBlock(raw);
+
+            block.set_property('m_Name', 'Hello: World');
+            expect(block.raw).toContain("m_Name: 'Hello: World'");
+
+            block.set_property('m_Name', 'value # comment');
+            expect(block.raw).toContain("m_Name: 'value # comment'");
+
+            block.set_property('m_Name', '{not a ref}');
+            expect(block.raw).toContain("m_Name: '{not a ref}'");
+        });
+
+        it('should not quote values without special characters', () => {
+            const raw = [
+                '--- !u!114 &908\n',
+                'MonoBehaviour:\n',
+                '  m_Name: OldName\n',
+            ].join('');
+            const block = new UnityBlock(raw);
+
+            block.set_property('m_Name', 'SimpleName');
+            expect(block.raw).toContain('m_Name: SimpleName');
+            expect(block.raw).not.toContain("'SimpleName'");
+        });
+
+        it('should handle $ metacharacters in dotted inline paths', () => {
+            const raw = [
+                '--- !u!4 &906\n',
+                'Transform:\n',
+                '  m_LocalPosition: {x: 0, y: 0, z: 0}\n',
+            ].join('');
+            const block = new UnityBlock(raw);
+
+            block.set_property('m_LocalPosition.x', '$100');
+            expect(block.get_property('m_LocalPosition.x')).toBe('$100');
+        });
+
+        it('should insert missing simple property after m_EditorClassIdentifier', () => {
+            const raw = [
+                '--- !u!114 &909\n',
+                'MonoBehaviour:\n',
+                '  m_Script: {fileID: 11500000}\n',
+                '  m_Name: Test\n',
+                '  m_EditorClassIdentifier: \n',
+            ].join('');
+            const block = new UnityBlock(raw);
+
+            const modified = block.set_property('myNewField', '42');
+            expect(modified).toBe(true);
+            expect(block.raw).toContain('myNewField: 42');
+            // Should appear after m_EditorClassIdentifier
+            const eciIdx = block.raw.indexOf('m_EditorClassIdentifier');
+            const newFieldIdx = block.raw.indexOf('myNewField');
+            expect(newFieldIdx).toBeGreaterThan(eciIdx);
+        });
+
+        it('should insert missing property at block end when no m_EditorClassIdentifier', () => {
+            const raw = [
+                '--- !u!114 &910\n',
+                'MonoBehaviour:\n',
+                '  m_Script: {fileID: 11500000}\n',
+                '  m_Name: Test\n',
+            ].join('');
+            const block = new UnityBlock(raw);
+
+            const modified = block.set_property('myNewField', 'hello');
+            expect(modified).toBe(true);
+            expect(block.raw).toContain('myNewField: hello');
+        });
     });
 });

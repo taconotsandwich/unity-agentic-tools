@@ -725,6 +725,8 @@ export interface CallEditorOptions {
   params?: Record<string, unknown>;
   timeout?: number;
   port?: number;
+  /** Number of retry attempts for transient connection errors (default: 2) */
+  retries?: number;
 }
 
 export interface StreamEditorOptions extends CallEditorOptions {

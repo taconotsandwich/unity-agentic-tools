@@ -17,6 +17,7 @@ let nativeExtractCsharpTypes: ((path: string) => Array<{ name: string; kind: str
 let nativeBuildTypeRegistry: ((projectRoot: string, includePackages?: boolean | null, includeDlls?: boolean | null) => Array<{ name: string; kind: string; namespace: string | null; filePath: string; guid: string | null }>) | null = null;
 let nativeExtractDllTypes: ((path: string) => Array<{ name: string; kind: string; namespace: string | null; filePath: string; guid: string | null }>) | null = null;
 let nativeBuildPackageGuidCache: ((projectRoot: string) => unknown) | null = null;
+let nativeBuildLocalPackageGuidCache: ((projectRoot: string) => unknown) | null = null;
 let nativeExtractSerializedFields: ((path: string) => Array<{ name: string; kind: string; namespace: string | null; baseClass: string | null; fields: Array<{ name: string; typeName: string; hasSerializeField: boolean; hasSerializeReference: boolean; isPublic: boolean; ownerType: string }> }>) | null = null;
 let nativeExtractDllFields: ((path: string) => Array<{ name: string; kind: string; namespace: string | null; baseClass: string | null; fields: Array<{ name: string; typeName: string; hasSerializeField: boolean; hasSerializeReference: boolean; isPublic: boolean; ownerType: string }> }>) | null = null;
 
@@ -47,6 +48,7 @@ try {
   nativeBuildTypeRegistry = (rustModule.buildTypeRegistry as typeof nativeBuildTypeRegistry) || null;
   nativeExtractDllTypes = (rustModule.extractDllTypes as typeof nativeExtractDllTypes) || null;
   nativeBuildPackageGuidCache = (rustModule.buildPackageGuidCache as typeof nativeBuildPackageGuidCache) || null;
+  nativeBuildLocalPackageGuidCache = (rustModule.buildLocalPackageGuidCache as typeof nativeBuildLocalPackageGuidCache) || null;
   nativeExtractSerializedFields = (rustModule.extractSerializedFields as typeof nativeExtractSerializedFields) || null;
   nativeExtractDllFields = (rustModule.extractDllFields as typeof nativeExtractDllFields) || null;
 } catch (err) {
@@ -209,6 +211,13 @@ export function getNativeExtractDllTypes(): typeof nativeExtractDllTypes {
  */
 export function getNativeBuildPackageGuidCache(): typeof nativeBuildPackageGuidCache {
   return nativeBuildPackageGuidCache;
+}
+
+/**
+ * Get native build_local_package_guid_cache if available, or null
+ */
+export function getNativeBuildLocalPackageGuidCache(): typeof nativeBuildLocalPackageGuidCache {
+  return nativeBuildLocalPackageGuidCache;
 }
 
 /**

@@ -192,6 +192,14 @@ export function generate_field_yaml(
     const lines: string[] = [];
 
     for (const field of fields) {
+        // [SerializeReference] fields serialize as managed references (rid: 0 = null ref).
+        // Full polymorphic authoring is not supported; emit null managed reference.
+        if (field.hasSerializeReference) {
+            lines.push(`${indent}${field.name}:`);
+            lines.push(`${indent}  rid: 0`);
+            continue;
+        }
+
         const default_value = yaml_default_for_type(field.typeName, version);
         if (default_value === null) {
             // Nullable type or version-gated type unavailable in this Unity version -- skip

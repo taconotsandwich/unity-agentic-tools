@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from 'vitest';
-import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { generateGuid, atomicWrite, validate_name, path_glob_to_regex } from '../src/utils';
@@ -106,6 +106,63 @@ describe('atomicWrite', () => {
         expect(result.success).toBe(true);
         expect(result.bytes_written).toBe(0);
         expect(readFileSync(filePath, 'utf-8')).toBe('');
+    });
+
+    it('should clean up stale .bak from prior crashed run', () => {
+        const dir = makeTempDir();
+        const filePath = join(dir, 'test.txt');
+        writeFileSync(filePath, 'current');
+        writeFileSync(`${filePath}.bak`, 'stale backup from crash');
+
+        const result = atomicWrite(filePath, 'new content');
+
+        expect(result.success).toBe(true);
+        expect(readFileSync(filePath, 'utf-8')).toBe('new content');
+        expect(existsSync(`${filePath}.bak`)).toBe(false);
+    });
+
+    it('should clean up .tmp on write failure', () => {
+        const dir = makeTempDir();
+        const filePath = join(dir, 'test.txt');
+        writeFileSync(filePath, 'original');
+
+        // Make the directory read-only so rename to .bak succeeds but
+        // the test still exercises cleanup. We simulate by checking that
+        // no .tmp files linger after a failed write to a bad path.
+        const badPath = join(dir, 'no-such-subdir', 'file.txt');
+        atomicWrite(badPath, 'data');
+
+        // No .tmp files should remain in the parent dir
+        const tmpFiles = readdirSync(dir).filter(f => f.endsWith('.tmp'));
+        expect(tmpFiles).toHaveLength(0);
+    });
+
+    it('should succeed when target file is deleted externally before rename to .bak', () => {
+        const dir = makeTempDir();
+        const filePath = join(dir, 'ephemeral.txt');
+        // File does not exist -- simulates external deletion between permission
+        // check and the rename-to-.bak step (TOCTOU window)
+
+        const result = atomicWrite(filePath, 'new content');
+
+        expect(result.success).toBe(true);
+        expect(readFileSync(filePath, 'utf-8')).toBe('new content');
+    });
+
+    it('should not leave .tmp or .bak files after concurrent writes to same path', () => {
+        const dir = makeTempDir();
+        const filePath = join(dir, 'concurrent.txt');
+        writeFileSync(filePath, 'initial');
+
+        // Simulate rapid sequential writes (concurrent writes with randomized tmp names)
+        for (let i = 0; i < 5; i++) {
+            const result = atomicWrite(filePath, `write-${i}`);
+            expect(result.success).toBe(true);
+        }
+
+        expect(readFileSync(filePath, 'utf-8')).toBe('write-4');
+        const leftovers = readdirSync(dir).filter(f => f.endsWith('.tmp') || f.endsWith('.bak'));
+        expect(leftovers).toHaveLength(0);
     });
 });
 

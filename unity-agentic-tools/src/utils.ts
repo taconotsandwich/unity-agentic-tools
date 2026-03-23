@@ -30,6 +30,8 @@ export interface AtomicWriteResult {
 
 /**
  * Atomic write: write to temp file, then rename to prevent partial writes.
+ * Uses randomized temp file names to prevent collisions from concurrent writes.
+ * Handles ENOENT gracefully for TOCTOU races (e.g., Unity AssetDatabase deleting files).
  */
 export function atomicWrite(filePath: string, content: string): AtomicWriteResult {
     // Check file write permission if the file already exists
@@ -45,23 +47,37 @@ export function atomicWrite(filePath: string, content: string): AtomicWriteResul
         }
     }
 
-    const tmpPath = `${filePath}.tmp`;
+    // Randomized temp name to prevent collisions from concurrent writes
+    const suffix = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+    const tmpPath = `${filePath}.${suffix}.tmp`;
+    const bakPath = `${filePath}.bak`;
+    let bakCreated = false;
 
     try {
+        // Clean up stale .bak from prior crashed runs
+        try { unlinkSync(bakPath); } catch { /* no stale .bak, fine */ }
+
         writeFileSync(tmpPath, content, 'utf-8');
 
-        if (existsSync(filePath)) {
-            renameSync(filePath, `${filePath}.bak`);
+        // Move original to .bak -- if it vanished (TOCTOU race), that's OK
+        try {
+            renameSync(filePath, bakPath);
+            bakCreated = true;
+        } catch (err: unknown) {
+            if (is_enoent(err)) {
+                // File was deleted externally between our check and rename -- not an error
+                bakCreated = false;
+            } else {
+                throw err;
+            }
         }
 
+        // Promote temp file to final path
         renameSync(tmpPath, filePath);
 
-        try {
-            if (existsSync(`${filePath}.bak`)) {
-                unlinkSync(`${filePath}.bak`);
-            }
-        } catch {
-            // Ignore cleanup errors
+        // Clean up backup
+        if (bakCreated) {
+            try { unlinkSync(bakPath); } catch { /* ignore cleanup errors */ }
         }
 
         return {
@@ -70,13 +86,17 @@ export function atomicWrite(filePath: string, content: string): AtomicWriteResul
             bytes_written: Buffer.byteLength(content, 'utf-8')
         };
     } catch (error) {
-        if (existsSync(`${filePath}.bak`)) {
+        // Rollback: restore backup if we created one
+        if (bakCreated) {
             try {
-                renameSync(`${filePath}.bak`, filePath);
+                renameSync(bakPath, filePath);
             } catch (restoreError) {
                 console.error('Failed to restore backup:', restoreError);
             }
         }
+
+        // Always clean up temp file
+        try { unlinkSync(tmpPath); } catch { /* may not exist */ }
 
         return {
             success: false,
@@ -84,6 +104,10 @@ export function atomicWrite(filePath: string, content: string): AtomicWriteResul
             error: error instanceof Error ? error.message : String(error)
         };
     }
+}
+
+function is_enoent(err: unknown): boolean {
+    return err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
 /**

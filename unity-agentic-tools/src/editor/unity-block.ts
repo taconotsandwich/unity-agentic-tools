@@ -40,6 +40,24 @@ function escape_regex(str: string): string {
 }
 
 /**
+ * Wrap a YAML value in single quotes if it contains characters that would
+ * break Unity YAML parsing. Single quotes only need `''` to escape `'`.
+ */
+function yaml_quote_if_needed(value: string): string {
+    if (value === '') return value;
+    // Values that need quoting: contains colon-space, hash, starts with
+    // YAML indicators ({, [, *, &, !, |, >, ', "), or leading/trailing whitespace
+    if (
+        value.includes(': ') || value.includes(' #') ||
+        /^[#\{\[*&!|>'"]/.test(value) ||
+        value !== value.trim()
+    ) {
+        return `'${value.replace(/'/g, "''")}'`;
+    }
+    return value;
+}
+
+/**
  * A mutable data class wrapping a single `--- !u!N &ID` Unity YAML block.
  *
  * Provides property access (get/set), format detection and preservation,
@@ -179,11 +197,16 @@ export class UnityBlock {
                 'm'
             );
             if (prop_pattern.test(this._raw)) {
-                const replacement_value = effective_ref ?? value;
+                const replacement_value = effective_ref ?? yaml_quote_if_needed(value);
                 this._raw = this._raw.replace(
                     prop_pattern,
-                    `$1${replacement_value}`
+                    (_match: string, prefix: string) => prefix + replacement_value
                 );
+            } else if (this._header.class_id === 114) {
+                // Field not present in YAML — insert it (MonoBehaviour only,
+                // since Unity omits default-valued fields from serialization)
+                const insert_value = effective_ref ?? yaml_quote_if_needed(value);
+                this._insert_property(path, insert_value);
             }
             return this._check_dirty(old_raw);
         }
@@ -209,11 +232,11 @@ export class UnityBlock {
                 if (field_pattern.test(fields)) {
                     const updated_fields = fields.replace(
                         field_pattern,
-                        `$1${value}`
+                        (_m: string, prefix: string) => prefix + value
                     );
                     this._raw = this._raw.replace(
                         inline_pattern,
-                        `$1${updated_fields}$3`
+                        (_m: string, g1: string, _g2: string, g3: string) => g1 + updated_fields + g3
                     );
                     inline_applied = true;
                 }
@@ -254,7 +277,7 @@ export class UnityBlock {
                         const old_line = lines[index];
                         const new_line = old_line.replace(
                             /-\s*.*/,
-                            `- ${ref_value}`
+                            () => `- ${ref_value}`
                         );
                         this._raw = this._raw.replace(old_line, new_line);
                     }
@@ -265,6 +288,30 @@ export class UnityBlock {
         }
 
         return false;
+    }
+
+    /**
+     * Insert a new property line when the property doesn't already exist.
+     * Places it after m_EditorClassIdentifier: if present, otherwise at block end.
+     * Only supports simple (non-dotted, non-array) paths.
+     */
+    private _insert_property(path: string, value: string): void {
+        const indented_line = `  ${path}: ${value}`;
+
+        // Insert after m_EditorClassIdentifier: line if present
+        const eci_pattern = /^([ \t]*m_EditorClassIdentifier:[ \t]*[^\n]*)/m;
+        const eci_match = this._raw.match(eci_pattern);
+        if (eci_match && eci_match.index !== undefined) {
+            const insert_after = eci_match.index + eci_match[0].length;
+            this._raw =
+                this._raw.slice(0, insert_after) +
+                '\n' + indented_line +
+                this._raw.slice(insert_after);
+            return;
+        }
+
+        // Append before final trailing newline
+        this._raw = this._raw.trimEnd() + '\n' + indented_line + '\n';
     }
 
     /**
@@ -385,7 +432,7 @@ export class UnityBlock {
             const element_indent = base_indent + '  ';
             this._raw = this._raw.replace(
                 empty_pattern,
-                `$1\n${element_indent}- ${value}`
+                (_m: string, g1: string) => `${g1}\n${element_indent}- ${value}`
             );
             return this._check_dirty(old_raw);
         }

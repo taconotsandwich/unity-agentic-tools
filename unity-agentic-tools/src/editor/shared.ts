@@ -438,10 +438,8 @@ export function applyModification(block: string, propertyPath: string, value: st
   if (!propertyPath.includes('.') && !propertyPath.includes('Array')) {
     const propPattern = new RegExp(`(^\\s*${propertyPath}:\\s*)(.*)$`, 'm');
     if (propPattern.test(block)) {
-      if (objectReference && objectReference !== '{fileID: 0}') {
-        return block.replace(propPattern, `$1${objectReference}`);
-      }
-      return block.replace(propPattern, `$1${value}`);
+      const replacement = (objectReference && objectReference !== '{fileID: 0}') ? objectReference : value;
+      return block.replace(propPattern, (_m: string, prefix: string) => prefix + replacement);
     }
     return block;
   }
@@ -458,8 +456,8 @@ export function applyModification(block: string, propertyPath: string, value: st
     if (inlineMatch) {
       const fields = inlineMatch[2];
       const fieldPattern = new RegExp(`(${subField}:\\s*)([^,}]+)`);
-      const updatedFields = fields.replace(fieldPattern, `$1${value}`);
-      return block.replace(inlinePattern, `$1${updatedFields}$3`);
+      const updatedFields = fields.replace(fieldPattern, (_m: string, prefix: string) => prefix + value);
+      return block.replace(inlinePattern, (_m: string, g1: string, _g2: string, g3: string) => g1 + updatedFields + g3);
     }
 
     // Fall back to block-style nested YAML
@@ -719,14 +717,51 @@ export function resolveScriptGuid(
           return true;
         });
 
-        if (matches.length === 1 && matches[0].guid) {
-          return { guid: matches[0].guid, path: matches[0].filePath };
+        if (matches.length === 1) {
+          if (matches[0].guid) {
+            return { guid: matches[0].guid, path: matches[0].filePath };
+          }
+          // GUID is null — try to resolve from adjacent .meta file
+          if (matches[0].filePath && projectPath) {
+            const fullFilePath = path.isAbsolute(matches[0].filePath)
+              ? matches[0].filePath
+              : path.join(projectPath, matches[0].filePath);
+            const metaPath = fullFilePath + '.meta';
+            if (existsSync(metaPath)) {
+              const guid = extractGuidFromMeta(metaPath);
+              if (guid) return { guid, path: matches[0].filePath };
+            }
+          }
         }
         if (matches.length > 1) {
           // Multiple matches: prefer the one with a GUID
           const withGuid = matches.filter(m => m.guid);
           if (withGuid.length === 1) {
             return { guid: withGuid[0].guid!, path: withGuid[0].filePath };
+          }
+          // Also try .meta fallback for entries with null GUIDs
+          const resolvedFromMeta = matches
+            .filter(m => !m.guid && m.filePath)
+            .map(m => {
+              const fullPath = path.isAbsolute(m.filePath)
+                ? m.filePath
+                : path.join(projectPath, m.filePath);
+              const guid = existsSync(fullPath + '.meta')
+                ? extractGuidFromMeta(fullPath + '.meta')
+                : null;
+              return guid ? { guid, path: m.filePath } : null;
+            })
+            .filter((r): r is { guid: string; path: string } => r !== null);
+          const allResolved = [...withGuid.map(m => ({ guid: m.guid!, path: m.filePath })), ...resolvedFromMeta];
+          if (allResolved.length === 1) {
+            return allResolved[0];
+          }
+          if (allResolved.length > 1) {
+            const paths = allResolved.map(m => m.path).join(', ');
+            throw new Error(
+              `Ambiguous type "${script}": found ${allResolved.length} matches (${paths}). ` +
+              `Use a qualified name (e.g., "Namespace.${targetName}") or provide the full path.`
+            );
           }
         }
       } catch {
@@ -735,21 +770,31 @@ export function resolveScriptGuid(
     }
 
     // Strategy 5: Package cache fallback
-    const packageCachePath = path.join(projectPath, '.unity-agentic', 'package-cache.json');
-    if (existsSync(packageCachePath)) {
-      try {
-        const packageCache = JSON.parse(readFileSync(packageCachePath, 'utf-8')) as Record<string, string>;
-        const scriptNameLower = script.toLowerCase().replace(/\.cs$/, '');
+    // Strategy 6: Local package cache fallback (Packages/ directory)
+    // Both support FQN input: "MyNamespace.MyClass" matches basename "MyClass"
+    const scriptNameLower = script.toLowerCase().replace(/\.cs$/, '');
+    const dotIdx = scriptNameLower.lastIndexOf('.');
+    const classNameOnly = dotIdx > 0 ? scriptNameLower.substring(dotIdx + 1) : null;
 
-        for (const [guid, assetPath] of Object.entries(packageCache)) {
+    const cachePaths = [
+      path.join(projectPath, '.unity-agentic', 'package-cache.json'),
+      path.join(projectPath, '.unity-agentic', 'local-package-cache.json'),
+    ];
+
+    for (const cachePath of cachePaths) {
+      if (!existsSync(cachePath)) continue;
+      try {
+        const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
+
+        for (const [guid, assetPath] of Object.entries(cache)) {
           if (!assetPath.endsWith('.cs')) continue;
           const fileName = path.basename(assetPath, '.cs').toLowerCase();
-          if (fileName === scriptNameLower) {
+          if (fileName === scriptNameLower || (classNameOnly && fileName === classNameOnly)) {
             return { guid, path: assetPath };
           }
         }
       } catch {
-        // Package cache read failed
+        // Cache read failed
       }
     }
   }

@@ -1,4 +1,4 @@
-import { writeFileSync, existsSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync } from 'fs';
 import * as path from 'path';
 import { load_guid_cache } from '../guid-cache';
 import type {
@@ -1148,6 +1148,107 @@ MonoImporter:
   };
 }
 
+const COMPONENT_BASE_CLASSES = new Set([
+  'MonoBehaviour', 'NetworkBehaviour', 'StateMachineBehaviour',
+]);
+
+/**
+ * Check if a base class eventually inherits from a valid component base.
+ * Uses the type registry and native field extraction to walk up the chain.
+ * Falls back to package caches and allows DLL-only types with known base names.
+ */
+function is_valid_component_base(
+  base_class: string,
+  project_path: string | undefined,
+  depth: number = 0
+): boolean {
+  if (depth > 5) return false;
+  if (COMPONENT_BASE_CLASSES.has(base_class)) return true;
+  if (!project_path) return false;
+
+  // Try type registry first
+  const registryPath = path.join(project_path, '.unity-agentic', 'type-registry.json');
+  if (existsSync(registryPath)) {
+    try {
+      const registry = JSON.parse(readFileSync(registryPath, 'utf-8')) as Array<{
+        name: string; kind: string; namespace: string | null; filePath: string; guid: string | null;
+      }>;
+
+      const match = registry.find(t => t.name === base_class && t.kind === 'class');
+      if (match?.filePath) {
+        const fullPath = path.isAbsolute(match.filePath)
+          ? match.filePath
+          : path.join(project_path, match.filePath);
+
+        if (fullPath.endsWith('.cs') && existsSync(fullPath)) {
+          const { getNativeExtractSerializedFields } = require('../scanner');
+          const extract = getNativeExtractSerializedFields();
+          if (extract) {
+            const typeInfos = extract(fullPath) as Array<{ name: string; baseClass: string | null }>;
+            const info = typeInfos?.find(t => t.name === base_class);
+            if (info?.baseClass) {
+              return is_valid_component_base(info.baseClass, project_path, depth + 1);
+            }
+          }
+        }
+
+        // Type exists in registry but from a DLL (no .cs file) -- check if it's
+        // plausibly a component base by name pattern (e.g., ends with "Behaviour")
+        if (!fullPath.endsWith('.cs') || !existsSync(fullPath)) {
+          if (match.kind === 'class') {
+            return is_likely_component_base_name(base_class);
+          }
+        }
+      }
+    } catch {
+      // Registry read failed, fall through to package cache
+    }
+  }
+
+  // Fall back: search package caches for .cs file of the base class
+  const cachePaths = [
+    path.join(project_path, '.unity-agentic', 'package-cache.json'),
+    path.join(project_path, '.unity-agentic', 'local-package-cache.json'),
+  ];
+
+  for (const cachePath of cachePaths) {
+    if (!existsSync(cachePath)) continue;
+    try {
+      const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
+      const baseClassLower = base_class.toLowerCase();
+
+      for (const [, assetPath] of Object.entries(cache)) {
+        if (!assetPath.endsWith('.cs')) continue;
+        if (path.basename(assetPath, '.cs').toLowerCase() !== baseClassLower) continue;
+
+        const fullPath = path.join(project_path, assetPath);
+        if (!existsSync(fullPath)) continue;
+
+        const { getNativeExtractSerializedFields } = require('../scanner');
+        const extract = getNativeExtractSerializedFields();
+        if (!extract) continue;
+
+        const typeInfos = extract(fullPath) as Array<{ name: string; baseClass: string | null }>;
+        const info = typeInfos?.find(t => t.name === base_class);
+        if (info?.baseClass) {
+          return is_valid_component_base(info.baseClass, project_path, depth + 1);
+        }
+      }
+    } catch {
+      // Cache read failed
+    }
+  }
+
+  return false;
+}
+
+/** Names that strongly suggest a valid component base class from a DLL-only package. */
+function is_likely_component_base_name(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower.endsWith('behaviour') || lower.endsWith('behavior') ||
+    lower.includes('monobehaviour') || lower.includes('networkbehaviour');
+}
+
 /**
  * Add a component to an existing GameObject.
  * Supports any Unity built-in component by name (e.g., "MeshRenderer", "Animator", "Canvas")
@@ -1224,7 +1325,16 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
     componentYAML = createGenericComponentYAML(componentName, classId, componentId, gameObjectId);
   } else {
     // Treat as custom script -- resolve with field extraction
-    const resolved = resolve_script_with_fields(component_type, project_path);
+    let resolved: ReturnType<typeof resolve_script_with_fields>;
+    try {
+      resolved = resolve_script_with_fields(component_type, project_path);
+    } catch (e) {
+      return {
+        success: false,
+        file_path,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
     if (!resolved) {
       const hints: string[] = [];
       if (project_path) {
@@ -1253,11 +1363,12 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
         error: `"${component_type}" is ${resolved.kind === 'enum' ? 'an enum' : 'an interface'}, not a MonoBehaviour. Cannot add as a component.`
       };
     }
-    if (resolved.base_class && !['MonoBehaviour', 'NetworkBehaviour', 'StateMachineBehaviour'].includes(resolved.base_class)) {
+    if (resolved.base_class && !COMPONENT_BASE_CLASSES.has(resolved.base_class) &&
+        !is_valid_component_base(resolved.base_class, project_path)) {
       return {
         success: false,
         file_path,
-        error: `"${component_type}" extends ${resolved.base_class}, not MonoBehaviour. Cannot add as a component.`
+        error: `"${component_type}" extends ${resolved.base_class}, which does not inherit from MonoBehaviour. Cannot add as a component. If this is incorrect, ensure the type registry is up to date ("setup" command).`
       };
     }
 

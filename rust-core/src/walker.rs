@@ -431,6 +431,62 @@ pub fn build_package_guid_cache(project_root: String) -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
+/// Build a GUID cache for Packages/ directory (local/embedded packages).
+///
+/// Local packages referenced via "file:" in manifest.json live in Packages/
+/// and are not indexed by build_guid_cache (Assets/) or
+/// build_package_guid_cache (Library/PackageCache/).
+#[napi]
+pub fn build_local_package_guid_cache(project_root: String) -> serde_json::Value {
+    let root = PathBuf::from(&project_root);
+    let packages_dir = root.join("Packages");
+
+    if !packages_dir.is_dir() {
+        return serde_json::Value::Object(serde_json::Map::new());
+    }
+
+    let meta_files: Vec<PathBuf> = WalkDir::new(&packages_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_type().is_file()
+                && e.path()
+                    .extension()
+                    .map(|ext| ext == "meta")
+                    .unwrap_or(false)
+        })
+        .map(|e| e.into_path())
+        .collect();
+
+    let guid_regex = regex::Regex::new(r"(?m)^guid:\s*([a-f0-9]{32})").unwrap();
+
+    let pairs: Vec<(String, String)> = meta_files
+        .par_iter()
+        .filter_map(|meta_path| {
+            let content = common::read_unity_file(meta_path).ok()?;
+            let caps = guid_regex.captures(&content)?;
+            let guid = caps.get(1)?.as_str().to_string();
+
+            let asset_str = meta_path.to_string_lossy();
+            let asset_no_meta = &asset_str[..asset_str.len() - 5];
+            let rel = Path::new(asset_no_meta)
+                .strip_prefix(&root)
+                .ok()?
+                .to_string_lossy()
+                .to_string();
+
+            Some((guid, rel))
+        })
+        .collect();
+
+    let mut map = serde_json::Map::new();
+    for (guid, path) in pairs {
+        map.insert(guid, serde_json::Value::String(path));
+    }
+
+    serde_json::Value::Object(map)
+}
+
 // ========== Tests ==========
 
 #[cfg(test)]
