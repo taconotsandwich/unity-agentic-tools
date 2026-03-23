@@ -157,43 +157,138 @@ namespace UnityAgenticTools.Server
 
         private static string ExtractStringField(string json, string field)
         {
-            var pattern = $"\"{field}\"\\s*:\\s*\"([^\"]*?)\"";
-            var match = Regex.Match(json, pattern);
-            if (match.Success) return match.Groups[1].Value;
-
-            var numPattern = $"\"{field}\"\\s*:\\s*(\\d+)";
-            var numMatch = Regex.Match(json, numPattern);
-            if (numMatch.Success) return numMatch.Groups[1].Value;
-
-            return null;
+            var target = $"\"{field}\"";
+            int idx = json.IndexOf(target, StringComparison.Ordinal);
+            if (idx < 0) return null;
+            int pos = idx + target.Length;
+            // skip whitespace and colon
+            while (pos < json.Length && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == ':')) pos++;
+            if (pos >= json.Length) return null;
+            if (json[pos] == '"') return ReadJsonString(json, ref pos);
+            // numeric fallback
+            int start = pos;
+            while (pos < json.Length && json[pos] >= '0' && json[pos] <= '9') pos++;
+            return pos > start ? json.Substring(start, pos - start) : null;
         }
 
         private static Dictionary<string, object> ParseFlatObject(string json)
         {
             var result = new Dictionary<string, object>();
-            var pattern = new Regex("\"([^\"]+)\"\\s*:\\s*(\"([^\"]*)\"|(-?\\d+\\.?\\d*)|true|false|null)");
-            foreach (Match m in pattern.Matches(json))
+            int i = 0;
+            int len = json.Length;
+
+            while (i < len && json[i] != '{') i++;
+            if (i >= len) return result;
+            i++;
+
+            while (i < len)
             {
-                var key = m.Groups[1].Value;
-                if (m.Groups[3].Success)
+                // skip to key or closing brace
+                while (i < len && json[i] != '"' && json[i] != '}') i++;
+                if (i >= len || json[i] == '}') break;
+
+                string key = ReadJsonString(json, ref i);
+
+                // skip to colon
+                while (i < len && json[i] != ':') i++;
+                if (i >= len) break;
+                i++;
+
+                // skip whitespace
+                while (i < len && (json[i] == ' ' || json[i] == '\t' || json[i] == '\n' || json[i] == '\r')) i++;
+                if (i >= len) break;
+
+                char c = json[i];
+                if (c == '"')
                 {
-                    result[key] = m.Groups[3].Value;
+                    result[key] = ReadJsonString(json, ref i);
+                }
+                else if (c == '{')
+                {
+                    int end = FindMatchingBrace(json, i);
+                    result[key] = end > i ? json.Substring(i, end - i + 1) : "{}";
+                    i = end + 1;
+                }
+                else if (c == '[')
+                {
+                    int end = FindMatchingBracket(json, i);
+                    result[key] = end > i ? json.Substring(i, end - i + 1) : "[]";
+                    i = end + 1;
                 }
                 else
                 {
-                    var val = m.Groups[2].Value;
-                    if (val == "true") result[key] = true;
-                    else if (val == "false") result[key] = false;
-                    else if (val == "null") result[key] = null;
-                    else if (double.TryParse(val, out var num))
-                    {
-                        if (val.Contains(".")) result[key] = num;
-                        else result[key] = (int)num;
-                    }
-                    else result[key] = val;
+                    int start = i;
+                    while (i < len && json[i] != ',' && json[i] != '}' && json[i] != '\n') i++;
+                    var raw = json.Substring(start, i - start).Trim();
+                    if (raw == "true") result[key] = true;
+                    else if (raw == "false") result[key] = false;
+                    else if (raw == "null") result[key] = null;
+                    else if (raw.Contains(".") && double.TryParse(raw,
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var d))
+                        result[key] = d;
+                    else if (int.TryParse(raw, out var n)) result[key] = n;
+                    else result[key] = raw;
                 }
+
+                // skip comma
+                while (i < len && json[i] != ',' && json[i] != '}') i++;
+                if (i < len && json[i] == ',') i++;
             }
             return result;
+        }
+
+        private static string ReadJsonString(string json, ref int i)
+        {
+            if (i >= json.Length || json[i] != '"') return "";
+            i++;
+            var sb = new System.Text.StringBuilder();
+            while (i < json.Length)
+            {
+                char c = json[i++];
+                if (c == '"') break;
+                if (c == '\\' && i < json.Length)
+                {
+                    char esc = json[i++];
+                    switch (esc)
+                    {
+                        case '"': sb.Append('"'); break;
+                        case '\\': sb.Append('\\'); break;
+                        case '/': sb.Append('/'); break;
+                        case 'n': sb.Append('\n'); break;
+                        case 'r': sb.Append('\r'); break;
+                        case 't': sb.Append('\t'); break;
+                        case 'u':
+                            if (i + 4 <= json.Length && int.TryParse(
+                                json.Substring(i, 4),
+                                System.Globalization.NumberStyles.HexNumber,
+                                null, out var code))
+                            {
+                                sb.Append((char)code);
+                                i += 4;
+                            }
+                            break;
+                        default: sb.Append(esc); break;
+                    }
+                }
+                else sb.Append(c);
+            }
+            return sb.ToString();
+        }
+
+        private static int FindMatchingBracket(string json, int start)
+        {
+            int depth = 0;
+            bool inString = false;
+            for (int i = start; i < json.Length; i++)
+            {
+                char c = json[i];
+                if (inString) { if (c == '\\') { i++; continue; } if (c == '"') inString = false; continue; }
+                if (c == '"') { inString = true; continue; }
+                if (c == '[') depth++;
+                if (c == ']') { depth--; if (depth == 0) return i; }
+            }
+            return json.Length - 1;
         }
 
         private static int FindMatchingBrace(string json, int start)

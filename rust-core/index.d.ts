@@ -203,7 +203,7 @@ export declare function extractCsharpTypes(path: string): Array<CSharpTypeRef>
  *
  * Scans Assets/ and optionally Library/PackageCache/ for .cs files,
  * extracts type declarations, and returns them with GUID + namespace info.
- * When include_packages is true, also scans Library/PackageCache/.
+ * When include_packages is true, also scans Library/PackageCache/ and Packages/.
  * When include_dlls is true, also extracts types from DLLs in Library/ScriptAssemblies/.
  */
 export declare function buildTypeRegistry(projectRoot: string, includePackages?: boolean | undefined | null, includeDlls?: boolean | undefined | null): Array<CSharpTypeRef>
@@ -261,6 +261,14 @@ export declare function buildGuidCache(projectRoot: string): any
  * Returns a separate cache so project assets and package assets stay distinct.
  */
 export declare function buildPackageGuidCache(projectRoot: string): any
+/**
+ * Build a GUID cache for Packages/ directory (local/embedded packages).
+ *
+ * Local packages referenced via "file:" in manifest.json live in Packages/
+ * and are not indexed by build_guid_cache (Assets/) or
+ * build_package_guid_cache (Library/PackageCache/).
+ */
+export declare function buildLocalPackageGuidCache(projectRoot: string): any
 /** Get the version of the native module */
 export declare function getVersion(): string
 /** Check if the native module is available */

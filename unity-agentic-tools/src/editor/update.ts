@@ -300,12 +300,12 @@ export function safeUnityYAMLEdit(
   let updatedRaw = targetBlock.raw;
   if (propertyPattern.test(updatedRaw)) {
     // Replace existing property
-    updatedRaw = updatedRaw.replace(propertyPattern, `$1${newValue}`);
+    updatedRaw = updatedRaw.replace(propertyPattern, (_m: string, prefix: string) => prefix + newValue);
   } else {
     // Property doesn't exist, add it before the next block marker or at the end
     updatedRaw = updatedRaw.replace(
       /(\n)(--- !u!|$)/,
-      `\n  m_${normalizedProperty}: ${newValue}$1$2`
+      (_m: string, g1: string, g2: string) => `\n  m_${normalizedProperty}: ${newValue}${g1}${g2}`
     );
   }
 
@@ -531,7 +531,8 @@ export function editPrefabOverride(options: EditPrefabOverrideOptions): EditPref
     if (entryMatch) {
         // Update existing entry
         const updatedText = targetBlock.raw.replace(entryPattern,
-            `$1${property_path}$2${new_value}$4${objRef}`
+            (_m: string, g1: string, g2: string, _g3: string, g4: string) =>
+                g1 + property_path + g2 + new_value + g4 + objRef
         );
 
         targetBlock.replace_raw(updatedText);
@@ -794,12 +795,12 @@ export function batchEditProperties(
       if (propertyPattern.test(updatedRaw)) {
         updatedRaw = updatedRaw.replace(
           propertyPattern,
-          `$1${edit.new_value}`
+          (_m: string, prefix: string) => prefix + edit.new_value
         );
       } else {
         updatedRaw = updatedRaw.replace(
           /(\n)(--- !u!|$)/,
-          `\n  m_${normalizedProperty}: ${edit.new_value}$1$2`
+          (_m: string, g1: string, g2: string) => `\n  m_${normalizedProperty}: ${edit.new_value}${g1}${g2}`
         );
       }
       targetBlock.replace_raw(updatedRaw);

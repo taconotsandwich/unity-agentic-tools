@@ -39,19 +39,49 @@ export function read_editor_config(project_path: string): EditorConfig | { error
     return config;
 }
 
+/** Error codes that indicate transient connection issues (server restarting after reload). */
+const RETRYABLE_CODES = new Set([-32002, -32003]);
+
+/** Delay schedule for retries (ms). Index = attempt number starting from 0. */
+const RETRY_DELAYS = [500, 1000, 2000];
+
 /**
  * Send a single JSON-RPC request to the Unity Editor and return the result.
+ * Automatically retries on transient connection errors (e.g., server restarting after assembly reload).
  */
 export async function call_editor(options: CallEditorOptions): Promise<RpcResponse> {
+    const maxRetries = options.retries ?? 2;
+
+    let lastResponse: RpcResponse | undefined;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        lastResponse = await call_editor_once(options);
+
+        if (!lastResponse.error || !RETRYABLE_CODES.has(lastResponse.error.code)) {
+            return lastResponse;
+        }
+
+        if (attempt < maxRetries) {
+            const delay = RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)];
+            await new Promise<void>(r => setTimeout(r, delay));
+        }
+    }
+
+    return lastResponse!;
+}
+
+/**
+ * Single-attempt JSON-RPC request to the Unity Editor.
+ */
+function call_editor_once(options: CallEditorOptions): Promise<RpcResponse> {
     const { method, params, timeout = 10000 } = options;
 
     const config = resolve_config(options);
     if ('error' in config) {
-        return {
-            jsonrpc: "2.0",
+        return Promise.resolve({
+            jsonrpc: "2.0" as const,
             id: "0",
             error: { code: -32000, message: config.error },
-        };
+        });
     }
 
     const url = `ws://127.0.0.1:${config.port}/unity-agentic`;

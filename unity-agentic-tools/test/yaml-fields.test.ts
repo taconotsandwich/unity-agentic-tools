@@ -210,4 +210,39 @@ describe('generate_field_yaml', () => {
         expect(yaml).toContain('team: 0');
         expect(yaml).toContain('health: 0');
     });
+
+    it('should emit rid: 0 for SerializeReference fields', () => {
+        const field: CSharpFieldRef = {
+            name: 'controller',
+            typeName: 'IController',
+            hasSerializeField: false,
+            hasSerializeReference: true,
+            isPublic: true,
+            ownerType: 'PlayerAI',
+        };
+        const yaml = generate_field_yaml([field]);
+        expect(yaml).toContain('controller:');
+        expect(yaml).toContain('  rid: 0');
+        expect(yaml).not.toContain('{fileID: 0}');
+    });
+
+    it('should emit rid: 0 for SR fields alongside normal fields', () => {
+        const fields: CSharpFieldRef[] = [
+            make_field('health', 'int'),
+            {
+                name: 'behaviour',
+                typeName: 'IBehaviour',
+                hasSerializeField: false,
+                hasSerializeReference: true,
+                isPublic: true,
+                ownerType: 'TestClass',
+            },
+            make_field('speed', 'float'),
+        ];
+        const yaml = generate_field_yaml(fields);
+        expect(yaml).toContain('health: 0');
+        expect(yaml).toContain('behaviour:');
+        expect(yaml).toContain('  rid: 0');
+        expect(yaml).toContain('speed: 0');
+    });
 });

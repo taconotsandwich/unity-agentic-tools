@@ -116,8 +116,16 @@ namespace UnityAgenticTools.Server
             Debug.Log("[UnityAgenticTools] WebSocket server stopped");
         }
 
+        private const int MainThreadTimeoutMs = 30000;
+
         public static Task<T> RunOnMainThread<T>(Func<T> func)
         {
+            if (!_running)
+            {
+                return Task.FromException<T>(
+                    new InvalidOperationException("Server is not running. Cannot dispatch to main thread."));
+            }
+
             var tcs = new TaskCompletionSource<T>();
             _mainThreadQueue.Enqueue(() =>
             {
@@ -130,11 +138,26 @@ namespace UnityAgenticTools.Server
                     tcs.SetException(ex);
                 }
             });
+
+            // Timeout guard: prevent indefinite hangs if EditorApplication.update stops pumping
+            Task.Delay(MainThreadTimeoutMs).ContinueWith(_ =>
+            {
+                tcs.TrySetException(new TimeoutException(
+                    $"Main thread dispatch timed out after {MainThreadTimeoutMs}ms. " +
+                    "EditorApplication.update may not be pumping (e.g., during assembly reload)."));
+            });
+
             return tcs.Task;
         }
 
         public static Task RunOnMainThread(Action action)
         {
+            if (!_running)
+            {
+                return Task.FromException(
+                    new InvalidOperationException("Server is not running. Cannot dispatch to main thread."));
+            }
+
             var tcs = new TaskCompletionSource<bool>();
             _mainThreadQueue.Enqueue(() =>
             {
@@ -148,6 +171,14 @@ namespace UnityAgenticTools.Server
                     tcs.SetException(ex);
                 }
             });
+
+            Task.Delay(MainThreadTimeoutMs).ContinueWith(_ =>
+            {
+                tcs.TrySetException(new TimeoutException(
+                    $"Main thread dispatch timed out after {MainThreadTimeoutMs}ms. " +
+                    "EditorApplication.update may not be pumping (e.g., during assembly reload)."));
+            });
+
             return tcs.Task;
         }
 
@@ -268,6 +299,9 @@ namespace UnityAgenticTools.Server
 
         private static void OnAfterAssemblyReload()
         {
+            // Drain any stale items from before reload (their TaskCompletionSources are orphaned)
+            while (_mainThreadQueue.TryDequeue(out _)) { }
+
             EditorApplication.update -= PumpMainThreadQueue;
             EditorApplication.update += PumpMainThreadQueue;
             Debug.Log("[UnityAgenticTools] Re-registered main thread pump after assembly reload");

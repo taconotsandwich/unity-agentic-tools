@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, statSync } from 'fs';
 import { join, relative, resolve } from 'path';
-import { getNativeBuildGuidCache, getNativeBuildTypeRegistry, getNativeBuildPackageGuidCache, isNativeModuleAvailable } from './scanner';
+import { getNativeBuildGuidCache, getNativeBuildTypeRegistry, getNativeBuildPackageGuidCache, getNativeBuildLocalPackageGuidCache, isNativeModuleAvailable } from './scanner';
 
 // Version is inlined at build time by bun's bundler (no runtime path resolution)
 const VERSION: string = (require('../package.json') as { version: string }).version;
@@ -9,6 +9,7 @@ const CONFIG_DIR = '.unity-agentic';
 const CONFIG_FILE = 'config.json';
 const GUID_CACHE_FILE = 'guid-cache.json';
 const PACKAGE_CACHE_FILE = 'package-cache.json';
+const LOCAL_PACKAGE_CACHE_FILE = 'local-package-cache.json';
 const TYPE_REGISTRY_FILE = 'type-registry.json';
 const DOC_INDEX_FILE = 'doc-index.json';
 
@@ -90,6 +91,21 @@ export function setup(options: SetupOptions = {}): SetupResult {
       packageGuidCount = Object.keys(packageCache).length;
     } catch {
       // Package cache is optional; don't fail setup if it errors
+    }
+  }
+
+  // Build local package GUID cache (Packages/ directory - embedded/local packages)
+  const nativeLocalPkgBuild = getNativeBuildLocalPackageGuidCache();
+  if (nativeLocalPkgBuild) {
+    try {
+      const localPkgCache = nativeLocalPkgBuild(projectPath) as GuidCache;
+      const localPkgCount = Object.keys(localPkgCache).length;
+      if (localPkgCount > 0) {
+        const localPkgCachePath = join(configPath, LOCAL_PACKAGE_CACHE_FILE);
+        writeFileSync(localPkgCachePath, JSON.stringify(localPkgCache, null, 2));
+      }
+    } catch {
+      // Local package cache is optional
     }
   }
 

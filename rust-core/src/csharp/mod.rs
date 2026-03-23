@@ -72,7 +72,7 @@ pub fn extract_csharp_types(path: String) -> Vec<CSharpTypeRef> {
 ///
 /// Scans Assets/ and optionally Library/PackageCache/ for .cs files,
 /// extracts type declarations, and returns them with GUID + namespace info.
-/// When include_packages is true, also scans Library/PackageCache/.
+/// When include_packages is true, also scans Library/PackageCache/ and Packages/.
 /// When include_dlls is true, also extracts types from DLLs in Library/ScriptAssemblies/.
 #[napi]
 pub fn build_type_registry(
@@ -92,11 +92,16 @@ pub fn build_type_registry(
         collect_cs_files(&assets_dir, &mut cs_files);
     }
 
-    // Optionally scan Library/PackageCache/ for .cs files
+    // Optionally scan Library/PackageCache/ and Packages/ for .cs files
     if include_packages {
         let package_cache = root.join("Library").join("PackageCache");
         if package_cache.is_dir() {
             collect_cs_files(&package_cache, &mut cs_files);
+        }
+
+        let packages_dir = root.join("Packages");
+        if packages_dir.is_dir() {
+            collect_cs_files(&packages_dir, &mut cs_files);
         }
     }
 
