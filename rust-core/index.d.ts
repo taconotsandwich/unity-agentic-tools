@@ -46,6 +46,7 @@ export interface PrefabModification {
   targetGuid?: string | undefined
   propertyPath: string
   value: string
+  objectReference?: string | undefined
 }
 /** Union result from find_by_name: either a GameObject or PrefabInstance */
 export interface FindResult {

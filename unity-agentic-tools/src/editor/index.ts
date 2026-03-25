@@ -15,6 +15,7 @@ export {
     editProperty,
     editComponentByFileId,
     editPrefabOverride,
+    batchEditPrefabOverrides,
     editTransform,
     batchEditProperties,
     reparentGameObject,
@@ -27,6 +28,8 @@ export {
     removeRemovedComponent,
     addRemovedGameObject,
     removeRemovedGameObject,
+    editManagedReference,
+    addPrefabManagedReference,
 } from './update';
 
 // Delete operations

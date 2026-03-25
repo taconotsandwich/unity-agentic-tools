@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from 'fs';
 import { join, basename, resolve, dirname } from 'path';
 import type { UnityScanner } from './scanner';
-import type { FindResult, Component, ComponentPropertyEdit, PropertyEdit } from './types';
+import type { FindResult, Component, ComponentPropertyEdit, PropertyEdit, PrefabOverrideEdit } from './types';
 import {
     editProperty,
     editTransform,
@@ -10,6 +10,7 @@ import {
     unpackPrefab,
     reparentGameObject,
     editPrefabOverride,
+    batchEditPrefabOverrides,
     editArray,
     batchEditProperties,
     batchEditComponentProperties,
@@ -18,6 +19,8 @@ import {
     removeRemovedComponent,
     addRemovedGameObject,
     removeRemovedGameObject,
+    editManagedReference,
+    addPrefabManagedReference,
 } from './editor';
 import { edit_settings, edit_tag, edit_layer, edit_sorting_layer } from './settings';
 import { enable_scene, disable_scene, move_scene } from './build-editor';
@@ -38,7 +41,7 @@ function parseVector(str: string): { x: number; y: number; z: number } {
 }
 
 /** Resolve a GameObject name or numeric fileID to a Transform fileID. */
-function resolve_transform_id(scanner: UnityScanner, file: string, identifier: string): { transform_id: number } | { error: string } {
+function resolve_transform_id(scanner: UnityScanner, file: string, identifier: string): { transform_id: string } | { error: string } {
     // Check for duplicate names before inspect
     let resolved_id = identifier;
     if (!/^-?\d+$/.test(identifier)) {
@@ -59,13 +62,13 @@ function resolve_transform_id(scanner: UnityScanner, file: string, identifier: s
         const transform = result.components?.find(
             (c: Component) => c.class_id === 4 || c.class_id === 224
         );
-        if (transform) return { transform_id: parseInt(transform.file_id, 10) };
+        if (transform) return { transform_id: transform.file_id };
     }
 
     // If inspect didn't find a GameObject (e.g. the ID is already a Transform fileID),
-    // return numeric identifiers as-is for direct Transform lookup
+    // return string identifiers as-is for direct Transform lookup
     if (/^-?\d+$/.test(identifier)) {
-        return { transform_id: parseInt(identifier, 10) };
+        return { transform_id: identifier };
     }
 
     return { error: `Could not resolve "${identifier}" to a Transform component. Use a GameObject name or transform fileID.` };
@@ -93,7 +96,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         });
 
     cmd.command('component <file> <file_id> <property> <value>')
-        .description('Edit any component property by file ID. Supports dotted paths (m_LocalPosition.x) and array paths (m_Materials.Array.data[0])')
+        .description('Edit any component property by file ID. Supports dotted paths (m_LocalPosition.x) and array paths (m_Materials.Array.data[0]). Quote paths with brackets or use dot notation (data.0) to avoid shell glob expansion')
         .option('-j, --json', 'Output as JSON')
         .action((file, file_id, property, value, _options) => {
             // Validate m_RootOrder: must be a non-negative integer
@@ -309,11 +312,16 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         });
 
     prefab_cmd.command('override <file> <prefab_instance> <property_path> <value>')
-        .description('Edit or add a property override in a PrefabInstance m_Modifications list')
+        .description('Edit or add a property override in a PrefabInstance m_Modifications list. Quote paths with brackets or use dot notation (data.0) to avoid shell glob expansion')
         .option('--object-reference <ref>', 'Object reference value (default: {fileID: 0})')
+        .option('--managed-reference <id>', 'Managed reference ID -- placed in value: field, forces objectReference: {fileID: 0}')
         .option('--target <target>', 'Target reference for new entries (e.g., "{fileID: 400000, guid: abc, type: 3}")')
         .option('-j, --json', 'Output as JSON')
         .action((file, prefab_instance, property_path, value, options) => {
+            // Validate --object-reference looks like a PPtr
+            if (options.objectReference && !/^\{fileID:/.test(options.objectReference)) {
+                console.error(`Warning: --object-reference "${options.objectReference}" does not look like a Unity object reference ({fileID: ...}). For managed reference IDs, use --managed-reference instead or pass the ID as the <value> argument.`);
+            }
             const result = editPrefabOverride({
                 file_path: file,
                 prefab_instance,
@@ -321,8 +329,74 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 new_value: value,
                 object_reference: options.objectReference,
                 target: options.target,
+                managed_reference: options.managedReference,
             });
 
+            console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
+        });
+
+    prefab_cmd.command('batch-overrides <file> <prefab_instance> <edits_json>')
+        .description('Batch edit multiple property overrides in a PrefabInstance. JSON format: [{"property_path":"...","value":"...","target":"...","object_reference":"..."}]')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, prefab_instance, edits_json, _options) => {
+            let raw_edits: Array<Record<string, unknown>>;
+            try {
+                const parsed = JSON.parse(edits_json);
+                if (!Array.isArray(parsed)) {
+                    console.log(JSON.stringify({ success: false, error: 'Edits must be a JSON array. Format: [{"property_path":"...","value":"..."}]' }, null, 2));
+                    process.exit(1);
+                }
+                raw_edits = parsed as Array<Record<string, unknown>>;
+            } catch {
+                console.log(JSON.stringify({ success: false, error: 'Invalid JSON for edits' }, null, 2));
+                process.exit(1);
+            }
+            // Normalize: accept both "value" and "new_value" keys
+            const edits: PrefabOverrideEdit[] = raw_edits.map(e => ({
+                property_path: String(e.property_path ?? ''),
+                value: String(e.new_value ?? e.value ?? ''),
+                object_reference: e.object_reference != null ? String(e.object_reference) : undefined,
+                target: e.target != null ? String(e.target) : undefined,
+                managed_reference: e.managed_reference != null ? String(e.managed_reference) : undefined,
+            }));
+            // Validate required fields
+            if (edits.length === 0) {
+                console.log(JSON.stringify({ success: false, error: 'Empty edits array. Provide at least one edit: [{"property_path":"...","value":"..."}]' }, null, 2));
+                process.exit(1);
+            }
+            for (const edit of edits) {
+                if (!edit.property_path) {
+                    console.log(JSON.stringify({ success: false, error: 'Missing "property_path" in edit entry. JSON format: [{"property_path":"...","value":"..."}]' }, null, 2));
+                    process.exit(1);
+                }
+                // Allow empty value when object_reference or managed_reference is provided
+                if (!edit.value && !edit.object_reference && !edit.managed_reference) {
+                    console.log(JSON.stringify({ success: false, error: `Missing "value" for override "${edit.property_path}". Provide "value", "object_reference", or "managed_reference".` }, null, 2));
+                    process.exit(1);
+                }
+            }
+            const result = batchEditPrefabOverrides(file, prefab_instance, edits);
+            console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
+        });
+
+    prefab_cmd.command('managed-reference <file> <prefab_instance> <field_path> <type_name>')
+        .description('Add a [SerializeReference] managed reference to a prefab override. Auto-generates rid and creates type/data/version override entries.')
+        .requiredOption('--target <ref>', 'Target reference (e.g., "{fileID: 400000, guid: ..., type: 3}")')
+        .option('--index <n>', 'Array index (default: 0)', '0')
+        .option('-p, --project <path>', 'Unity project path (for type registry)')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, prefab_instance, field_path, type_name, options) => {
+            const result = addPrefabManagedReference({
+                file_path: file,
+                prefab_instance,
+                field_path,
+                type_name,
+                target: options.target,
+                index: parseInt(options.index, 10),
+                project_path: options.project,
+            });
             console.log(JSON.stringify(result, null, 2));
             if (!result.success) process.exitCode = 1;
         });
@@ -358,7 +432,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         });
 
     cmd.command('array <file> <file_id> <array_property> <action> [args...]')
-        .description('Insert, append, or remove array elements in a component. Insert: <index> <value> or <value> --index <n>. Append: <value>. Remove: <index> or --index <n>.')
+        .description('Insert, append, or remove array elements in a component. Insert: <index> <value> or <value> --index <n>. Append: <value>. Remove: <index> or --index <n>. Quote paths with brackets or use dot notation (data.0) to avoid shell glob expansion')
         .option('--index <n>', 'Index for insert/remove')
         .option('-j, --json', 'Output as JSON')
         .action((file, file_id, array_property, action, args: string[], options) => {
@@ -512,7 +586,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         });
 
     prefab_cmd.command('remove-override <file> <prefab_instance> <property_path>')
-        .description('Remove a property override from a PrefabInstance')
+        .description('Remove a property override from a PrefabInstance. Quote paths with brackets or use dot notation (data.0) to avoid shell glob expansion')
         .option('--target <ref>', 'Target reference to match (for disambiguation)')
         .option('-j, --json', 'Output as JSON')
         .action((file, prefab_instance, property_path, options) => {
@@ -2192,6 +2266,24 @@ AnimatorStateTransition:
         });
 
     cmd.addCommand(prefab_cmd);
+
+    cmd.command('managed-reference <file> <component_id> <field_path> <type_name>')
+        .description('Add a managed reference (SerializeReference) to a component field. Type can be "Namespace.ClassName" (registry lookup) or "Assembly Namespace.ClassName" (manual).')
+        .option('-p, --project <path>', 'Unity project path (for type registry)')
+        .option('--append', 'Append to array (do not update field rid)')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, component_id, field_path, type_name, options) => {
+            const result = editManagedReference({
+                file_path: file,
+                file_id: component_id,
+                field_path,
+                type_name,
+                project_path: options.project,
+                append: options.append === true,
+            });
+            console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
+        });
 
     return cmd;
 }

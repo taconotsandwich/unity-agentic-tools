@@ -13,7 +13,7 @@ import type {
 } from '../types';
 import { get_class_id, UNITY_CLASS_IDS } from '../class-ids';
 import { generateGuid, validate_name, validate_file_path, find_unity_project_root } from '../utils';
-import { extractGuidFromMeta, resolve_script_with_fields } from './shared';
+import { extractGuidFromMeta, resolve_script_with_fields, resolve_source_prefab } from './shared';
 import { generate_field_yaml } from './yaml-fields';
 import { UnityDocument } from './unity-document';
 import type { UnityVersion } from '../build-version';
@@ -45,10 +45,10 @@ function get_layer_from_parent(doc: UnityDocument, parentTransformId: string): n
  * Create YAML blocks for a new GameObject with Transform.
  */
 function createGameObjectYAML(
-  gameObjectId: number,
-  transformId: number,
+  gameObjectId: string,
+  transformId: string,
   name: string,
-  parentTransformId: number = 0,
+  parentTransformId: string = '0',
   rootOrder: number = 0,
   layer: number = 0
 ): string {
@@ -136,6 +136,86 @@ function findStrippedRootTransform(doc: UnityDocument, prefabInstanceId: string)
 }
 
 /**
+ * Find a GameObject in a PrefabVariant file by looking through stripped blocks
+ * and PrefabInstance m_Modifications for name overrides.
+ * Falls back to loading the source prefab to match by original name.
+ */
+function find_game_object_in_variant(
+    doc: UnityDocument,
+    name: string,
+    file_path: string,
+    project_path?: string,
+): { stripped_go_id: string; source_ref: string; prefab_instance_id: string } | null {
+    // Step 1: Search PrefabInstance m_Modifications for a m_Name override matching the target name
+    const pi_blocks = doc.find_by_class_id(1001);
+    for (const pi_block of pi_blocks) {
+        // Match modification entries with propertyPath: m_Name and capture target + value
+        const mod_pattern = /- target:[ \t]*(\{[^}]+\})\s*propertyPath:[ \t]*m_Name\s*value:[ \t]*([^\n]*)/g;
+        let mod_match: RegExpExecArray | null;
+        while ((mod_match = mod_pattern.exec(pi_block.raw)) !== null) {
+            const target_ref = mod_match[1];
+            const mod_value = mod_match[2].trim();
+            if (mod_value !== name) continue;
+
+            // Found a name modification matching our target -- find the stripped GO block
+            // whose m_CorrespondingSourceObject matches this target ref
+            for (const block of doc.blocks) {
+                if (block.class_id !== 1 || !block.is_stripped) continue;
+                const source_match = block.raw.match(/m_CorrespondingSourceObject:[ \t]*(\{[^}]+\})/);
+                if (!source_match) continue;
+
+                // Normalize whitespace for comparison
+                const normalized_source = source_match[1].replace(/\s+/g, ' ');
+                const normalized_target = target_ref.replace(/\s+/g, ' ');
+                if (normalized_source === normalized_target) {
+                    return {
+                        stripped_go_id: block.file_id,
+                        source_ref: target_ref,
+                        prefab_instance_id: pi_block.file_id,
+                    };
+                }
+            }
+        }
+    }
+
+    // Step 2: Fallback -- load source prefab and find GO by original (unrenamed) name
+    const source_info = resolve_source_prefab(doc, file_path, project_path);
+    if (!source_info) return null;
+
+    let source_doc: UnityDocument;
+    try {
+        source_doc = UnityDocument.from_file(source_info.source_path);
+    } catch {
+        return null;
+    }
+
+    const source_gos = source_doc.find_game_objects_by_name(name);
+    if (source_gos.length !== 1) return null;
+
+    const source_go = source_gos[0];
+    const source_go_file_id = source_go.file_id;
+    const source_guid = source_info.source_guid;
+
+    // Find the local stripped GO whose m_CorrespondingSourceObject has this fileID + GUID
+    for (const block of doc.blocks) {
+        if (block.class_id !== 1 || !block.is_stripped) continue;
+        const source_match = block.raw.match(/m_CorrespondingSourceObject:[ \t]*\{[^}]*fileID:[ \t]*(-?\d+)[^}]*guid:[ \t]*([a-f0-9]{32})/);
+        if (!source_match) continue;
+
+        if (source_match[1] === source_go_file_id && source_match[2] === source_guid) {
+            const source_ref = `{fileID: ${source_go_file_id}, guid: ${source_guid}, type: 3}`;
+            return {
+                stripped_go_id: block.file_id,
+                source_ref,
+                prefab_instance_id: source_info.prefab_instance_id,
+            };
+        }
+    }
+
+    return null;
+}
+
+/**
  * Append a new entry to a PrefabInstance's m_AddedGameObjects array.
  */
 function appendToAddedGameObjects(doc: UnityDocument, piId: string, targetSourceRef: string, newGoId: string): void {
@@ -156,6 +236,33 @@ function appendToAddedGameObjects(doc: UnityDocument, piId: string, targetSource
 
   // Try appending to existing entries
   const existingPattern = /(m_AddedGameObjects:\s*\n(?:\s+-[\s\S]*?(?=\n\s+m_|$))*)/;
+  if (existingPattern.test(raw)) {
+    raw = raw.replace(existingPattern, `$1${entry}`);
+    piBlock.replace_raw(raw);
+  }
+}
+
+/**
+ * Append a new entry to a PrefabInstance's m_AddedComponents array.
+ */
+function appendToAddedComponents(doc: UnityDocument, piId: string, targetSourceRef: string, newComponentId: string): void {
+  const piBlock = doc.find_by_file_id(piId);
+  if (!piBlock) return;
+
+  const entry = `\n    - targetCorrespondingSourceObject: ${targetSourceRef}\n      insertIndex: -1\n      addedObject: {fileID: ${newComponentId}}`;
+
+  let raw = piBlock.raw;
+
+  // Try replacing empty array: m_AddedComponents: []
+  const emptyPattern = /m_AddedComponents:[ \t]*\[\]/;
+  if (emptyPattern.test(raw)) {
+    raw = raw.replace(emptyPattern, `m_AddedComponents:${entry}`);
+    piBlock.replace_raw(raw);
+    return;
+  }
+
+  // Try appending to existing entries
+  const existingPattern = /(m_AddedComponents:[ \t]*\n(?:[ \t]+-[\s\S]*?(?=\n[ \t]+m_|$))*)/;
   if (existingPattern.test(raw)) {
     raw = raw.replace(existingPattern, `$1${entry}`);
     piBlock.replace_raw(raw);
@@ -190,8 +297,8 @@ const COMPONENT_DEFAULTS: Record<number, string> = {
 function createGenericComponentYAML(
   componentName: string,
   classId: number,
-  componentId: number,
-  gameObjectId: number
+  componentId: string,
+  gameObjectId: string
 ): string {
   const defaults = COMPONENT_DEFAULTS[classId] ? '\n' + COMPONENT_DEFAULTS[classId] + '\n' : '';
   return `--- !u!${classId} &${componentId}
@@ -226,8 +333,8 @@ function addComponentToGameObject(doc: UnityDocument, gameObjectId: string, comp
  * Version-gated types (Hash128, RenderingLayerMask) are skipped if the project is too old.
  */
 function createMonoBehaviourYAML(
-  componentId: number,
-  gameObjectId: number,
+  componentId: string,
+  gameObjectId: string,
   scriptGuid: string,
   fields?: CSharpFieldRef[],
   version?: UnityVersion
@@ -372,9 +479,9 @@ export function createGameObject(options: CreateGameObjectOptions): CreateGameOb
   const transformIdStr = doc.generate_file_id();
 
   // Create the YAML blocks
-  const gameObjectId = parseInt(gameObjectIdStr, 10);
-  const transformId = parseInt(transformIdStr, 10);
-  const parentTransformId = parseInt(parentTransformIdStr, 10);
+  const gameObjectId = gameObjectIdStr;
+  const transformId = transformIdStr;
+  const parentTransformId = parentTransformIdStr;
   const newBlocks = createGameObjectYAML(gameObjectId, transformId, name.trim(), parentTransformId, rootOrder, layer);
 
   // Append blocks to document
@@ -405,7 +512,7 @@ export function createGameObject(options: CreateGameObjectOptions): CreateGameOb
     file_path,
     game_object_id: gameObjectId,
     transform_id: transformId,
-    prefab_instance_id: variantPiId ? parseInt(variantPiId, 10) : undefined
+    prefab_instance_id: variantPiId || undefined
   };
 }
 
@@ -891,9 +998,9 @@ export function createPrefabVariant(options: CreatePrefabVariantOptions): Create
 
   // Generate IDs for the variant (use temp doc for generation)
   const tempDoc = UnityDocument.from_string('%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n');
-  const prefabInstanceId = parseInt(tempDoc.generate_file_id(), 10);
-  const strippedGoId = parseInt(tempDoc.generate_file_id(), 10);
-  const strippedTransformId = parseInt(tempDoc.generate_file_id(), 10);
+  const prefabInstanceId = tempDoc.generate_file_id();
+  const strippedGoId = tempDoc.generate_file_id();
+  const strippedTransformId = tempDoc.generate_file_id();
 
   // Determine variant name
   const finalName = variant_name || `${rootInfo.name} Variant`;
@@ -1288,11 +1395,21 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
 
   // Find the GameObject (must be unique for destructive operation)
   const goResult = doc.require_unique_game_object(game_object_name);
+  let gameObjectIdStr: string;
+  let variantInfo: { source_ref: string; prefab_instance_id: string } | null = null;
+
   if ('error' in goResult) {
-    return { success: false, file_path, error: goResult.error };
+    // Fallback: try PrefabVariant lookup for stripped source objects
+    const vResult = find_game_object_in_variant(doc, game_object_name, file_path, project_path);
+    if (!vResult) {
+      return { success: false, file_path, error: goResult.error };
+    }
+    gameObjectIdStr = vResult.stripped_go_id;
+    variantInfo = { source_ref: vResult.source_ref, prefab_instance_id: vResult.prefab_instance_id };
+  } else {
+    gameObjectIdStr = goResult.file_id;
   }
-  const gameObjectIdStr = goResult.file_id;
-  const gameObjectId = parseInt(gameObjectIdStr, 10);
+  const gameObjectId = gameObjectIdStr;
 
   // Check if it's a known Unity built-in component
   const classId = get_class_id(component_type);
@@ -1313,7 +1430,7 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
 
   // Generate unique component ID
   const componentIdStr = doc.generate_file_id();
-  const componentId = parseInt(componentIdStr, 10);
+  const componentId = componentIdStr;
 
   let componentYAML: string;
   let scriptGuid: string | undefined;
@@ -1384,8 +1501,12 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
     extractionError = resolved.extraction_error;
   }
 
-  // Add component reference to GameObject
-  addComponentToGameObject(doc, gameObjectIdStr, componentIdStr);
+  // Add component reference -- variant path uses m_AddedComponents instead of m_Component
+  if (variantInfo) {
+    appendToAddedComponents(doc, variantInfo.prefab_instance_id, variantInfo.source_ref, componentIdStr);
+  } else {
+    addComponentToGameObject(doc, gameObjectIdStr, componentIdStr);
+  }
 
   // Append component block to document
   doc.append_raw(componentYAML);

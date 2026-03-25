@@ -1,0 +1,71 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &5765656985498706498 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}
+  m_PrefabInstance: {fileID: 5765656985498706500}
+  m_PrefabAsset: {fileID: 0}
+--- !u!4 &5765656985498706499 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 400000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}
+  m_PrefabInstance: {fileID: 5765656985498706500}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &5765656985498706501 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 100001, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}
+  m_PrefabInstance: {fileID: 5765656985498706500}
+  m_PrefabAsset: {fileID: 0}
+--- !u!4 &5765656985498706502 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 400001, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}
+  m_PrefabInstance: {fileID: 5765656985498706500}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1001 &5765656985498706500
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}
+      propertyPath: m_Name
+      value: EnemyVariant
+      objectReference: {fileID: 0}
+    - target: {fileID: 400000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 5
+      objectReference: {fileID: 0}
+    - target: {fileID: 400000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 400000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 11400000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}
+      propertyPath: health
+      value: 200
+      objectReference: {fileID: 0}
+    - target: {fileID: 11400000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}
+      propertyPath: damage
+      value: 25
+      objectReference: {fileID: 0}
+    - target: {fileID: 11400001, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}
+      propertyPath: showWhenFull
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 11400000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}
+      propertyPath: patrolPoints.Array.data[0].managedReferenceType
+      value: Assembly-CSharp GameAI.PatrolBehaviour
+      objectReference: {fileID: 0}
+    - target: {fileID: 11400000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}
+      propertyPath: patrolPoints.Array.data[0].managedReferenceValue
+      value: 7000000000000000001
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}

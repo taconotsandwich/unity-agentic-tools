@@ -166,6 +166,8 @@ export function build_editor_command(): Command {
                 params.set = options.set;
             } else if (options.args) {
                 params.args = options.args;
+            } else if (args.length === 1 && args[0].startsWith('[')) {
+                params.args = args[0];
             } else if (args.length > 0) {
                 params.args = JSON.stringify(args);
             }
@@ -178,11 +180,13 @@ export function build_editor_command(): Command {
         .option('-c, --count <n>', 'Number of log entries to retrieve', '50')
         .option('--limit <n>', 'Alias for --count')
         .option('-t, --type <type>', 'Filter by log type (Log, Warning, Error, Assert, Exception)')
-        .action(async function(this: Command, options: { count?: string; limit?: string; type?: string }) {
+        .option('-s, --severity <type>', 'Alias for --type')
+        .action(async function(this: Command, options: { count?: string; limit?: string; type?: string; severity?: string }) {
             const params: Record<string, unknown> = {};
             const count = options.limit || options.count;
             if (count) params.count = parseInt(count, 10);
-            if (options.type) params.type = options.type;
+            const typeFilter = options.severity || options.type;
+            if (typeFilter) params.type = typeFilter;
             await handle_rpc(this, 'editor.console.getLogs', params);
         });
 

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve, join } from 'path';
 import { readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
-import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile, createScene, editPrefabOverride, editArray, batchEditComponentProperties, removePrefabOverride, addRemovedComponent, removeRemovedComponent, addRemovedGameObject, removeRemovedGameObject, deletePrefabInstance } from '../src/editor';
+import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile, createScene, editPrefabOverride, batchEditPrefabOverrides, editArray, batchEditComponentProperties, removePrefabOverride, addRemovedComponent, removeRemovedComponent, addRemovedGameObject, removeRemovedGameObject, deletePrefabInstance } from '../src/editor';
 import { UnityDocument } from '../src/editor/unity-document';
 import { create_temp_fixture } from './test-utils';
 import type { TempFixture } from './test-utils';
@@ -510,8 +510,8 @@ describe('createGameObject', () => {
         expect(result.success).toBe(true);
         expect(result.game_object_id).toBeDefined();
         expect(result.transform_id).toBeDefined();
-        expect(typeof result.game_object_id).toBe('number');
-        expect(typeof result.transform_id).toBe('number');
+        expect(typeof result.game_object_id).toBe('string');
+        expect(typeof result.transform_id).toBe('string');
 
         // Verify the content was actually written
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
@@ -877,7 +877,7 @@ describe('editTransform', () => {
     it('should return error for nonexistent transform ID', () => {
         const editResult = editTransform({
             file_path: temp_fixture.temp_path,
-            transform_id: 9999999999,
+            transform_id: '9999999999',
             position: { x: 1, y: 2, z: 3 }
         });
 
@@ -888,7 +888,7 @@ describe('editTransform', () => {
     it('should return error for nonexistent file', () => {
         const editResult = editTransform({
             file_path: '/nonexistent/file.unity',
-            transform_id: 123,
+            transform_id: '123',
             position: { x: 1, y: 2, z: 3 }
         });
 
@@ -929,7 +929,7 @@ describe('editTransform', () => {
         // Player's transform ID from SampleScene.unity is 1847675924
         const editResult = editTransform({
             file_path: temp_fixture.temp_path,
-            transform_id: 1847675924,
+            transform_id: '1847675924',
             position: { x: 99, y: 88, z: 77 }
         });
 
@@ -2603,7 +2603,7 @@ describe('reparentGameObject', () => {
         });
 
         expect(result.success).toBe(true);
-        expect(result.new_parent_transform_id).toBe(0);
+        expect(result.new_parent_transform_id).toBe('0');
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         const childPattern = new RegExp(`--- !u!4 &${childResult.transform_id}[\\s\\S]*?(?=--- !u!|$)`);
@@ -2779,7 +2779,7 @@ describe('reparentGameObject', () => {
         });
 
         expect(result.success).toBe(true);
-        expect(result.new_parent_transform_id).toBe(0);
+        expect(result.new_parent_transform_id).toBe('0');
     });
 
     it('should fail with invalid file ID when using --by-id', () => {
@@ -3697,7 +3697,7 @@ describe('createGameObject - variant support', () => {
         });
 
         expect(result.success).toBe(true);
-        expect(result.prefab_instance_id).toBe(700000);
+        expect(result.prefab_instance_id).toBe('700000');
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
 
@@ -4275,4 +4275,212 @@ describe('editComponentByFileId - m_ prefix order (Bug #1)', () => {
         expect(content).toContain('moveSpeed: 15');
     });
 
+});
+
+describe('editComponentByFileId - m_ prefixed custom field update (no duplicate insertion)', () => {
+    const fixtureContent = [
+        '%YAML 1.1',
+        '%TAG !u! tag:unity3d.com,2011:',
+        '--- !u!1 &100',
+        'GameObject:',
+        '  m_ObjectHideFlags: 0',
+        '  m_Name: Entity',
+        '--- !u!114 &200',
+        'MonoBehaviour:',
+        '  m_ObjectHideFlags: 0',
+        '  m_Script: {fileID: 11500000, guid: abc123, type: 3}',
+        '  m_Name: ',
+        '  m_EditorClassIdentifier: ',
+        '  m_entityName: OldName',
+        '  m_pathPrefix: Echo',
+        '  m_entityTargetingSide: Ally',
+        '',
+    ].join('\n');
+
+    let tempDir: string;
+    let tempPath: string;
+
+    beforeEach(() => {
+        const { mkdtempSync } = require('fs');
+        tempDir = mkdtempSync(join(tmpdir(), 'uat-m-prefix-'));
+        tempPath = join(tempDir, 'test.prefab');
+        writeFileSync(tempPath, fixtureContent);
+    });
+
+    afterEach(() => {
+        rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should update m_entityName when called with unprefixed entityName', () => {
+        const result = editComponentByFileId({
+            file_path: tempPath,
+            file_id: '200',
+            property: 'entityName',
+            new_value: 'Player'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.bytes_written).toBeGreaterThan(0);
+
+        const content = readFileSync(tempPath, 'utf-8');
+        expect(content).toContain('m_entityName: Player');
+        expect(content).not.toMatch(/^\s*entityName:/m);
+    });
+
+    it('should update m_entityTargetingSide when called with unprefixed name', () => {
+        const result = editComponentByFileId({
+            file_path: tempPath,
+            file_id: '200',
+            property: 'entityTargetingSide',
+            new_value: 'Enemy'
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(tempPath, 'utf-8');
+        expect(content).toContain('m_entityTargetingSide: Enemy');
+        expect(content).not.toMatch(/^\s*entityTargetingSide:/m);
+    });
+
+    it('should not create duplicates across sequential updates', () => {
+        editComponentByFileId({
+            file_path: tempPath,
+            file_id: '200',
+            property: 'entityName',
+            new_value: 'Player'
+        });
+        editComponentByFileId({
+            file_path: tempPath,
+            file_id: '200',
+            property: 'entityTargetingSide',
+            new_value: 'Enemy'
+        });
+
+        const content = readFileSync(tempPath, 'utf-8');
+        expect(content).toContain('m_entityName: Player');
+        expect(content).toContain('m_entityTargetingSide: Enemy');
+        expect(content).not.toMatch(/^\s*entityName:/m);
+        expect(content).not.toMatch(/^\s*entityTargetingSide:/m);
+    });
+
+    it('should report no_change when m_-prefixed field already has the value', () => {
+        const result = editComponentByFileId({
+            file_path: tempPath,
+            file_id: '200',
+            property: 'pathPrefix',
+            new_value: 'Echo'
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.no_change).toBe(true);
+
+        const content = readFileSync(tempPath, 'utf-8');
+        expect(content).toContain('m_pathPrefix: Echo');
+        expect(content).not.toMatch(/^\s*pathPrefix:/m);
+    });
+});
+
+// ========== Bug #1: Large fileID precision in PrefabVariant ==========
+
+describe('addComponent - PrefabVariant fileID precision', () => {
+    it('should preserve large fileIDs without precision loss', () => {
+        const temp = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SamplePrefabVariant.prefab')
+        );
+        try {
+            const result = addComponent({
+                file_path: temp.temp_path,
+                game_object_name: 'EnemyVariant',
+                component_type: 'AudioSource',
+            });
+
+            expect(result.success).toBe(true);
+
+            const content = readFileSync(temp.temp_path, 'utf-8');
+            // The stripped GO fileID is 5765656985498706498 (exceeds MAX_SAFE_INTEGER)
+            // Must appear verbatim, not truncated to 5765656985498707000
+            expect(content).toContain('m_GameObject: {fileID: 5765656985498706498}');
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+});
+
+// ========== Bug #4: Managed reference override ==========
+
+describe('editPrefabOverride - managed reference', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SamplePrefabVariant.prefab')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should place managed_reference ID in value field with objectReference {fileID: 0}', () => {
+        const result = editPrefabOverride({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '5765656985498706500',
+            property_path: 'patrolPoints.Array.data[0].managedReferenceValue',
+            new_value: '',
+            managed_reference: '9000000000000000001',
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.action).toBe('updated');
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toMatch(/propertyPath: 'patrolPoints\.Array\.data\[0\]\.managedReferenceValue'\s+value: 9000000000000000001\s+objectReference: \{fileID: 0\}/);
+    });
+});
+
+// ========== Bug #5: batch-overrides empty value regression ==========
+
+describe('batchEditPrefabOverrides - empty value', () => {
+    it('should accept empty value when object_reference is provided', () => {
+        const temp = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SamplePrefabVariant.prefab')
+        );
+        try {
+            const result = batchEditPrefabOverrides(temp.temp_path, '5765656985498706500', [
+                { property_path: 'health', value: '', object_reference: '{fileID: 12345}' }
+            ]);
+
+            expect(result.success).toBe(true);
+
+            const content = readFileSync(temp.temp_path, 'utf-8');
+            expect(content).toMatch(/propertyPath: health\s+value:\s*\n\s+objectReference: \{fileID: 12345\}/);
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+});
+
+// ========== Bug #6: Auto-quote bracket propertyPaths regression ==========
+
+describe('editPrefabOverride - bracket auto-quoting', () => {
+    it('should auto-quote propertyPath containing brackets', () => {
+        const temp = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SamplePrefabVariant.prefab')
+        );
+        try {
+            const result = editPrefabOverride({
+                file_path: temp.temp_path,
+                prefab_instance: '5765656985498706500',
+                property_path: 'patrolPoints.Array.data[0].managedReferenceType',
+                new_value: 'Assembly-CSharp GameAI.NewBehaviour',
+            });
+
+            expect(result.success).toBe(true);
+
+            const content = readFileSync(temp.temp_path, 'utf-8');
+            expect(content).toContain("propertyPath: 'patrolPoints.Array.data[0].managedReferenceType'");
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
 });

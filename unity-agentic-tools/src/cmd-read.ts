@@ -7,8 +7,10 @@ import { getNativeExtractCsharpTypes, getNativeExtractDllTypes, getNativeBuildTy
 import { read_settings } from './settings';
 import { get_build_settings } from './build-settings';
 import { UnityDocument } from './editor';
+import { extractGuidFromMeta, resolve_source_prefab } from './editor/shared';
+import { get_class_id } from './class-ids';
 import { load_guid_cache, load_guid_cache_for_file } from './guid-cache';
-import { path_glob_to_regex } from './utils';
+import { path_glob_to_regex, find_unity_project_root } from './utils';
 import { list_packages } from './packages';
 import { load_input_actions } from './input-actions';
 import type { InputActionsFile } from './input-actions';
@@ -794,13 +796,72 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             if (result.total === 0 && !result.error) {
-                try {
-                    const fileSize = statSync(file).size;
-                    if (fileSize > 100) {
-                        const corruptWarning = 'File has valid Unity YAML header but contains no parseable GameObjects -- file may be corrupt or malformed';
-                        result.warning = result.warning ? `${result.warning}; ${corruptWarning}` : corruptWarning;
-                    }
-                } catch { /* ignore stat errors */ }
+                // Check if this is a PrefabVariant (has prefab_instances but no direct gameobjects)
+                const prefabInstances = (result as unknown as Record<string, unknown>).prefabInstances as Array<Record<string, unknown>> | undefined;
+                if (prefabInstances && prefabInstances.length > 0) {
+                    // Try to resolve source prefab hierarchy
+                    try {
+                        const doc = UnityDocument.from_file(file);
+                        const projectPath = find_unity_project_root(dirname(file));
+                        const resolved = resolve_source_prefab(doc, file, projectPath ?? undefined);
+
+                        if (resolved) {
+                            // Inspect the source prefab
+                            const sourceResult = getScanner().inspect_all_paginated({
+                                file: resolved.source_path,
+                                include_properties: options.properties === true,
+                                verbose: options.verbose === true,
+                                page_size: pageSize,
+                                cursor: 0,
+                                max_depth: maxDepth,
+                                filter_component: options.filterComponent,
+                            });
+
+                            if (sourceResult.total > 0 && sourceResult.gameobjects) {
+                                // Apply m_Name overrides from variant modifications
+                                const piBlock = resolved.prefab_instance_block;
+                                const nameOverrides = new Map<string, string>();
+                                const namePattern = /- target:[ \t]*\{fileID:[ \t]*(-?\d+)[^}]*\}\s*\n\s*propertyPath:[ \t]*m_Name\s*\n\s*value:[ \t]*(.*)/g;
+                                let nameMatch;
+                                while ((nameMatch = namePattern.exec(piBlock.raw)) !== null) {
+                                    nameOverrides.set(nameMatch[1], nameMatch[2].trim());
+                                }
+
+                                // Apply name overrides to source gameobjects
+                                for (const go of sourceResult.gameobjects) {
+                                    const goRecord = go as unknown as Record<string, unknown>;
+                                    const override = nameOverrides.get(goRecord.fileId as string);
+                                    if (override) {
+                                        goRecord.name = override;
+                                    }
+                                }
+
+                                // Merge into result
+                                const resultRecord = result as unknown as Record<string, unknown>;
+                                resultRecord.gameobjects = sourceResult.gameobjects;
+                                resultRecord.total = sourceResult.total;
+                                resultRecord.totalInScene = sourceResult.totalInScene;
+                                resultRecord.resolvedFromSource = true;
+                                resultRecord.sourcePrefab = resolved.source_path;
+                                resultRecord.sourceGuid = resolved.source_guid;
+
+                                const variantNote = `PrefabVariant resolved from source prefab: ${resolved.source_path}`;
+                                result.warning = result.warning ? `${result.warning}; ${variantNote}` : variantNote;
+                            }
+                        }
+                    } catch { /* source resolution failed, fall through to corrupt warning */ }
+                }
+
+                // If still 0 gameobjects after variant resolution, show the corrupt warning
+                if (result.total === 0) {
+                    try {
+                        const fileSize = statSync(file).size;
+                        if (fileSize > 100) {
+                            const corruptWarning = 'File has valid Unity YAML header but contains no parseable GameObjects -- file may be corrupt or malformed';
+                            result.warning = result.warning ? `${result.warning}; ${corruptWarning}` : corruptWarning;
+                        }
+                    } catch { /* ignore stat errors */ }
+                }
             }
 
             if (options.summary) {
@@ -1244,15 +1305,35 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                         const target_match = lines[i].match(/\{fileID:\s*(-?\d+)/);
                         const property_match = i + 1 < lines.length ? lines[i + 1].match(/propertyPath:\s*(.+)/) : null;
                         const value_match = i + 2 < lines.length ? lines[i + 2].match(/value:\s*(.*)/) : null;
-                        const obj_ref_match = i + 3 < lines.length ? lines[i + 3].match(/objectReference:\s*\{fileID:\s*(-?\d+)/) : null;
+                        const obj_ref_match = i + 3 < lines.length ? lines[i + 3].match(/objectReference:[ \t]*(.+)/) : null;
 
                         if (target_match && property_match) {
-                            modifications.push({
+                            const mod: Record<string, unknown> = {
                                 target_file_id: target_match[1],
                                 property_path: property_match[1].trim(),
                                 value: value_match ? value_match[1].trim() : '',
-                                object_reference: obj_ref_match ? obj_ref_match[1] : null,
-                            });
+                                object_reference: obj_ref_match ? obj_ref_match[1].trim() : null,
+                            };
+
+                            // Parse managed reference type declarations into structured fields
+                            const propPath = mod.property_path as string;
+                            const modValue = mod.value as string;
+                            if (propPath.endsWith('.managedReferenceType') && modValue) {
+                                const spaceIdx = modValue.indexOf(' ');
+                                if (spaceIdx > 0) {
+                                    const assembly = modValue.substring(0, spaceIdx);
+                                    const full_type = modValue.substring(spaceIdx + 1);
+                                    const lastDot = full_type.lastIndexOf('.');
+                                    mod.managed_reference_type = {
+                                        assembly,
+                                        full_type,
+                                        namespace: lastDot >= 0 ? full_type.substring(0, lastDot) : '',
+                                        class_name: lastDot >= 0 ? full_type.substring(lastDot + 1) : full_type,
+                                    };
+                                }
+                            }
+
+                            modifications.push(mod);
                         }
                         i += 4;
                     } else {
@@ -1333,6 +1414,145 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
                 const edges = doc.trace_references(file_id, direction, depth);
                 console.log(JSON.stringify({ file, file_id, direction, depth, edges }, null, 2));
+            } catch (err) {
+                console.log(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }, null, 2));
+                process.exit(1);
+            }
+        });
+
+    cmd.command('target <file> <gameobject_name> [component_type]')
+        .description('Build a --target reference string for prefab override commands')
+        .option('-p, --project <path>', 'Unity project path')
+        .option('-j, --json', 'Output as JSON')
+        .action((file, gameobject_name, component_type, options) => {
+            try {
+                if (!existsSync(file)) {
+                    console.log(JSON.stringify({ error: `File not found: ${file}` }, null, 2));
+                    process.exit(1);
+                }
+
+                const doc = UnityDocument.from_file(file);
+
+                // Determine GUID: PrefabVariants use the source prefab's GUID (targets reference source objects)
+                let guid: string | null;
+                const piBlocks = doc.find_by_class_id(1001);
+                if (piBlocks.length > 0) {
+                    const sourceMatch = piBlocks[0].raw.match(/m_SourcePrefab:[ \t]*\{[^}]*guid:[ \t]*([a-f0-9]{32})/);
+                    guid = sourceMatch ? sourceMatch[1] : null;
+                    if (!guid) {
+                        console.log(JSON.stringify({ error: 'Cannot extract source GUID from PrefabInstance m_SourcePrefab.' }, null, 2));
+                        process.exit(1);
+                    }
+                } else {
+                    const metaPath = file + '.meta';
+                    guid = extractGuidFromMeta(metaPath);
+                    if (!guid) {
+                        console.log(JSON.stringify({ error: `Cannot read GUID from ${metaPath}. Ensure the .meta file exists.` }, null, 2));
+                        process.exit(1);
+                    }
+                }
+
+                // Find the GameObject
+                const goResult = doc.require_unique_game_object(gameobject_name);
+                let targetFileId: string;
+
+                if ('error' in goResult) {
+                    // Fallback: search PrefabInstance modifications for m_Name
+                    let found = false;
+                    for (const block of doc.blocks) {
+                        if (block.class_id !== 1001) continue;
+                        const nameMatch = block.raw.match(
+                            new RegExp(`- target:[ \\t]*\\{fileID:[ \\t]*(-?\\d+)[^}]*\\}\\s*\\n\\s*propertyPath:[ \\t]*m_Name\\s*\\n\\s*value:[ \\t]*${gameobject_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'm')
+                        );
+                        if (nameMatch) {
+                            targetFileId = nameMatch[1];
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        console.log(JSON.stringify({ error: goResult.error }, null, 2));
+                        process.exit(1);
+                    }
+                } else {
+                    targetFileId = goResult.file_id;
+                }
+
+                // If component_type specified, find the component on the GO
+                if (component_type) {
+                    const classId = get_class_id(component_type);
+                    const goBlock = doc.find_by_file_id(targetFileId!);
+
+                    if (goBlock && !goBlock.is_stripped) {
+                        // Normal GO: search component list
+                        const compRefs = [...goBlock.raw.matchAll(/component:[ \t]*\{fileID:[ \t]*(-?\d+)\}/g)].map(m => m[1]);
+                        let compFound = false;
+                        for (const refId of compRefs) {
+                            const compBlock = doc.find_by_file_id(refId);
+                            if (!compBlock) continue;
+                            if (classId !== null && compBlock.class_id === classId) {
+                                targetFileId = refId;
+                                compFound = true;
+                                break;
+                            }
+                            // Script-based match: check m_Script guid for MonoBehaviours
+                            if (classId === null && compBlock.class_id === 114) {
+                                const scriptMatch = compBlock.raw.match(/m_Script:[ \t]*\{[^}]*guid:[ \t]*([a-f0-9]{32})/);
+                                if (scriptMatch) {
+                                    const project = options.project || find_unity_project_root(dirname(file));
+                                    if (project) {
+                                        const cache = load_guid_cache(project);
+                                        if (cache) {
+                                            const scriptPath = cache.resolve(scriptMatch[1]);
+                                            if (scriptPath && basename(scriptPath, '.cs').toLowerCase() === component_type.toLowerCase().replace(/\.cs$/, '')) {
+                                                targetFileId = refId;
+                                                compFound = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if (!compFound) {
+                            console.log(JSON.stringify({ error: `Component "${component_type}" not found on GameObject "${gameobject_name}"` }, null, 2));
+                            process.exit(1);
+                        }
+                    } else {
+                        // Stripped GO or not found directly: search source prefab for component
+                        const project = options.project || find_unity_project_root(dirname(file));
+                        const resolved = resolve_source_prefab(doc, file, project ?? undefined);
+                        if (resolved) {
+                            const sourceDoc = UnityDocument.from_file(resolved.source_path);
+                            const sourceGo = sourceDoc.require_unique_game_object(gameobject_name);
+                            if (!('error' in sourceGo)) {
+                                const compRefs = [...sourceGo.raw.matchAll(/component:[ \t]*\{fileID:[ \t]*(-?\d+)\}/g)].map(m => m[1]);
+                                let compFound = false;
+                                for (const refId of compRefs) {
+                                    const compBlock = sourceDoc.find_by_file_id(refId);
+                                    if (!compBlock) continue;
+                                    if (classId !== null && compBlock.class_id === classId) {
+                                        targetFileId = refId;
+                                        compFound = true;
+                                        break;
+                                    }
+                                }
+                                if (!compFound) {
+                                    console.log(JSON.stringify({ error: `Component "${component_type}" not found on "${gameobject_name}" in source prefab` }, null, 2));
+                                    process.exit(1);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                const target = `{fileID: ${targetFileId!}, guid: ${guid}, type: 3}`;
+                console.log(JSON.stringify({
+                    target,
+                    file_id: targetFileId!,
+                    guid,
+                    type: 3,
+                }, null, 2));
             } catch (err) {
                 console.log(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }, null, 2));
                 process.exit(1);
@@ -1449,7 +1669,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         });
 
     // ========== P3.1: Editor.log reading ==========
-    cmd.command('log')
+    cmd.command('log [project-path]')
         .description('Read and filter the Unity Editor.log')
         .option('--path <file>', 'Path to Editor.log (auto-detected if omitted)')
         .option('--project <path>', 'Filter to log entries from a specific Unity project session')
@@ -1461,7 +1681,8 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--since <timestamp>', 'Filter entries after this timestamp (YYYY-MM-DD or HH:MM:SS)')
         .option('--search <pattern>', 'Regex filter on log content')
         .option('-j, --json', 'Output as JSON')
-        .action((options) => {
+        .action((projectPath: string | undefined, options) => {
+            if (projectPath && !options.project) options.project = projectPath;
             const logPath = options.path || get_editor_log_path();
             if (!logPath || !existsSync(logPath)) {
                 console.log(JSON.stringify({ error: `Editor.log not found${logPath ? `: ${logPath}` : '. Could not detect platform log path.'}` }, null, 2));
