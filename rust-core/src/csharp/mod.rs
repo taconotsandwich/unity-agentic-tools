@@ -238,9 +238,10 @@ static NON_SERIALIZED_RE: LazyLock<Regex> = LazyLock::new(|| {
 // Field declaration: captures (1) everything before the type, (2) type, (3) name
 // Handles generics like List<int>, Dictionary<string, int>, arrays like int[], and nullable T?
 // Leading attributes like [SerializeField] are stripped before matching (see strip_attributes).
+// Uses =(?!>) to exclude expression-bodied properties/methods (=> arrow).
 static FIELD_DECL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?m)^\s*((?:(?:public|private|protected|internal|static|readonly|const|volatile|new)\s+)*)(\w[\w.]*(?:<[^>]+>)?(?:\[\s*\])?(?:\?)?)\s+(\w+)\s*[;=]",
+        r"(?m)^\s*((?:(?:public|private|protected|internal|static|readonly|const|volatile|new)\s+)*)(\w[\w.]*(?:<[^>]+>)?(?:\[\s*\])?(?:\?)?)\s+(\w+)\s*(?:;|=[^>])",
     )
     .unwrap()
 });
@@ -1859,5 +1860,26 @@ namespace Game {
         assert!(names.contains(&"Config"), "Should find Config");
         assert!(names.contains(&"RealClass"), "Should find RealClass");
         assert!(!names.contains(&"NotAClass"), "Should NOT find NotAClass (inside string literal)");
+    }
+
+    #[test]
+    fn test_expression_bodied_property_not_serialized() {
+        let source = r#"
+public class PhaseController : MonoBehaviour {
+    public int phase = 1;
+    public float speed;
+    public bool IsPhase2 => phase >= 2;
+    public float ArenaLeftBound => -10f;
+    public Vector3 ArenaCenter => Vector3.zero;
+    public string Description => "some text";
+}
+"#;
+        let types = extract_fields_from_source(source);
+        let ctrl = types.iter().find(|t| t.name == "PhaseController").expect("PhaseController");
+        assert_eq!(ctrl.fields.len(), 2, "Should only have 'phase' and 'speed', not expression-bodied properties");
+        assert!(ctrl.fields.iter().any(|f| f.name == "phase"));
+        assert!(ctrl.fields.iter().any(|f| f.name == "speed"));
+        assert!(!ctrl.fields.iter().any(|f| f.name == "IsPhase2"), "Expression-bodied property should not be extracted");
+        assert!(!ctrl.fields.iter().any(|f| f.name == "ArenaLeftBound"), "Expression-bodied property should not be extracted");
     }
 }

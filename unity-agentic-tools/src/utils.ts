@@ -50,13 +50,10 @@ export function atomicWrite(filePath: string, content: string): AtomicWriteResul
     // Randomized temp name to prevent collisions from concurrent writes
     const suffix = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
     const tmpPath = `${filePath}.${suffix}.tmp`;
-    const bakPath = `${filePath}.bak`;
+    const bakPath = `${filePath}.${suffix}.bak`;
     let bakCreated = false;
 
     try {
-        // Clean up stale .bak from prior crashed runs
-        try { unlinkSync(bakPath); } catch { /* no stale .bak, fine */ }
-
         writeFileSync(tmpPath, content, 'utf-8');
 
         // Move original to .bak -- if it vanished (TOCTOU race), that's OK
@@ -108,6 +105,15 @@ export function atomicWrite(filePath: string, content: string): AtomicWriteResul
 
 function is_enoent(err: unknown): boolean {
     return err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+/**
+ * Normalize property path: convert dot-notation array indices to bracket notation.
+ * e.g. "m_Materials.Array.data.0" -> "m_Materials.Array.data[0]"
+ * This provides a shell-safe alternative to bracket syntax which triggers glob expansion in zsh.
+ */
+export function normalize_property_path(path: string): string {
+    return path.replace(/\.Array\.data\.(\d+)/g, '.Array.data[$1]');
 }
 
 /**

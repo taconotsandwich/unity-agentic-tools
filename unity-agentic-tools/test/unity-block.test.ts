@@ -134,6 +134,17 @@ describe('UnityBlock', () => {
             expect(val).toContain('fileID: 10303');
         });
 
+        it('should read array element using dot-notation index', () => {
+            const raw_blocks = load_blocks('SampleScene.unity');
+            const raw = find_raw_block(raw_blocks, '1847675926');
+            const block = new UnityBlock(raw);
+
+            const bracket = block.get_property('m_Materials.Array.data[0]');
+            const dot = block.get_property('m_Materials.Array.data.0');
+            expect(dot).toBe(bracket);
+            expect(dot).toContain('fileID: 10303');
+        });
+
         it.each([
             ['non-existent property', '508316491', 'm_NonExistent'],
             ['non-existent dotted path', '508316495', 'm_LocalPosition.w'],
@@ -197,6 +208,19 @@ describe('UnityBlock', () => {
             );
             expect(modified).toBe(true);
             expect(block.get_property('m_Materials.Array.data[0]')).toContain('fileID: 99999');
+        });
+
+        it('should set an array element using dot-notation index', () => {
+            const raw_blocks = load_blocks('SampleScene.unity');
+            const raw = find_raw_block(raw_blocks, '1847675926');
+            const block = new UnityBlock(raw);
+
+            const modified = block.set_property(
+                'm_Materials.Array.data.0',
+                '{fileID: 99999, guid: abcd1234, type: 2}'
+            );
+            expect(modified).toBe(true);
+            expect(block.get_property('m_Materials.Array.data.0')).toContain('fileID: 99999');
         });
 
         it('should return false when property does not exist (simple)', () => {
@@ -958,6 +982,38 @@ describe('UnityBlock', () => {
             const modified = block.set_property('myNewField', 'hello');
             expect(modified).toBe(true);
             expect(block.raw).toContain('myNewField: hello');
+        });
+
+        it('should NOT insert unprefixed field when m_-prefixed variant exists', () => {
+            const raw = [
+                '--- !u!114 &911\n',
+                'MonoBehaviour:\n',
+                '  m_Script: {fileID: 11500000}\n',
+                '  m_EditorClassIdentifier: \n',
+                '  m_entityName: OldValue\n',
+            ].join('');
+            const block = new UnityBlock(raw);
+
+            const modified = block.set_property('entityName', 'NewValue');
+            expect(modified).toBe(false);
+            expect(block.raw).not.toMatch(/^\s*entityName:/m);
+            expect(block.raw).toContain('m_entityName: OldValue');
+        });
+
+        it('should NOT insert m_-prefixed field when unprefixed variant exists', () => {
+            const raw = [
+                '--- !u!114 &912\n',
+                'MonoBehaviour:\n',
+                '  m_Script: {fileID: 11500000}\n',
+                '  m_EditorClassIdentifier: \n',
+                '  moveSpeed: 10\n',
+            ].join('');
+            const block = new UnityBlock(raw);
+
+            const modified = block.set_property('m_moveSpeed', 'NewValue');
+            expect(modified).toBe(false);
+            expect(block.raw).not.toMatch(/^\s*m_moveSpeed:/m);
+            expect(block.raw).toContain('moveSpeed: 10');
         });
     });
 });

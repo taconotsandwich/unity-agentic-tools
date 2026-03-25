@@ -2,7 +2,7 @@ import { describe, expect, it, afterEach } from 'vitest';
 import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { generateGuid, atomicWrite, validate_name, path_glob_to_regex } from '../src/utils';
+import { generateGuid, atomicWrite, validate_name, path_glob_to_regex, normalize_property_path } from '../src/utils';
 
 describe('generateGuid', () => {
     it('should return a 32-character lowercase hex string', () => {
@@ -108,17 +108,17 @@ describe('atomicWrite', () => {
         expect(readFileSync(filePath, 'utf-8')).toBe('');
     });
 
-    it('should clean up stale .bak from prior crashed run', () => {
+    it('should not leave uniquely-suffixed .bak after successful write', () => {
         const dir = makeTempDir();
         const filePath = join(dir, 'test.txt');
         writeFileSync(filePath, 'current');
-        writeFileSync(`${filePath}.bak`, 'stale backup from crash');
 
         const result = atomicWrite(filePath, 'new content');
 
         expect(result.success).toBe(true);
         expect(readFileSync(filePath, 'utf-8')).toBe('new content');
-        expect(existsSync(`${filePath}.bak`)).toBe(false);
+        const bakFiles = readdirSync(dir).filter(f => f.endsWith('.bak'));
+        expect(bakFiles).toHaveLength(0);
     });
 
     it('should clean up .tmp on write failure', () => {
@@ -163,6 +163,27 @@ describe('atomicWrite', () => {
         expect(readFileSync(filePath, 'utf-8')).toBe('write-4');
         const leftovers = readdirSync(dir).filter(f => f.endsWith('.tmp') || f.endsWith('.bak'));
         expect(leftovers).toHaveLength(0);
+    });
+});
+
+describe('normalize_property_path', () => {
+    it('should convert dot-notation array index to bracket notation', () => {
+        expect(normalize_property_path('m_Materials.Array.data.0')).toBe('m_Materials.Array.data[0]');
+        expect(normalize_property_path('m_Points.Array.data.5.x')).toBe('m_Points.Array.data[5].x');
+    });
+
+    it('should leave bracket notation unchanged', () => {
+        expect(normalize_property_path('m_Materials.Array.data[0]')).toBe('m_Materials.Array.data[0]');
+    });
+
+    it('should leave non-array paths unchanged', () => {
+        expect(normalize_property_path('m_LocalPosition.x')).toBe('m_LocalPosition.x');
+        expect(normalize_property_path('m_Name')).toBe('m_Name');
+    });
+
+    it('should handle multiple array indices in one path', () => {
+        expect(normalize_property_path('m_Outer.Array.data.2.m_Inner.Array.data.3'))
+            .toBe('m_Outer.Array.data[2].m_Inner.Array.data[3]');
     });
 });
 

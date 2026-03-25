@@ -90,6 +90,7 @@ pub fn extract_modifications(block: &str) -> Vec<PrefabModification> {
     let guid_re = Regex::new(r"guid:\s*([a-f0-9]{32})").expect("Invalid regex");
     let value_re = Regex::new(r"^\s*value:\s*(.*)$").expect("Invalid regex");
     let property_re = Regex::new(r"^\s*propertyPath:\s*(.+)$").expect("Invalid regex");
+    let obj_ref_re = Regex::new(r"^\s*objectReference:\s*(.+)$").expect("Invalid regex");
 
     let mut i = 0;
     while i < lines.len() {
@@ -104,9 +105,10 @@ pub fn extract_modifications(block: &str) -> Vec<PrefabModification> {
                 .and_then(|c| c.get(1))
                 .map(|m| m.as_str().to_string());
 
-            // Look ahead for propertyPath and value
+            // Look ahead for propertyPath, value, and objectReference
             let mut property_path = String::new();
             let mut value = String::new();
+            let mut object_reference: Option<String> = None;
 
             for j in (i + 1)..lines.len().min(i + 5) {
                 if let Some(caps) = property_re.captures(lines[j]) {
@@ -114,6 +116,9 @@ pub fn extract_modifications(block: &str) -> Vec<PrefabModification> {
                 }
                 if let Some(caps) = value_re.captures(lines[j]) {
                     value = caps.get(1).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+                }
+                if let Some(caps) = obj_ref_re.captures(lines[j]) {
+                    object_reference = caps.get(1).map(|m| m.as_str().trim().to_string());
                 }
                 // Stop at next modification entry or section
                 if j > i + 1 && lines[j].trim_start().starts_with("- target:") {
@@ -126,6 +131,7 @@ pub fn extract_modifications(block: &str) -> Vec<PrefabModification> {
                 target_guid,
                 property_path,
                 value,
+                object_reference,
             });
         }
         i += 1;

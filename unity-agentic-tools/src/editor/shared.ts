@@ -1,6 +1,9 @@
 import { readFileSync, existsSync } from 'fs';
 import * as path from 'path';
-import { load_guid_cache } from '../guid-cache';
+import { load_guid_cache, load_guid_cache_for_file } from '../guid-cache';
+import { normalize_property_path, find_unity_project_root } from '../utils';
+import type { UnityDocument } from './unity-document';
+import type { UnityBlock } from './unity-block';
 
 /**
  * Extract all existing file IDs from a Unity YAML file.
@@ -434,6 +437,7 @@ export function validateUnityYAML(content: string): string | null {
  * Apply a single property modification to a block.
  */
 export function applyModification(block: string, propertyPath: string, value: string, objectReference: string): string {
+  propertyPath = normalize_property_path(propertyPath);
   // Handle simple paths (e.g., m_Name)
   if (!propertyPath.includes('.') && !propertyPath.includes('Array')) {
     const propPattern = new RegExp(`(^\\s*${propertyPath}:\\s*)(.*)$`, 'm');
@@ -647,6 +651,49 @@ export function extractGuidFromMeta(metaPath: string): string | null {
 }
 
 /**
+ * Resolve the source prefab for a PrefabVariant file.
+ * Finds the PrefabInstance block, extracts the source GUID, and resolves
+ * the source prefab path via the GUID cache.
+ */
+export function resolve_source_prefab(
+  doc: UnityDocument,
+  file_path: string,
+  project_path?: string,
+): {
+  source_guid: string;
+  source_path: string;
+  prefab_instance_id: string;
+  prefab_instance_block: UnityBlock;
+} | null {
+  const pi_blocks = doc.find_by_class_id(1001);
+  if (pi_blocks.length === 0) return null;
+
+  const pi_block = pi_blocks[0];
+
+  // Extract source GUID from m_SourcePrefab
+  const source_match = pi_block.raw.match(/m_SourcePrefab:[ \t]*\{[^}]*guid:[ \t]*([a-f0-9]{32})/);
+  if (!source_match) return null;
+  const source_guid = source_match[1];
+
+  // Resolve GUID to absolute path
+  const resolved_project = project_path || find_unity_project_root(path.dirname(file_path));
+  if (!resolved_project) return null;
+
+  const cache = load_guid_cache_for_file(file_path, resolved_project);
+  if (!cache) return null;
+
+  const source_path = cache.resolve_absolute(source_guid);
+  if (!source_path || !existsSync(source_path)) return null;
+
+  return {
+    source_guid,
+    source_path,
+    prefab_instance_id: pi_block.file_id,
+    prefab_instance_block: pi_block,
+  };
+}
+
+/**
  * Look up a script GUID by name, path, or raw GUID.
  * Returns { guid, path } or null if not found.
  */
@@ -731,6 +778,15 @@ export function resolveScriptGuid(
               const guid = extractGuidFromMeta(metaPath);
               if (guid) return { guid, path: matches[0].filePath };
             }
+            // Fallback: try Packages/ relative path through project root
+            if (matches[0].filePath.startsWith('Packages/')) {
+              const pkgPath = path.join(projectPath, matches[0].filePath);
+              const pkgMetaPath = pkgPath + '.meta';
+              if (existsSync(pkgMetaPath)) {
+                const guid = extractGuidFromMeta(pkgMetaPath);
+                if (guid) return { guid, path: matches[0].filePath };
+              }
+            }
           }
         }
         if (matches.length > 1) {
@@ -746,9 +802,16 @@ export function resolveScriptGuid(
               const fullPath = path.isAbsolute(m.filePath)
                 ? m.filePath
                 : path.join(projectPath, m.filePath);
-              const guid = existsSync(fullPath + '.meta')
+              let guid = existsSync(fullPath + '.meta')
                 ? extractGuidFromMeta(fullPath + '.meta')
                 : null;
+              // Fallback: try Packages/ relative path through project root
+              if (!guid && m.filePath.startsWith('Packages/')) {
+                const pkgPath = path.join(projectPath, m.filePath);
+                if (existsSync(pkgPath + '.meta')) {
+                  guid = extractGuidFromMeta(pkgPath + '.meta');
+                }
+              }
               return guid ? { guid, path: m.filePath } : null;
             })
             .filter((r): r is { guid: string; path: string } => r !== null);
@@ -757,6 +820,19 @@ export function resolveScriptGuid(
             return allResolved[0];
           }
           if (allResolved.length > 1) {
+            // Try package caches as tiebreaker
+            const pkgCachePaths = [
+              path.join(projectPath, '.unity-agentic', 'package-cache.json'),
+              path.join(projectPath, '.unity-agentic', 'local-package-cache.json'),
+            ];
+            for (const cachePath of pkgCachePaths) {
+              if (!existsSync(cachePath)) continue;
+              try {
+                const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
+                const inCache = allResolved.filter(r => r.guid in cache);
+                if (inCache.length === 1) return inCache[0];
+              } catch { /* ignore */ }
+            }
             const paths = allResolved.map(m => m.path).join(', ');
             throw new Error(
               `Ambiguous type "${script}": found ${allResolved.length} matches (${paths}). ` +

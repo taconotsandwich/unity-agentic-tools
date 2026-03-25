@@ -127,15 +127,23 @@ namespace UnityAgenticTools.Server
             }
 
             var tcs = new TaskCompletionSource<T>();
+
+            // Cancel immediately when server stops (e.g., assembly reload)
+            var reg = _cts.Token.Register(() => tcs.TrySetCanceled());
+
             _mainThreadQueue.Enqueue(() =>
             {
                 try
                 {
-                    tcs.SetResult(func());
+                    tcs.TrySetResult(func());
                 }
                 catch (Exception ex)
                 {
-                    tcs.SetException(ex);
+                    tcs.TrySetException(ex);
+                }
+                finally
+                {
+                    reg.Dispose();
                 }
             });
 
@@ -159,16 +167,24 @@ namespace UnityAgenticTools.Server
             }
 
             var tcs = new TaskCompletionSource<bool>();
+
+            // Cancel immediately when server stops (e.g., assembly reload)
+            var reg = _cts.Token.Register(() => tcs.TrySetCanceled());
+
             _mainThreadQueue.Enqueue(() =>
             {
                 try
                 {
                     action();
-                    tcs.SetResult(true);
+                    tcs.TrySetResult(true);
                 }
                 catch (Exception ex)
                 {
-                    tcs.SetException(ex);
+                    tcs.TrySetException(ex);
+                }
+                finally
+                {
+                    reg.Dispose();
                 }
             });
 

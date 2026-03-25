@@ -146,7 +146,7 @@ export interface CreateGameObjectOptions {
 
 export interface EditTransformOptions {
   file_path: string;
-  transform_id: number;
+  transform_id: string;
   position?: Vector3;
   rotation?: Vector3;  // Euler angles in degrees
   scale?: Vector3;
@@ -162,7 +162,7 @@ export interface AddComponentOptions {
 export interface AddComponentResult {
   success: boolean;
   file_path: string;
-  component_id?: number;
+  component_id?: string;
   script_guid?: string;  // Set when adding a script
   script_path?: string;  // Set when adding a script
   warning?: string;
@@ -179,16 +179,16 @@ export interface CreatePrefabVariantResult {
   success: boolean;
   output_path: string;
   source_guid?: string;
-  prefab_instance_id?: number;
+  prefab_instance_id?: string;
   error?: string;
 }
 
 export interface CreateGameObjectResult {
   success: boolean;
   file_path: string;
-  game_object_id?: number;
-  transform_id?: number;
-  prefab_instance_id?: number;
+  game_object_id?: string;
+  transform_id?: string;
+  prefab_instance_id?: string;
   error?: string;
 }
 
@@ -344,9 +344,9 @@ export interface ReparentGameObjectOptions {
 export interface ReparentGameObjectResult {
   success: boolean;
   file_path: string;
-  child_transform_id?: number;
-  old_parent_transform_id?: number;
-  new_parent_transform_id?: number;
+  child_transform_id?: string;
+  old_parent_transform_id?: string;
+  new_parent_transform_id?: string;
   error?: string;
 }
 
@@ -397,6 +397,7 @@ export interface EditPrefabOverrideOptions {
   new_value: string;
   object_reference?: string;    // e.g., "{fileID: 12345}" -- defaults to "{fileID: 0}"
   target?: string;              // Target reference for new entries (e.g., "{fileID: 400000, guid: abc, type: 3}")
+  managed_reference?: string;   // Managed reference ID -- placed in value: field, forces objectReference: {fileID: 0}
 }
 
 export interface EditPrefabOverrideResult {
@@ -406,6 +407,42 @@ export interface EditPrefabOverrideResult {
   property_path?: string;
   action?: 'updated' | 'added';
   error?: string;
+}
+
+export interface PrefabOverrideEdit {
+    property_path: string;
+    value: string;
+    object_reference?: string;
+    target?: string;
+    managed_reference?: string;   // Managed reference ID -- placed in value: field, forces objectReference: {fileID: 0}
+}
+
+export interface BatchPrefabOverrideResult {
+    success: boolean;
+    file_path: string;
+    prefab_instance_id?: string;
+    applied?: number;
+    actions?: Array<{ property_path: string; action: 'updated' | 'added' }>;
+    error?: string;
+}
+
+// ========== Managed Reference Types ==========
+
+export interface EditManagedReferenceOptions {
+    file_path: string;
+    file_id: string;
+    field_path: string;
+    type_name: string;
+    project_path?: string;
+    append?: boolean;
+}
+
+export interface EditManagedReferenceResult {
+    success: boolean;
+    file_path: string;
+    rid?: number;
+    type_info?: { class_name: string; namespace: string; assembly: string };
+    error?: string;
 }
 
 // ========== Settings Types ==========

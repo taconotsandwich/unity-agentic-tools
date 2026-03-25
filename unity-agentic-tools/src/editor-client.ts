@@ -40,7 +40,7 @@ export function read_editor_config(project_path: string): EditorConfig | { error
 }
 
 /** Error codes that indicate transient connection issues (server restarting after reload). */
-const RETRYABLE_CODES = new Set([-32002, -32003]);
+const RETRYABLE_CODES = new Set([-32000, -32002, -32003]);
 
 /** Delay schedule for retries (ms). Index = attempt number starting from 0. */
 const RETRY_DELAYS = [500, 1000, 2000];

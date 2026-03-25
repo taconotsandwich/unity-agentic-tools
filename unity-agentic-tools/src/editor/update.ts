@@ -1,4 +1,5 @@
 import { existsSync } from 'fs';
+import { readFileSync } from 'fs';
 import type {
     EditResult, PropertyEditOptions,
     EditTransformOptions, Vector3, Quaternion, PropertyEdit,
@@ -9,10 +10,13 @@ import type {
     ArrayEditOptions, ArrayEditResult, ComponentPropertyEdit,
     RemovePrefabOverrideOptions, RemovePrefabOverrideResult,
     PrefabSubArrayOptions, PrefabSubArrayResult,
+    PrefabOverrideEdit, BatchPrefabOverrideResult,
+    EditManagedReferenceOptions, EditManagedReferenceResult,
 } from '../types';
 import { validate_file_path } from '../utils';
 import { read_settings } from '../settings';
 import { UnityDocument } from './unity-document';
+import { yaml_quote_if_needed } from './unity-block';
 import { UnityBlock } from './unity-block';
 
 // ========== Private Helpers ==========
@@ -433,10 +437,16 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
     }
   }
 
-  // Type-validate the new value against the current value
-  // Try exact name first (custom MonoBehaviour fields), then m_-prefixed (built-in Unity fields)
-  const currentValue = targetBlock.get_property(exactProperty)
-    ?? (exactProperty !== prefixedProperty ? targetBlock.get_property(prefixedProperty) : null);
+  // Type-validate the new value against the current value.
+  // Track which name variant resolved so the write step uses the correct one.
+  const exactValue = targetBlock.get_property(exactProperty);
+  const resolvedProperty = exactValue !== null
+    ? exactProperty
+    : (exactProperty !== prefixedProperty && targetBlock.get_property(prefixedProperty) !== null
+      ? prefixedProperty
+      : null);
+  const currentValue = exactValue
+    ?? (resolvedProperty === prefixedProperty ? targetBlock.get_property(prefixedProperty) : null);
   if (currentValue !== null) {
     const typeError = validate_value_type(currentValue, new_value);
     if (typeError) {
@@ -448,12 +458,17 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
     }
   }
 
-  // Try exact property name first (handles custom MonoBehaviour fields like "DirectNested.RawValue")
-  let modified = targetBlock.set_property(exactProperty, new_value, '{fileID: 0}');
-
-  // Fall back to m_-prefixed name (handles built-in Unity fields like "m_LocalPosition.x")
-  if (!modified && exactProperty !== prefixedProperty) {
-    modified = targetBlock.set_property(prefixedProperty, new_value, '{fileID: 0}');
+  // Write using the resolved name (avoids inserting duplicates when the property
+  // exists under the m_-prefixed variant but the user supplied the unprefixed name).
+  let modified: boolean;
+  if (resolvedProperty) {
+    modified = targetBlock.set_property(resolvedProperty, new_value, '{fileID: 0}');
+  } else {
+    // Property doesn't exist yet -- try exact first (custom fields), then prefixed
+    modified = targetBlock.set_property(exactProperty, new_value, '{fileID: 0}');
+    if (!modified && exactProperty !== prefixedProperty) {
+      modified = targetBlock.set_property(prefixedProperty, new_value, '{fileID: 0}');
+    }
   }
 
   // If still unchanged, either property doesn't exist or value is already set
@@ -500,8 +515,14 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
  * Edit or add a property override in a PrefabInstance's m_Modifications list.
  */
 export function editPrefabOverride(options: EditPrefabOverrideOptions): EditPrefabOverrideResult {
-    const { file_path, prefab_instance, property_path, new_value, object_reference, target } = options;
-    const objRef = object_reference ?? '{fileID: 0}';
+    const { file_path, prefab_instance, new_value, object_reference, target, managed_reference } = options;
+    // Auto-quote propertyPath containing brackets (Unity YAML requires single quotes)
+    const property_path = /[\[\]]/.test(options.property_path) && !options.property_path.startsWith("'")
+        ? `'${options.property_path}'`
+        : options.property_path;
+    // managed_reference: ID goes in value:, objectReference forced to {fileID: 0}
+    const effectiveValue = managed_reference ?? new_value;
+    const objRef = managed_reference ? '{fileID: 0}' : (object_reference ?? '{fileID: 0}');
 
     if (!existsSync(file_path)) {
         return { success: false, file_path, error: `File not found: ${file_path}` };
@@ -520,19 +541,24 @@ export function editPrefabOverride(options: EditPrefabOverrideOptions): EditPref
         return { success: false, file_path, error: `PrefabInstance "${prefab_instance}" not found` };
     }
 
-    // Find existing modification entry by propertyPath
-    const escapedPath = property_path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Find existing modification entry by propertyPath (handle both quoted and unquoted)
+    const unquotedPath = property_path.replace(/^'|'$/g, '');
+    const quotedPath = `'${unquotedPath}'`;
+    const escapedUnquoted = unquotedPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapedQuoted = quotedPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pathAlternation = escapedUnquoted === escapedQuoted ? escapedUnquoted : `(?:${escapedQuoted}|${escapedUnquoted})`;
     const entryPattern = new RegExp(
-        `(- target:\\s*\\{[^}]+\\}\\s*\\n\\s*propertyPath:\\s*)${escapedPath}(\\s*\\n\\s*value:\\s*)(.*)(\\s*\\n\\s*objectReference:\\s*)(.*)`,
+        `(- target:\\s*\\{[^}]+\\}\\s*\\n\\s*propertyPath:\\s*)${pathAlternation}(\\s*\\n\\s*value:\\s*)(.*)(\\s*\\n\\s*objectReference:\\s*)(.*)`,
         'm'
     );
     const entryMatch = targetBlock.raw.match(entryPattern);
 
     if (entryMatch) {
-        // Update existing entry
+        // Update existing entry (apply YAML quoting for string safety)
+        const quotedValue = yaml_quote_if_needed(effectiveValue);
         const updatedText = targetBlock.raw.replace(entryPattern,
             (_m: string, g1: string, g2: string, _g3: string, g4: string) =>
-                g1 + property_path + g2 + new_value + g4 + objRef
+                g1 + property_path + g2 + quotedValue + g4 + objRef
         );
 
         targetBlock.replace_raw(updatedText);
@@ -584,8 +610,9 @@ export function editPrefabOverride(options: EditPrefabOverrideOptions): EditPref
         };
     }
 
-    // Build the new modification entry
-    const newEntry = `    - target: ${targetRef}\n      propertyPath: ${property_path}\n      value: ${new_value}\n      objectReference: ${objRef}`;
+    // Build the new modification entry (apply YAML quoting for string safety)
+    const quotedNewValue = yaml_quote_if_needed(effectiveValue);
+    const newEntry = `    - target: ${targetRef}\n      propertyPath: ${property_path}\n      value: ${quotedNewValue}\n      objectReference: ${objRef}`;
 
     // Insert before m_RemovedComponents (end of modifications list)
     const removedPattern = /(\n\s*m_RemovedComponents:)/m;
@@ -634,6 +661,152 @@ export function editPrefabOverride(options: EditPrefabOverrideOptions): EditPref
         prefab_instance_id: prefab_instance,
         property_path,
         action: 'added',
+    };
+}
+
+/**
+ * Batch edit multiple property overrides in a PrefabInstance's m_Modifications list.
+ * Loads the document once, applies all edits in-memory, and saves once.
+ */
+export function batchEditPrefabOverrides(
+    file_path: string,
+    prefab_instance: string,
+    edits: PrefabOverrideEdit[],
+): BatchPrefabOverrideResult {
+    if (!existsSync(file_path)) {
+        return { success: false, file_path, error: `File not found: ${file_path}` };
+    }
+
+    let doc: UnityDocument;
+    try {
+        doc = UnityDocument.from_file(file_path);
+    } catch (err) {
+        return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    const targetBlock = findPrefabInstanceBlock(doc, prefab_instance);
+    if (!targetBlock) {
+        return { success: false, file_path, error: `PrefabInstance "${prefab_instance}" not found` };
+    }
+
+    const actions: Array<{ property_path: string; action: 'updated' | 'added' }> = [];
+
+    for (const edit of edits) {
+        const { value, object_reference, target, managed_reference } = edit;
+        // Auto-quote propertyPath containing brackets (Unity YAML requires single quotes)
+        const property_path = /[\[\]]/.test(edit.property_path) && !edit.property_path.startsWith("'")
+            ? `'${edit.property_path}'`
+            : edit.property_path;
+        // managed_reference: ID goes in value:, objectReference forced to {fileID: 0}
+        const effectiveValue = managed_reference ?? value;
+        const objRef = managed_reference ? '{fileID: 0}' : (object_reference ?? '{fileID: 0}');
+
+        // Find existing modification entry by propertyPath (handle both quoted and unquoted)
+        const unquotedPath = property_path.replace(/^'|'$/g, '');
+        const quotedPathStr = `'${unquotedPath}'`;
+        const batchEscapedUnquoted = unquotedPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const batchEscapedQuoted = quotedPathStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const batchPathAlt = batchEscapedUnquoted === batchEscapedQuoted ? batchEscapedUnquoted : `(?:${batchEscapedQuoted}|${batchEscapedUnquoted})`;
+        const entryPattern = new RegExp(
+            `(- target:\\s*\\{[^}]+\\}\\s*\\n\\s*propertyPath:\\s*)${batchPathAlt}(\\s*\\n\\s*value:\\s*)(.*)(\\s*\\n\\s*objectReference:\\s*)(.*)`,
+            'm'
+        );
+        const entryMatch = targetBlock.raw.match(entryPattern);
+
+        if (entryMatch) {
+            // Update existing entry
+            const quotedValue = yaml_quote_if_needed(effectiveValue);
+            const updatedText = targetBlock.raw.replace(entryPattern,
+                (_m: string, g1: string, g2: string, _g3: string, g4: string) =>
+                    g1 + property_path + g2 + quotedValue + g4 + objRef
+            );
+            targetBlock.replace_raw(updatedText);
+            actions.push({ property_path, action: 'updated' });
+        } else {
+            // No existing entry -- add a new one
+            let targetRef = target;
+            if (!targetRef) {
+                // Try to infer from sibling properties sharing same root path
+                const rootProp = property_path.split('.')[0];
+                const siblingPattern = new RegExp(
+                    `- target:\\s*(\\{[^}]+\\})\\s*\\n\\s*propertyPath:\\s*${rootProp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+                    'm'
+                );
+                const siblingMatch = targetBlock.raw.match(siblingPattern);
+                if (siblingMatch) {
+                    targetRef = siblingMatch[1];
+                }
+            }
+
+            if (!targetRef) {
+                return {
+                    success: false,
+                    file_path,
+                    error: `Cannot infer target for new override "${property_path}". Provide "target" in the edit entry (e.g., "{fileID: 400000, guid: ..., type: 3}").`
+                };
+            }
+
+            if (!/^\{fileID:\s*-?\d+/.test(targetRef)) {
+                return {
+                    success: false,
+                    file_path,
+                    error: `Invalid target reference "${targetRef}" for "${property_path}". Expected format: {fileID: N, guid: ..., type: T}`
+                };
+            }
+
+            // Build the new modification entry
+            const quotedNewValue = yaml_quote_if_needed(effectiveValue);
+            const newEntry = `    - target: ${targetRef}\n      propertyPath: ${property_path}\n      value: ${quotedNewValue}\n      objectReference: ${objRef}`;
+
+            // Insert before m_RemovedComponents (end of modifications list)
+            const removedPattern = /(\n\s*m_RemovedComponents:)/m;
+            const removedMatch = targetBlock.raw.match(removedPattern);
+
+            let updatedText: string;
+            if (removedMatch) {
+                updatedText = targetBlock.raw.replace(removedPattern, `\n${newEntry}$1`);
+            } else {
+                // Fallback: insert after the last objectReference line in m_Modifications
+                const lines = targetBlock.raw.split('\n');
+                let lastObjRefIdx = -1;
+                let inModifications = false;
+                for (let i = 0; i < lines.length; i++) {
+                    if (/m_Modifications:/.test(lines[i])) {
+                        inModifications = true;
+                        continue;
+                    }
+                    if (inModifications && /^\s*objectReference:/.test(lines[i])) {
+                        lastObjRefIdx = i;
+                    }
+                    if (inModifications && /^\s*m_\w+:/.test(lines[i]) && !/objectReference/.test(lines[i]) && !/propertyPath/.test(lines[i])) {
+                        if (lastObjRefIdx !== -1) break;
+                    }
+                }
+
+                if (lastObjRefIdx !== -1) {
+                    lines.splice(lastObjRefIdx + 1, 0, newEntry);
+                    updatedText = lines.join('\n');
+                } else {
+                    return { success: false, file_path, error: `Could not find insertion point in m_Modifications for "${property_path}"` };
+                }
+            }
+
+            targetBlock.replace_raw(updatedText);
+            actions.push({ property_path, action: 'added' });
+        }
+    }
+
+    const saveResult = doc.save();
+    if (!saveResult.success) {
+        return { success: false, file_path, error: saveResult.error };
+    }
+
+    return {
+        success: true,
+        file_path,
+        prefab_instance_id: prefab_instance,
+        applied: actions.length,
+        actions,
     };
 }
 
@@ -1006,9 +1179,9 @@ export function reparentGameObject(options: ReparentGameObjectOptions): Reparent
   return {
     success: true,
     file_path,
-    child_transform_id: parseInt(childTransformId, 10),
-    old_parent_transform_id: parseInt(oldParentTransformId, 10),
-    new_parent_transform_id: parseInt(newParentTransformId, 10)
+    child_transform_id: childTransformId,
+    old_parent_transform_id: oldParentTransformId,
+    new_parent_transform_id: newParentTransformId
   };
 }
 
@@ -1520,9 +1693,9 @@ export function removeRemovedGameObject(options: PrefabSubArrayOptions): PrefabS
     return { success: false, file_path, error: 'Validation failed after removing GameObject' };
   }
 
-  const saveResult = doc.save();
-  if (!saveResult.success) {
-    return { success: false, file_path, error: saveResult.error };
+  const restoreGoSaveResult = doc.save();
+  if (!restoreGoSaveResult.success) {
+    return { success: false, file_path, error: restoreGoSaveResult.error };
   }
 
   return {
@@ -1530,4 +1703,314 @@ export function removeRemovedGameObject(options: PrefabSubArrayOptions): PrefabS
     file_path,
     prefab_instance_id: targetBlock.file_id,
   };
+}
+
+// ========== Prefab Managed Reference ==========
+
+/**
+ * Generate a managed reference ID matching Unity's algorithm.
+ *
+ * Unity (2021+) generates IDs as: hash(timestamp + system_info) << 18 | counter.
+ * The upper ~46 bits are a session-unique base derived from time + machine info.
+ * The lower 18 bits are a sequential counter (0..262143) within a batch.
+ *
+ * We replicate this by: crypto-random 46-bit base << 18, then scan for collisions.
+ * Reserved values: -2 (null ref), -1 (unknown). Range: 1 to Int64.MaxValue.
+ */
+function generate_managed_reference_id(existing_raw: string, count: number = 1): string[] {
+    const { randomBytes } = require('crypto') as typeof import('crypto');
+
+    // Collect all existing positive int64 IDs from the file
+    const existingIds = new Set<bigint>();
+    const idPattern = /\b(\d{1,19})\b/g;
+    // Only scan lines that contain managed reference contexts
+    for (const line of existing_raw.split('\n')) {
+        if (line.includes('managedReferences[') || line.includes('rid:') ||
+            (line.includes('objectReference:') && /\d{10,}/.test(line)) ||
+            (line.includes('value:') && /\d{16,}/.test(line))) {
+            let m;
+            while ((m = idPattern.exec(line)) !== null) {
+                const val = BigInt(m[1]);
+                if (val > 0n) existingIds.add(val);
+            }
+        }
+    }
+
+    // Generate a base: random 46 bits shifted left by 18
+    const buf = randomBytes(8);
+    // Read as unsigned 64-bit, mask to 46 bits, shift left 18
+    const raw64 = buf.readBigUInt64BE();
+    const mask46 = (1n << 46n) - 1n;
+    let base = ((raw64 & mask46) | 1n) << 18n; // ensure non-zero base
+
+    // Clamp to positive Int64 range
+    const INT64_MAX = 9223372036854775807n;
+    if (base > INT64_MAX) base = base & (INT64_MAX >> 18n) << 18n;
+    if (base <= 0n) base = 1n << 18n;
+
+    const results: string[] = [];
+    for (let i = 0; i < count; i++) {
+        let id = base + BigInt(i);
+        // Resolve collisions by incrementing counter
+        while (id <= 0n || id > INT64_MAX || existingIds.has(id)) {
+            id += 1n;
+        }
+        existingIds.add(id);
+        results.push(id.toString());
+    }
+    return results;
+}
+
+export interface PrefabManagedReferenceOptions {
+    file_path: string;
+    prefab_instance: string;
+    field_path: string;
+    type_name: string;
+    target: string;
+    index?: number;
+    project_path?: string;
+}
+
+export interface PrefabManagedReferenceResult {
+    success: boolean;
+    file_path: string;
+    rid?: string;
+    type_info?: { class_name: string; namespace: string; assembly: string };
+    overrides_created?: string[];
+    error?: string;
+}
+
+/**
+ * Add a managed reference to a [SerializeReference] field in a prefab override.
+ * Auto-generates the rid and creates all necessary override entries:
+ *   - field.Array.data[N].managedReferenceType  (type declaration)
+ *   - field.Array.data[N]                        (value: rid)
+ *   - managedReferences[-2]                      (version marker)
+ */
+export function addPrefabManagedReference(options: PrefabManagedReferenceOptions): PrefabManagedReferenceResult {
+    const { file_path, prefab_instance, field_path, type_name, target, project_path } = options;
+    const index = options.index ?? 0;
+
+    if (!existsSync(file_path)) {
+        return { success: false, file_path, error: `File not found: ${file_path}` };
+    }
+
+    // Resolve type info
+    const typeInfo = resolve_managed_type(type_name, project_path);
+    let finalTypeInfo: { class_name: string; namespace: string; assembly: string };
+
+    if (typeInfo) {
+        finalTypeInfo = typeInfo;
+    } else {
+        // Allow manual format: "Assembly Namespace.ClassName"
+        const spaceIdx = type_name.indexOf(' ');
+        if (spaceIdx > 0) {
+            const asm = type_name.substring(0, spaceIdx);
+            const fullType = type_name.substring(spaceIdx + 1);
+            const lastDot = fullType.lastIndexOf('.');
+            finalTypeInfo = {
+                assembly: asm,
+                namespace: lastDot >= 0 ? fullType.substring(0, lastDot) : '',
+                class_name: lastDot >= 0 ? fullType.substring(lastDot + 1) : fullType,
+            };
+        } else {
+            return {
+                success: false, file_path,
+                error: `Type "${type_name}" not found in type registry. Use "Assembly Namespace.ClassName" format or run "setup" to rebuild.`,
+            };
+        }
+    }
+
+    let doc: UnityDocument;
+    try {
+        doc = UnityDocument.from_file(file_path);
+    } catch (err) {
+        return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    const piBlock = findPrefabInstanceBlock(doc, prefab_instance);
+    if (!piBlock) {
+        return { success: false, file_path, error: `PrefabInstance "${prefab_instance}" not found` };
+    }
+
+    // Generate the managed reference ID
+    const [rid] = generate_managed_reference_id(piBlock.raw);
+
+    // Build the type string: "Assembly Namespace.ClassName" or "Assembly ClassName"
+    const typeValue = finalTypeInfo.namespace
+        ? `${finalTypeInfo.assembly} ${finalTypeInfo.namespace}.${finalTypeInfo.class_name}`
+        : `${finalTypeInfo.assembly} ${finalTypeInfo.class_name}`;
+
+    // Strip .Array suffix from field_path if present (Unity YAML convention)
+    const basePath = field_path.replace(/\.Array$/, '');
+
+    // Build all override entries
+    const overrides: PrefabOverrideEdit[] = [
+        {
+            property_path: `${basePath}.Array.data[${index}].managedReferenceType`,
+            value: typeValue,
+            target,
+        },
+        {
+            property_path: `${basePath}.Array.data[${index}]`,
+            value: rid,
+            target,
+        },
+        {
+            property_path: `managedReferences[-2]`,
+            value: '2',
+            target,
+        },
+    ];
+
+    // Apply all overrides via batchEditPrefabOverrides
+    const result = batchEditPrefabOverrides(file_path, prefab_instance, overrides);
+
+    if (!result.success) {
+        return { success: false, file_path, error: result.error };
+    }
+
+    return {
+        success: true,
+        file_path,
+        rid,
+        type_info: finalTypeInfo,
+        overrides_created: overrides.map(o => o.property_path),
+    };
+}
+
+// ========== Managed Reference Editing ==========
+
+function resolve_managed_type(
+    type_name: string,
+    project_path?: string,
+): { class_name: string; namespace: string; assembly: string } | null {
+    if (!project_path) return null;
+
+    const { join } = require('path') as typeof import('path');
+    const registryPath = join(project_path, '.unity-agentic', 'type-registry.json');
+    if (!existsSync(registryPath)) return null;
+
+    try {
+        const registry = JSON.parse(readFileSync(registryPath, 'utf-8')) as Array<{
+            name: string; kind: string; namespace: string | null;
+            filePath: string; guid: string | null;
+        }>;
+
+        let targetName = type_name;
+        let targetNs: string | null = null;
+        const dotIndex = type_name.lastIndexOf('.');
+        if (dotIndex > 0) {
+            targetNs = type_name.substring(0, dotIndex);
+            targetName = type_name.substring(dotIndex + 1);
+        }
+
+        const matches = registry.filter(t => {
+            if (t.name.toLowerCase() !== targetName.toLowerCase()) return false;
+            if (targetNs && t.namespace?.toLowerCase() !== targetNs.toLowerCase()) return false;
+            return true;
+        });
+
+        if (matches.length === 0) return null;
+        const match = matches[0];
+        let assembly = 'Assembly-CSharp';
+        if (match.filePath && (match.filePath.includes('Packages/') || match.filePath.includes('PackageCache/'))) {
+            const pkgMatch = match.filePath.match(/(?:Packages|PackageCache)\/([^/]+)/);
+            if (pkgMatch) assembly = pkgMatch[1].replace(/@.*$/, '');
+        }
+        return { class_name: match.name, namespace: match.namespace || '', assembly };
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Add a managed reference to a component's SerializeReference field.
+ */
+export function editManagedReference(options: EditManagedReferenceOptions): EditManagedReferenceResult {
+    const { file_path, file_id, field_path, type_name, project_path, append } = options;
+
+    if (!existsSync(file_path)) {
+        return { success: false, file_path, error: `File not found: ${file_path}` };
+    }
+
+    let doc: UnityDocument;
+    try {
+        doc = UnityDocument.from_file(file_path);
+    } catch (err) {
+        return { success: false, file_path, error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    const block = doc.find_by_file_id(file_id);
+    if (!block) {
+        return { success: false, file_path, error: `Component with fileID ${file_id} not found` };
+    }
+    if (block.class_id !== 114) {
+        return { success: false, file_path, error: `fileID ${file_id} is not a MonoBehaviour (class ${block.class_id}). Managed references only apply to MonoBehaviours.` };
+    }
+
+    const typeInfo = resolve_managed_type(type_name, project_path);
+    if (!typeInfo) {
+        // Allow manual format: "Assembly Namespace.ClassName"
+        const spaceIdx = type_name.indexOf(' ');
+        if (spaceIdx > 0) {
+            const asm = type_name.substring(0, spaceIdx);
+            const fullType = type_name.substring(spaceIdx + 1);
+            const lastDot = fullType.lastIndexOf('.');
+            const manual = {
+                assembly: asm,
+                namespace: lastDot >= 0 ? fullType.substring(0, lastDot) : '',
+                class_name: lastDot >= 0 ? fullType.substring(lastDot + 1) : fullType,
+            };
+            return applyManagedReference(doc, block, file_path, field_path, manual, append);
+        }
+        return {
+            success: false, file_path,
+            error: `Type "${type_name}" not found in type registry. Use "Assembly Namespace.ClassName" format or run "setup" to rebuild.`,
+        };
+    }
+
+    return applyManagedReference(doc, block, file_path, field_path, typeInfo, append);
+}
+
+function applyManagedReference(
+    doc: UnityDocument, block: UnityBlock, file_path: string,
+    field_path: string, typeInfo: { class_name: string; namespace: string; assembly: string },
+    append?: boolean,
+): EditManagedReferenceResult {
+    let raw = block.raw;
+
+    const ridMatches = [...raw.matchAll(/rid:[ \t]*(\d+)/g)];
+    const existingRids = ridMatches.map(m => parseInt(m[1], 10)).filter(n => !isNaN(n));
+    const nextRid = existingRids.length > 0 ? Math.max(...existingRids) + 1 : 1;
+
+    const refEntry = `    - rid: ${nextRid}\n      type: {class: ${typeInfo.class_name}, ns: ${typeInfo.namespace}, asm: ${typeInfo.assembly}}\n      data: {}`;
+
+    const refIdsPattern = /(\s*RefIds:\s*\n)/;
+    const referencesPattern = /(\s*references:\s*\n\s*version:\s*\d+\s*\n)/;
+
+    if (refIdsPattern.test(raw)) {
+        raw = raw.replace(refIdsPattern, `$1${refEntry}\n`);
+    } else if (referencesPattern.test(raw)) {
+        raw = raw.replace(referencesPattern, `$1    RefIds:\n${refEntry}\n`);
+    } else {
+        raw = raw.trimEnd() + `\n  references:\n    version: 2\n    RefIds:\n${refEntry}\n`;
+    }
+
+    if (!append) {
+        const fieldRidPattern = new RegExp(
+            `(${field_path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*\\n\\s*rid:[ \\t]*)\\d+`, 'm'
+        );
+        if (fieldRidPattern.test(raw)) {
+            raw = raw.replace(fieldRidPattern, `$1${nextRid}`);
+        }
+    }
+
+    block.replace_raw(raw);
+    const mrSave = doc.save();
+    if (!mrSave.success) {
+        return { success: false, file_path, error: mrSave.error };
+    }
+
+    return { success: true, file_path, rid: nextRid, type_info: typeInfo };
 }

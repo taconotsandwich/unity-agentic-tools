@@ -1,4 +1,5 @@
 import { get_class_id_name } from '../class-ids';
+import { normalize_property_path } from '../utils';
 
 /**
  * Header components parsed from a Unity YAML block separator line.
@@ -43,7 +44,7 @@ function escape_regex(str: string): string {
  * Wrap a YAML value in single quotes if it contains characters that would
  * break Unity YAML parsing. Single quotes only need `''` to escape `'`.
  */
-function yaml_quote_if_needed(value: string): string {
+export function yaml_quote_if_needed(value: string): string {
     if (value === '') return value;
     // Values that need quoting: contains colon-space, hash, starts with
     // YAML indicators ({, [, *, &, !, |, >, ', "), or leading/trailing whitespace
@@ -126,6 +127,7 @@ export class UnityBlock {
      * - Array paths: "m_Materials.Array.data[0]" -> array element
      */
     get_property(path: string): string | null {
+        path = normalize_property_path(path);
         // Array paths: e.g. m_Materials.Array.data[0]
         if (path.includes('Array.data[')) {
             return this._get_array_element(path);
@@ -184,6 +186,7 @@ export class UnityBlock {
         value: string,
         object_reference?: string
     ): boolean {
+        path = normalize_property_path(path);
         const old_raw = this._raw;
         const effective_ref =
             object_reference && object_reference !== '{fileID: 0}'
@@ -296,6 +299,13 @@ export class UnityBlock {
      * Only supports simple (non-dotted, non-array) paths.
      */
     private _insert_property(path: string, value: string): void {
+        // Guard: don't insert if the m_-prefixed (or unprefixed) variant already exists
+        const alt = path.startsWith('m_') ? path.slice(2) : 'm_' + path;
+        const alt_pattern = new RegExp(`^\\s*${escape_regex(alt)}:`, 'm');
+        if (alt_pattern.test(this._raw)) {
+            return;
+        }
+
         const indented_line = `  ${path}: ${value}`;
 
         // Insert after m_EditorClassIdentifier: line if present

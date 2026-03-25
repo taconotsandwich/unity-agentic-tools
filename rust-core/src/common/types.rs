@@ -69,6 +69,8 @@ pub struct PrefabModification {
     pub target_guid: Option<String>,
     pub property_path: String,
     pub value: String,
+    #[napi(ts_type = "string | undefined")]
+    pub object_reference: Option<String>,
 }
 
 /// Union result from find_by_name: either a GameObject or PrefabInstance

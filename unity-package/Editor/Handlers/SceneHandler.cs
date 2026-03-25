@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEditor.SceneManagement;
@@ -21,11 +22,23 @@ namespace UnityAgenticTools.Server
                     return await EditorWebSocketServer.RunOnMainThread(() =>
                     {
                         var saved = EditorSceneManager.SaveOpenScenes();
-                        return new Dictionary<string, object>
+                        if (saved)
                         {
-                            { "success", saved },
-                            { "message", saved ? "All open scenes saved" : "Failed to save scenes" }
-                        };
+                            return new Dictionary<string, object>
+                            {
+                                { "success", true },
+                                { "message", "All open scenes saved" }
+                            };
+                        }
+
+                        var details = new StringBuilder("Failed to save scenes.");
+                        for (int i = 0; i < SceneManager.sceneCount; i++)
+                        {
+                            var scene = SceneManager.GetSceneAt(i);
+                            var scenePath = string.IsNullOrEmpty(scene.path) ? "(unsaved)" : scene.path;
+                            details.Append($" [{scene.name}: path={scenePath}, dirty={scene.isDirty}, loaded={scene.isLoaded}]");
+                        }
+                        throw new InvalidOperationException(details.ToString());
                     });
 
                 case "open":
