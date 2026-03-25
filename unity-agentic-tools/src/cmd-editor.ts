@@ -214,8 +214,7 @@ export function build_editor_command(): Command {
                     port,
                     method: 'editor.console.subscribe',
                     on_event: (event) => {
-                        if (event.method === 'editor.console.logReceived' ||
-                            event.method === 'editor.event.logMessage') {
+                        if (event.method === 'editor.console.logReceived') {
                             const params = event.params ?? {};
                             if (type_filter && typeof params.type === 'string' &&
                                 params.type.toLowerCase() !== type_filter) {

@@ -192,11 +192,16 @@ export function generate_field_yaml(
     const lines: string[] = [];
 
     for (const field of fields) {
-        // [SerializeReference] fields serialize as managed references (rid: 0 = null ref).
-        // Full polymorphic authoring is not supported; emit null managed reference.
+        // [SerializeReference] fields serialize as managed references.
+        // List/array types get an empty array; scalar types get rid: 0 (null ref).
         if (field.hasSerializeReference) {
-            lines.push(`${indent}${field.name}:`);
-            lines.push(`${indent}  rid: 0`);
+            const t = field.typeName;
+            if (t.endsWith('[]') || (t.startsWith('List<') && t.endsWith('>'))) {
+                lines.push(`${indent}${field.name}: []`);
+            } else {
+                lines.push(`${indent}${field.name}:`);
+                lines.push(`${indent}  rid: 0`);
+            }
             continue;
         }
 

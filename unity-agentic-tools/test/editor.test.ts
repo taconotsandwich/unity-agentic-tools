@@ -4460,6 +4460,74 @@ describe('batchEditPrefabOverrides - empty value', () => {
     });
 });
 
+// ========== Bug: incomplete PPtr target auto-enrichment ==========
+
+describe('override target auto-enrichment', () => {
+    it('batchEditPrefabOverrides should enrich incomplete target with source prefab guid', () => {
+        const temp = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SamplePrefabVariant.prefab')
+        );
+        try {
+            const result = batchEditPrefabOverrides(temp.temp_path, '5765656985498706500', [
+                { property_path: 'speed', value: '10', target: '{fileID: 100000}' }
+            ]);
+
+            expect(result.success).toBe(true);
+            expect(result.actions).toEqual([{ property_path: 'speed', action: 'added' }]);
+
+            const content = readFileSync(temp.temp_path, 'utf-8');
+            expect(content).toContain('target: {fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}');
+            expect(content).toMatch(/propertyPath: speed\s+value: 10/);
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+
+    it('editPrefabOverride should enrich incomplete target with source prefab guid', () => {
+        const temp = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SamplePrefabVariant.prefab')
+        );
+        try {
+            const result = editPrefabOverride({
+                file_path: temp.temp_path,
+                prefab_instance: '5765656985498706500',
+                property_path: 'armor',
+                new_value: '50',
+                target: '{fileID: 100000}',
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.action).toBe('added');
+
+            const content = readFileSync(temp.temp_path, 'utf-8');
+            expect(content).toContain('target: {fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}');
+            expect(content).toMatch(/propertyPath: armor\s+value: 50/);
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+
+    it('should not modify already-complete target reference', () => {
+        const temp = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SamplePrefabVariant.prefab')
+        );
+        try {
+            const fullTarget = '{fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}';
+            const result = batchEditPrefabOverrides(temp.temp_path, '5765656985498706500', [
+                { property_path: 'maxSpeed', value: '20', target: fullTarget }
+            ]);
+
+            expect(result.success).toBe(true);
+
+            const content = readFileSync(temp.temp_path, 'utf-8');
+            expect(content).toContain(`target: ${fullTarget}`);
+            expect(content).toMatch(/propertyPath: maxSpeed\s+value: 20/);
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+});
+
 // ========== Bug #6: Auto-quote bracket propertyPaths regression ==========
 
 describe('editPrefabOverride - bracket auto-quoting', () => {
