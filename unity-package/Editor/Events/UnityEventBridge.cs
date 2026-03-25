@@ -10,7 +10,6 @@ namespace UnityAgenticTools.Server
         static UnityEventBridge()
         {
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
-            Application.logMessageReceived += OnLogMessageReceived;
             EditorApplication.pauseStateChanged += OnPauseStateChanged;
         }
 
@@ -39,18 +38,5 @@ namespace UnityAgenticTools.Server
                 });
         }
 
-        private static void OnLogMessageReceived(string condition, string stackTrace, LogType type)
-        {
-            if (!EditorWebSocketServer.IsRunning) return;
-
-            EventBroadcaster.Broadcast("editor.event.logMessage",
-                new Dictionary<string, object>
-                {
-                    { "message", condition },
-                    { "stackTrace", stackTrace },
-                    { "type", type.ToString() },
-                    { "timestamp", System.DateTime.UtcNow.ToString("o") }
-                });
-        }
     }
 }

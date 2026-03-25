@@ -22,6 +22,19 @@ import { UnityBlock } from './unity-block';
 // ========== Private Helpers ==========
 
 /**
+ * Auto-enrich an incomplete PPtr target reference by adding guid + type from m_SourcePrefab.
+ * In prefab variants, all modification targets reference the source prefab,
+ * so {fileID: N} can be completed to {fileID: N, guid: <source_guid>, type: 3}.
+ * Returns the enriched ref, or null if source GUID can't be extracted.
+ */
+function enrich_target_ref(targetRef: string, blockRaw: string): string | null {
+    if (/guid:/.test(targetRef)) return targetRef;
+    const sourceMatch = blockRaw.match(/m_SourcePrefab:[ \t]*\{[^}]*guid:[ \t]*([a-f0-9]{32})/);
+    if (!sourceMatch) return null;
+    return targetRef.replace(/\}$/, `, guid: ${sourceMatch[1]}, type: 3}`);
+}
+
+/**
  * Convert Euler angles (degrees) to quaternion.
  * Unity uses ZXY rotation order.
  */
@@ -610,6 +623,10 @@ export function editPrefabOverride(options: EditPrefabOverrideOptions): EditPref
         };
     }
 
+    // Auto-enrich incomplete target (add source prefab guid + type if missing)
+    const enriched = enrich_target_ref(targetRef, targetBlock.raw);
+    if (enriched) targetRef = enriched;
+
     // Build the new modification entry (apply YAML quoting for string safety)
     const quotedNewValue = yaml_quote_if_needed(effectiveValue);
     const newEntry = `    - target: ${targetRef}\n      propertyPath: ${property_path}\n      value: ${quotedNewValue}\n      objectReference: ${objRef}`;
@@ -753,6 +770,10 @@ export function batchEditPrefabOverrides(
                     error: `Invalid target reference "${targetRef}" for "${property_path}". Expected format: {fileID: N, guid: ..., type: T}`
                 };
             }
+
+            // Auto-enrich incomplete target (add source prefab guid + type if missing)
+            const enriched = enrich_target_ref(targetRef, targetBlock.raw);
+            if (enriched) targetRef = enriched;
 
             // Build the new modification entry
             const quotedNewValue = yaml_quote_if_needed(effectiveValue);
@@ -1852,7 +1873,7 @@ export function addPrefabManagedReference(options: PrefabManagedReferenceOptions
             target,
         },
         {
-            property_path: `${basePath}.Array.data[${index}]`,
+            property_path: `${basePath}.Array.data[${index}].managedReferenceValue`,
             value: rid,
             target,
         },

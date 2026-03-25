@@ -121,9 +121,9 @@ function findTransformIdByName(doc: UnityDocument, objectName: string): string |
 function findStrippedRootTransform(doc: UnityDocument, prefabInstanceId: string): { transformId: string; sourceRef: string } | null {
   for (const block of doc.blocks) {
     if (block.class_id !== 4 || !block.is_stripped) continue;
-    const piMatch = block.raw.match(/m_PrefabInstance:\s*\{fileID:\s*(\d+)\}/);
+    const piMatch = block.raw.match(/m_PrefabInstance:[ \t]*\{fileID:[ \t]*(-?\d+)\}/);
     if (piMatch && piMatch[1] === prefabInstanceId) {
-      const sourceMatch = block.raw.match(/m_CorrespondingSourceObject:\s*(\{[^}]+\})/);
+      const sourceMatch = block.raw.match(/m_CorrespondingSourceObject:[ \t]*(\{[^}]+\})/);
       if (sourceMatch) {
         return {
           transformId: block.file_id,
@@ -227,7 +227,7 @@ function appendToAddedGameObjects(doc: UnityDocument, piId: string, targetSource
   let raw = piBlock.raw;
 
   // Try replacing empty array: m_AddedGameObjects: []
-  const emptyPattern = /m_AddedGameObjects:\s*\[\]/;
+  const emptyPattern = /m_AddedGameObjects:[ \t]*\[\]/;
   if (emptyPattern.test(raw)) {
     raw = raw.replace(emptyPattern, `m_AddedGameObjects:${entry}`);
     piBlock.replace_raw(raw);
@@ -235,7 +235,7 @@ function appendToAddedGameObjects(doc: UnityDocument, piId: string, targetSource
   }
 
   // Try appending to existing entries
-  const existingPattern = /(m_AddedGameObjects:\s*\n(?:\s+-[\s\S]*?(?=\n\s+m_|$))*)/;
+  const existingPattern = /(m_AddedGameObjects:[ \t]*\n(?:[ \t]+-[\s\S]*?(?=\n[ \t]+m_|$))*)/;
   if (existingPattern.test(raw)) {
     raw = raw.replace(existingPattern, `$1${entry}`);
     piBlock.replace_raw(raw);
@@ -274,9 +274,16 @@ const COMPONENT_DEFAULTS: Record<number, string> = {
   20: `  serializedVersion: 2\n  m_ClearFlags: 1\n  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}\n  m_projectionMatrixMode: 1\n  m_FOVAxisMode: 0\n  near clip plane: 0.3\n  far clip plane: 1000\n  field of view: 60\n  orthographic: 0\n  orthographic size: 5\n  m_Depth: -1`, // Camera
   23: `  m_CastShadows: 1\n  m_ReceiveShadows: 1\n  m_Materials:\n  - {fileID: 0}`, // MeshRenderer
   33: `  m_Mesh: {fileID: 0}`, // MeshFilter
+  50: `  m_BodyType: 0\n  m_Mass: 1\n  m_LinearDrag: 0\n  m_AngularDrag: 0.05\n  m_GravityScale: 1\n  m_Interpolate: 0\n  m_SleepingMode: 1\n  m_CollisionDetection: 0`, // Rigidbody2D
   54: `  m_Mass: 1\n  m_Drag: 0\n  m_AngularDrag: 0.05\n  m_UseGravity: 1\n  m_IsKinematic: 0`, // Rigidbody
+  58: `  m_IsTrigger: 0\n  m_Material: {fileID: 0}\n  m_Offset: {x: 0, y: 0}\n  m_Radius: 0.5`, // CircleCollider2D
+  60: `  m_IsTrigger: 0\n  m_Material: {fileID: 0}\n  m_Offset: {x: 0, y: 0}\n  m_Points: []`, // PolygonCollider2D
+  61: `  m_IsTrigger: 0\n  m_Material: {fileID: 0}\n  m_Offset: {x: 0, y: 0}\n  m_Size: {x: 1, y: 1}`, // BoxCollider2D
   64: `  m_IsTrigger: 0\n  m_Convex: 0\n  m_CookingOptions: 30\n  m_Mesh: {fileID: 0}`, // MeshCollider
   65: `  m_IsTrigger: 0\n  m_Material: {fileID: 0}\n  m_Center: {x: 0, y: 0, z: 0}\n  m_Size: {x: 1, y: 1, z: 1}`, // BoxCollider
+  66: `  m_IsTrigger: 0\n  m_Material: {fileID: 0}\n  m_Offset: {x: 0, y: 0}\n  m_GeometryType: 0`, // CompositeCollider2D
+  68: `  m_IsTrigger: 0\n  m_Material: {fileID: 0}\n  m_Offset: {x: 0, y: 0}\n  m_Points: []`, // EdgeCollider2D
+  70: `  m_IsTrigger: 0\n  m_Material: {fileID: 0}\n  m_Offset: {x: 0, y: 0}\n  m_Size: {x: 1, y: 1}\n  m_Direction: 0`, // CapsuleCollider2D
   82: `  m_PlayOnAwake: 1\n  m_Volume: 1\n  m_Pitch: 1\n  m_Loop: 0\n  m_Mute: 0\n  m_Priority: 128`, // AudioSource
   96: `  m_CastShadows: 1\n  m_ReceiveShadows: 1\n  m_Materials:\n  - {fileID: 0}\n  m_Time: 5\n  m_MinVertexDistance: 0.1`, // TrailRenderer
   108: `  m_LightType: 1\n  m_Color: {r: 1, g: 0.95686275, b: 0.8392157, a: 1}\n  m_Intensity: 1\n  m_Range: 10\n  m_SpotAngle: 30\n  m_Shadows: 2`, // Light
@@ -340,6 +347,8 @@ function createMonoBehaviourYAML(
   version?: UnityVersion
 ): string {
   const field_yaml = fields && fields.length > 0 ? generate_field_yaml(fields, version) : '\n';
+  const has_serialize_ref = fields?.some(f => f.hasSerializeReference) ?? false;
+  const references_section = has_serialize_ref ? `  references:\n    version: 2\n    RefIds: []\n` : '';
   return `--- !u!114 &${componentId}
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -351,7 +360,7 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ${scriptGuid}, type: 3}
   m_Name:
-  m_EditorClassIdentifier:${field_yaml}`;
+  m_EditorClassIdentifier:${field_yaml}${references_section}`;
 }
 
 // ========== Exported Functions ==========
