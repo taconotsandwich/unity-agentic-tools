@@ -5,6 +5,7 @@
  * Ensures version consistency across:
  * - unity-agentic-tools/package.json (source of truth)
  * - rust-core/package.json
+ * - unity-package/package.json
  *
  * Usage:
  *   bun scripts/sync-version.js          # Sync versions
@@ -20,6 +21,7 @@ const ROOT = path.resolve(__dirname, '..');
 const FILES = {
   source: path.join(ROOT, 'unity-agentic-tools', 'package.json'),
   rustCore: path.join(ROOT, 'rust-core', 'package.json'),
+  unityPackage: path.join(ROOT, 'unity-package', 'package.json'),
 };
 
 function readJSON(filePath) {
@@ -48,6 +50,11 @@ function getVersions() {
     versions.rustCore = rustCore.version;
   }
 
+  const unityPackage = readJSON(FILES.unityPackage);
+  if (unityPackage) {
+    versions.unityPackage = unityPackage.version;
+  }
+
   return versions;
 }
 
@@ -57,6 +64,7 @@ function checkVersions() {
   console.log('Current versions:');
   console.log(`  unity-agentic-tools/package.json: ${versions.source || 'not found'}`);
   console.log(`  rust-core/package.json: ${versions.rustCore || 'not found'}`);
+  console.log(`  unity-package/package.json: ${versions.unityPackage || 'not found'}`);
 
   const allVersions = Object.values(versions).filter(Boolean);
   const uniqueVersions = [...new Set(allVersions)];
@@ -99,6 +107,14 @@ function syncVersions(targetVersion) {
     rustCore.version = version;
     writeJSON(FILES.rustCore, rustCore);
     console.log(`  Updated: rust-core/package.json`);
+  }
+
+  // Update unity-package/package.json
+  const unityPackage = readJSON(FILES.unityPackage);
+  if (unityPackage) {
+    unityPackage.version = version;
+    writeJSON(FILES.unityPackage, unityPackage);
+    console.log(`  Updated: unity-package/package.json`);
   }
 
   console.log('\nVersion synchronization complete!');
