@@ -2271,8 +2271,19 @@ AnimatorStateTransition:
         .description('Add a managed reference (SerializeReference) to a component field. Type can be "Namespace.ClassName" (registry lookup) or "Assembly Namespace.ClassName" (manual).')
         .option('-p, --project <path>', 'Unity project path (for type registry)')
         .option('--append', 'Append to array (do not update field rid)')
+        .option('--properties <json>', 'JSON object of initial field values for the data block (e.g. \'{"damage": "10"}\')')
         .option('-j, --json', 'Output as JSON')
         .action((file, component_id, field_path, type_name, options) => {
+            let initial_values: Record<string, string> | undefined;
+            if (options.properties) {
+                try {
+                    initial_values = JSON.parse(options.properties);
+                } catch {
+                    console.log(JSON.stringify({ success: false, error: `Invalid JSON for --properties: ${options.properties}` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+            }
             const result = editManagedReference({
                 file_path: file,
                 file_id: component_id,
@@ -2280,6 +2291,7 @@ AnimatorStateTransition:
                 type_name,
                 project_path: options.project,
                 append: options.append === true,
+                initial_values,
             });
             console.log(JSON.stringify(result, null, 2));
             if (!result.success) process.exitCode = 1;

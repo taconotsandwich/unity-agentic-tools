@@ -307,6 +307,8 @@ export interface CreateScriptableObjectOptions {
   output_path: string;
   script: string;
   project_path?: string;
+  /** Initial field values to set after generating the asset (e.g. {"damage": "10"}) */
+  initial_values?: Record<string, string>;
 }
 
 export interface CreateScriptableObjectResult {
@@ -435,6 +437,8 @@ export interface EditManagedReferenceOptions {
     type_name: string;
     project_path?: string;
     append?: boolean;
+    /** Initial field values for the managed reference data block */
+    initial_values?: Record<string, string>;
 }
 
 export interface EditManagedReferenceResult {
@@ -764,6 +768,8 @@ export interface CallEditorOptions {
   port?: number;
   /** Number of retry attempts for transient connection errors (default: 2) */
   retries?: number;
+  /** Fire-and-forget: send request and return immediately without waiting for response */
+  no_wait?: boolean;
 }
 
 export interface StreamEditorOptions extends CallEditorOptions {

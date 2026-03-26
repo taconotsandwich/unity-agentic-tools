@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve, join } from 'path';
 import { readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
-import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile, createScene, editPrefabOverride, batchEditPrefabOverrides, editArray, batchEditComponentProperties, removePrefabOverride, addRemovedComponent, removeRemovedComponent, addRemovedGameObject, removeRemovedGameObject, deletePrefabInstance } from '../src/editor';
+import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile, createScene, editPrefabOverride, batchEditPrefabOverrides, editArray, batchEditComponentProperties, removePrefabOverride, addRemovedComponent, removeRemovedComponent, addRemovedGameObject, removeRemovedGameObject, deletePrefabInstance, editManagedReference } from '../src/editor';
 import { UnityDocument } from '../src/editor/unity-document';
 import { create_temp_fixture } from './test-utils';
 import type { TempFixture } from './test-utils';
@@ -2033,6 +2033,88 @@ describe('createScriptableObject', () => {
         expect(result.success).toBe(false);
         expect(result.error).toContain('not found');
     });
+
+    it('should apply initial_values to the generated asset', () => {
+        const testGuid = 'aabbccdd11223344aabbccdd11223344';
+        const result = createScriptableObject({
+            output_path: outputPath,
+            script: testGuid,
+            initial_values: { damage: '50', speed: '2.5' }
+        });
+
+        expect(result.success).toBe(true);
+        const content = readFileSync(outputPath, 'utf-8');
+        expect(content).toContain('damage: 50');
+        expect(content).toContain('speed: 2.5');
+    });
+});
+
+// ========== Managed Reference Tests ==========
+
+describe('editManagedReference', () => {
+    it('should create a managed reference with initial_values', () => {
+        const tempPath = join(tmpdir(), 'mr-test.unity');
+        const yaml = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_Script: {fileID: 11500000, guid: abc123, type: 3}
+  m_Name: TestMono
+  m_EditorClassIdentifier:
+  myActions: []
+`;
+        writeFileSync(tempPath, yaml, 'utf-8');
+        try {
+            const result = editManagedReference({
+                file_path: tempPath,
+                file_id: '11400000',
+                field_path: 'myActions',
+                type_name: 'Assembly-CSharp MyNamespace.MyAction',
+                append: true,
+                initial_values: { rawDamage: '10', inputType: '1' }
+            });
+            expect(result.success).toBe(true);
+            expect(result.rid).toBeDefined();
+
+            const content = readFileSync(tempPath, 'utf-8');
+            expect(content).toContain('rawDamage: 10');
+            expect(content).toContain('inputType: 1');
+            expect(content).toContain('class: MyAction');
+        } finally {
+            try { unlinkSync(tempPath); } catch {}
+        }
+    });
+
+    it('should create a managed reference with empty data when no initial_values', () => {
+        const tempPath = join(tmpdir(), 'mr-test2.unity');
+        const yaml = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_Script: {fileID: 11500000, guid: abc123, type: 3}
+  m_Name: TestMono
+  m_EditorClassIdentifier:
+  myActions: []
+`;
+        writeFileSync(tempPath, yaml, 'utf-8');
+        try {
+            const result = editManagedReference({
+                file_path: tempPath,
+                file_id: '11400000',
+                field_path: 'myActions',
+                type_name: 'Assembly-CSharp MyNamespace.MyAction',
+                append: true,
+            });
+            expect(result.success).toBe(true);
+
+            const content = readFileSync(tempPath, 'utf-8');
+            expect(content).toContain('data: {}');
+        } finally {
+            try { unlinkSync(tempPath); } catch {}
+        }
+    });
 });
 
 // ========== Unpack Prefab Tests ==========
@@ -3351,6 +3433,61 @@ describe('value validation (validate_value_type)', () => {
             new_value: '{x: 1, y: 2.5, z: -3}'
         });
         expect(result.success).toBe(true);
+    });
+
+    it('should allow numeric value when existing value is {fileID: 0} (enum placeholder)', () => {
+        const tempPath = join(tmpdir(), 'enum-test.unity');
+        const yaml = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_Script: {fileID: 11500000, guid: abc123, type: 3}
+  m_Name: TestMono
+  m_EditorClassIdentifier:
+  targetScope: {fileID: 0}
+`;
+        writeFileSync(tempPath, yaml, 'utf-8');
+        try {
+            const result = editComponentByFileId({
+                file_path: tempPath,
+                file_id: '11400000',
+                property: 'targetScope',
+                new_value: '1'
+            });
+            expect(result.success).toBe(true);
+            const content = readFileSync(tempPath, 'utf-8');
+            expect(content).toContain('targetScope: 1');
+        } finally {
+            try { unlinkSync(tempPath); } catch {}
+        }
+    });
+
+    it('should still reject non-reference values for non-zero fileID references', () => {
+        const tempPath = join(tmpdir(), 'ref-test.unity');
+        const yaml = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_Script: {fileID: 11500000, guid: abc123, type: 3}
+  m_Name: TestMono
+  m_EditorClassIdentifier:
+  myRef: {fileID: 12345, guid: deadbeef, type: 3}
+`;
+        writeFileSync(tempPath, yaml, 'utf-8');
+        try {
+            const result = editComponentByFileId({
+                file_path: tempPath,
+                file_id: '11400000',
+                property: 'myRef',
+                new_value: '42'
+            });
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('reference value');
+        } finally {
+            try { unlinkSync(tempPath); } catch {}
+        }
     });
 });
 

@@ -253,6 +253,9 @@ export class UnityBlock {
                 );
                 if (block_result !== null) {
                     this._raw = block_result;
+                } else if (this._header.class_id === 114 && parts.length === 2) {
+                    // Parent struct doesn't exist in YAML -- insert it (MonoBehaviour/SO only)
+                    this._insert_struct_property(parent_prop, sub_field, effective_value);
                 }
             }
 
@@ -322,6 +325,34 @@ export class UnityBlock {
 
         // Append before final trailing newline
         this._raw = this._raw.trimEnd() + '\n' + indented_line + '\n';
+    }
+
+    /**
+     * Insert a new nested struct property (parent.child) when the parent doesn't exist.
+     * Places it after m_EditorClassIdentifier: if present, otherwise at block end.
+     * Only supports single-level nesting (parts.length === 2).
+     */
+    private _insert_struct_property(parent: string, child: string, value: string): void {
+        // Guard: don't insert if parent already exists (shouldn't reach here, but safety)
+        const parent_pattern = new RegExp(`^[ \t]*${escape_regex(parent)}:`, 'm');
+        if (parent_pattern.test(this._raw)) {
+            return;
+        }
+
+        const struct_block = `  ${parent}:\n    ${child}: ${value}`;
+
+        const eci_pattern = /^([ \t]*m_EditorClassIdentifier:[ \t]*[^\n]*)/m;
+        const eci_match = this._raw.match(eci_pattern);
+        if (eci_match && eci_match.index !== undefined) {
+            const insert_after = eci_match.index + eci_match[0].length;
+            this._raw =
+                this._raw.slice(0, insert_after) +
+                '\n' + struct_block +
+                this._raw.slice(insert_after);
+            return;
+        }
+
+        this._raw = this._raw.trimEnd() + '\n' + struct_block + '\n';
     }
 
     /**
