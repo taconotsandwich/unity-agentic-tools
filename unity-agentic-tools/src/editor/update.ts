@@ -69,7 +69,12 @@ function validate_value_type(current_value: string, new_value: string): string |
     const incoming = new_value.trim();
 
     // 1. Reference: current is {fileID:...} -> new must also be {fileID:...}
+    //    Exception: {fileID: 0} is ambiguous -- could be a null reference OR an enum
+    //    default placeholder from yaml_default_for_type. Allow any value through.
     if (/^\{fileID:/.test(current)) {
+        if (/^\{fileID:[ \t]*0[ \t]*\}$/.test(current)) {
+            return null;
+        }
         if (!/^\{fileID:/.test(incoming)) {
             return `Expected a reference value ({fileID: ...}), got "${incoming}"`;
         }
@@ -1949,7 +1954,7 @@ function resolve_managed_type(
  * Add a managed reference to a component's SerializeReference field.
  */
 export function editManagedReference(options: EditManagedReferenceOptions): EditManagedReferenceResult {
-    const { file_path, file_id, field_path, type_name, project_path, append } = options;
+    const { file_path, file_id, field_path, type_name, project_path, append, initial_values } = options;
 
     if (!existsSync(file_path)) {
         return { success: false, file_path, error: `File not found: ${file_path}` };
@@ -1983,7 +1988,7 @@ export function editManagedReference(options: EditManagedReferenceOptions): Edit
                 namespace: lastDot >= 0 ? fullType.substring(0, lastDot) : '',
                 class_name: lastDot >= 0 ? fullType.substring(lastDot + 1) : fullType,
             };
-            return applyManagedReference(doc, block, file_path, field_path, manual, append);
+            return applyManagedReference(doc, block, file_path, field_path, manual, append, initial_values);
         }
         return {
             success: false, file_path,
@@ -1991,13 +1996,13 @@ export function editManagedReference(options: EditManagedReferenceOptions): Edit
         };
     }
 
-    return applyManagedReference(doc, block, file_path, field_path, typeInfo, append);
+    return applyManagedReference(doc, block, file_path, field_path, typeInfo, append, initial_values);
 }
 
 function applyManagedReference(
     doc: UnityDocument, block: UnityBlock, file_path: string,
     field_path: string, typeInfo: { class_name: string; namespace: string; assembly: string },
-    append?: boolean,
+    append?: boolean, initial_values?: Record<string, string>,
 ): EditManagedReferenceResult {
     let raw = block.raw;
 
@@ -2005,7 +2010,13 @@ function applyManagedReference(
     const existingRids = ridMatches.map(m => parseInt(m[1], 10)).filter(n => !isNaN(n));
     const nextRid = existingRids.length > 0 ? Math.max(...existingRids) + 1 : 1;
 
-    const refEntry = `    - rid: ${nextRid}\n      type: {class: ${typeInfo.class_name}, ns: ${typeInfo.namespace}, asm: ${typeInfo.assembly}}\n      data: {}`;
+    let dataBlock = '{}';
+    if (initial_values && Object.keys(initial_values).length > 0) {
+        const lines = Object.entries(initial_values).map(([k, v]) => `        ${k}: ${v}`);
+        dataBlock = '\n' + lines.join('\n');
+    }
+
+    const refEntry = `    - rid: ${nextRid}\n      type: {class: ${typeInfo.class_name}, ns: ${typeInfo.namespace}, asm: ${typeInfo.assembly}}\n      data: ${dataBlock}`;
 
     const refIdsPattern = /(\s*RefIds:\s*\n)/;
     const referencesPattern = /(\s*references:\s*\n\s*version:\s*\d+\s*\n)/;

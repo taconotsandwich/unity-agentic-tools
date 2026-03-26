@@ -118,7 +118,7 @@ namespace UnityAgenticTools.Server
 
         private const int MainThreadTimeoutMs = 30000;
 
-        public static Task<T> RunOnMainThread<T>(Func<T> func)
+        public static Task<T> RunOnMainThread<T>(Func<T> func, int timeoutMs = MainThreadTimeoutMs)
         {
             if (!_running)
             {
@@ -148,17 +148,17 @@ namespace UnityAgenticTools.Server
             });
 
             // Timeout guard: prevent indefinite hangs if EditorApplication.update stops pumping
-            Task.Delay(MainThreadTimeoutMs).ContinueWith(_ =>
+            Task.Delay(timeoutMs).ContinueWith(_ =>
             {
                 tcs.TrySetException(new TimeoutException(
-                    $"Main thread dispatch timed out after {MainThreadTimeoutMs}ms. " +
+                    $"Main thread dispatch timed out after {timeoutMs}ms. " +
                     "EditorApplication.update may not be pumping (e.g., during assembly reload)."));
             });
 
             return tcs.Task;
         }
 
-        public static Task RunOnMainThread(Action action)
+        public static Task RunOnMainThread(Action action, int timeoutMs = MainThreadTimeoutMs)
         {
             if (!_running)
             {
@@ -188,10 +188,10 @@ namespace UnityAgenticTools.Server
                 }
             });
 
-            Task.Delay(MainThreadTimeoutMs).ContinueWith(_ =>
+            Task.Delay(timeoutMs).ContinueWith(_ =>
             {
                 tcs.TrySetException(new TimeoutException(
-                    $"Main thread dispatch timed out after {MainThreadTimeoutMs}ms. " +
+                    $"Main thread dispatch timed out after {timeoutMs}ms. " +
                     "EditorApplication.update may not be pumping (e.g., during assembly reload)."));
             });
 

@@ -1153,7 +1153,7 @@ export function createScriptableObject(options: CreateScriptableObjectOptions): 
     ? generate_field_yaml(resolved.fields, version)
     : '\n';
 
-  const assetYaml = `%YAML 1.1
+  let assetYaml = `%YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
 --- !u!114 &11400000
 MonoBehaviour:
@@ -1167,6 +1167,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ${resolved.guid}, type: 3}
   m_Name: ${baseName}
   m_EditorClassIdentifier:${field_yaml}`;
+
+  // Apply initial field values if provided
+  if (options.initial_values && Object.keys(options.initial_values).length > 0) {
+    const doc = UnityDocument.from_string(assetYaml);
+    const block = doc.blocks[0];
+    if (block) {
+      for (const [key, val] of Object.entries(options.initial_values)) {
+        block.set_property(key, val);
+      }
+      assetYaml = doc.serialize();
+    }
+  }
 
   try {
     writeFileSync(output_path, assetYaml, 'utf-8');

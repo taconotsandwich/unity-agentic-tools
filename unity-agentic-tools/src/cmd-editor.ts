@@ -28,13 +28,13 @@ function get_common_options(cmd: Command): { project_path: string; timeout: numb
     return { project_path, timeout, port };
 }
 
-function build_call_options(cmd: Command, method: string, params?: Record<string, unknown>): CallEditorOptions {
+function build_call_options(cmd: Command, method: string, params?: Record<string, unknown>, extra?: { no_wait?: boolean }): CallEditorOptions {
     const { project_path, timeout, port } = get_common_options(cmd);
-    return { project_path, method, params, timeout, port };
+    return { project_path, method, params, timeout, port, ...(extra?.no_wait ? { no_wait: true } : {}) };
 }
 
-async function handle_rpc(cmd: Command, method: string, params?: Record<string, unknown>): Promise<void> {
-    const options = build_call_options(cmd, method, params);
+async function handle_rpc(cmd: Command, method: string, params?: Record<string, unknown>, extra?: { no_wait?: boolean }): Promise<void> {
+    const options = build_call_options(cmd, method, params, extra);
     const response = await call_editor(options);
     output_response(response);
 }
@@ -160,7 +160,8 @@ export function build_editor_command(): Command {
         .description('Call a static Unity Editor API method or read/set a static property')
         .option('--set <value>', 'Set a static property value')
         .option('--args <json>', 'JSON array of method arguments (overrides positional args)')
-        .action(async function(this: Command, type: string, member: string, args: string[], options: { set?: string; args?: string }) {
+        .option('--no-wait', 'Fire and forget -- return immediately without waiting for result')
+        .action(async function(this: Command, type: string, member: string, args: string[], options: { set?: string; args?: string; noWait?: boolean }) {
             const params: Record<string, unknown> = { type, member };
             if (options.set !== undefined) {
                 params.set = options.set;
@@ -171,7 +172,7 @@ export function build_editor_command(): Command {
             } else if (args.length > 0) {
                 params.args = JSON.stringify(args);
             }
-            await handle_rpc(this, 'editor.invoke', params);
+            await handle_rpc(this, 'editor.invoke', params, { no_wait: options.noWait });
         });
 
     // 15. console-logs

@@ -73,7 +73,7 @@ export async function call_editor(options: CallEditorOptions): Promise<RpcRespon
  * Single-attempt JSON-RPC request to the Unity Editor.
  */
 function call_editor_once(options: CallEditorOptions): Promise<RpcResponse> {
-    const { method, params, timeout = 10000 } = options;
+    const { method, params, timeout = 10000, no_wait } = options;
 
     const config = resolve_config(options);
     if ('error' in config) {
@@ -87,11 +87,16 @@ function call_editor_once(options: CallEditorOptions): Promise<RpcResponse> {
     const url = `ws://127.0.0.1:${config.port}/unity-agentic`;
     const request_id = generate_id();
 
+    // Inject timeout and no_wait into params so the server can read them
+    const wire_params: Record<string, unknown> = { ...params };
+    if (timeout !== 10000) wire_params._timeout = timeout;
+    if (no_wait) wire_params.no_wait = true;
+
     const request: RpcRequest = {
         jsonrpc: "2.0",
         id: request_id,
         method,
-        ...(params ? { params } : {}),
+        ...(Object.keys(wire_params).length > 0 ? { params: wire_params } : {}),
     };
 
     return new Promise<RpcResponse>((resolve) => {
@@ -115,6 +120,17 @@ function call_editor_once(options: CallEditorOptions): Promise<RpcResponse> {
 
             ws.onopen = () => {
                 ws.send(JSON.stringify(request));
+                // Fire-and-forget: resolve immediately after sending
+                if (no_wait && !resolved) {
+                    resolved = true;
+                    clearTimeout(timer);
+                    setTimeout(() => { try { ws.close(); } catch {} }, 200);
+                    resolve({
+                        jsonrpc: "2.0",
+                        id: request_id,
+                        result: { queued: true },
+                    });
+                }
             };
 
             ws.onmessage = (event: MessageEvent) => {

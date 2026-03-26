@@ -1016,4 +1016,36 @@ describe('UnityBlock', () => {
             expect(block.raw).toContain('moveSpeed: 10');
         });
     });
+
+    describe('set_property nested struct insertion', () => {
+        it('should insert a dotted path when parent struct does not exist (class 114)', () => {
+            const raw = [
+                '--- !u!114 &11400000\n',
+                'MonoBehaviour:\n',
+                '  m_ObjectHideFlags: 0\n',
+                '  m_Script: {fileID: 11500000, guid: abc123, type: 3}\n',
+                '  m_Name: TestSO\n',
+                '  m_EditorClassIdentifier:\n',
+            ].join('');
+            const block = new UnityBlock(raw);
+
+            const modified = block.set_property('config.damage', '10');
+            expect(modified).toBe(true);
+            expect(block.raw).toContain('config:');
+            expect(block.raw).toContain('damage: 10');
+        });
+
+        it('should not insert nested struct for non-class-114 blocks', () => {
+            const raw = [
+                '--- !u!4 &508316495\n',
+                'Transform:\n',
+                '  m_ObjectHideFlags: 0\n',
+                '  m_LocalPosition: {x: 0, y: 1, z: -10}\n',
+            ].join('');
+            const block = new UnityBlock(raw);
+
+            const modified = block.set_property('nonExistent.subField', '5');
+            expect(modified).toBe(false);
+        });
+    });
 });

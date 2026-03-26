@@ -94,12 +94,24 @@ export function build_create_command(): Command {
     cmd.command('scriptable-object <output_path> <script>')
         .description('Create a new ScriptableObject .asset file')
         .option('-p, --project <path>', 'Unity project path (for script GUID lookup)')
+        .option('--set <json>', 'Initial field values as JSON object (e.g. \'{"damage": "10", "targetScope": "1"}\')')
         .option('-j, --json', 'Output as JSON')
         .action((output_path, script, options) => {
+            let initial_values: Record<string, string> | undefined;
+            if (options.set) {
+                try {
+                    initial_values = JSON.parse(options.set);
+                } catch {
+                    console.log(JSON.stringify({ success: false, error: `Invalid JSON for --set: ${options.set}` }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+            }
             const result = createScriptableObject({
                 output_path: output_path,
                 script: script,
                 project_path: options.project,
+                initial_values,
             });
 
             console.log(JSON.stringify(result, null, 2));
