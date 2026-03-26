@@ -593,21 +593,5 @@ export function build_editor_command(): Command {
             }
         });
 
-    // Redirect: "editor log" -> explain alternatives
-    cmd.command('log')
-        .allowUnknownOption()
-        .argument('[args...]')
-        .action(() => {
-            console.log(JSON.stringify({
-                success: false,
-                error: '"editor log" does not exist. Use one of:',
-                alternatives: [
-                    { command: 'editor console-logs', description: 'Get recent console entries from the running Editor (live bridge)' },
-                    { command: 'read log', description: 'Read and filter the Unity Editor.log file on disk (no bridge needed)' },
-                ],
-            }, null, 2));
-            process.exitCode = 1;
-        });
-
     return cmd;
 }

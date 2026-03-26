@@ -1,4 +1,4 @@
-# editor -- 43 commands
+# editor -- 37 commands
 
 Live Unity Editor integration via WebSocket bridge. Requires `editor install <project>` first.
 
@@ -149,7 +149,6 @@ editor invoke MyCompany.Tools.LevelBuilder GenerateNavMesh
 
 | Mistake | Fix |
 |---------|-----|
-| `editor log` | Use `editor console-logs` (live) or `read log` (disk) |
 | `get text @hN` | `@hN` = hierarchy ref. `get text`/`get value` need `@uN` from `ui-snapshot` |
 | `scene-open /abs/path` | Use Assets-relative: `scene-open Assets/Scenes/Main.unity` |
 | `wait --timeout 2000` (no condition) | `--timeout` is a ceiling, not a wait. Use `wait 2000` for delay |

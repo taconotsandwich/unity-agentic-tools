@@ -2506,18 +2506,5 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify({ file, ...ia }, null, 2));
         });
 
-    // Redirect: "read prefab" -> explain to use "read scene"
-    cmd.command('prefab')
-        .argument('[file]')
-        .allowUnknownOption()
-        .action(() => {
-            console.log(JSON.stringify({
-                success: false,
-                error: '"read prefab" does not exist. Use "read scene" -- it handles both .unity and .prefab files.',
-                correct_usage: 'unity-agentic-tools read scene <file.prefab>',
-            }, null, 2));
-            process.exitCode = 1;
-        });
-
     return cmd;
 }

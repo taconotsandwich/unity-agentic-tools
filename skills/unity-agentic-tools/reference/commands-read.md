@@ -21,6 +21,7 @@
 | `read animation <file>` | AnimationClip (.anim) |
 | `read animator <file>` | AnimatorController (.controller) |
 | `read manifest <project>` | Packages from manifest.json (`--search <pattern>`) |
+| `read target <file> <name> [component_type]` | Build `--target` reference string for prefab override commands |
 | `read input-actions <file>` | Input Actions file (`--summary`, `--maps`, `--actions`, `--bindings`) |
 
 
@@ -85,8 +86,3 @@ View modes for AnimatorController files:
 | `--transitions` | List transitions with conditions |
 | `--project <path>` | Project root for motion clip GUID resolution |
 
-## Common mistakes
-
-| Mistake | Fix |
-|---------|-----|
-| `read prefab <file>` | Use `read scene <file>` -- handles both .unity and .prefab |
