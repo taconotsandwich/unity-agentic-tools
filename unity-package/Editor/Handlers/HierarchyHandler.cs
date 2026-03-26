@@ -84,7 +84,11 @@ namespace UnityAgenticTools.Server
             var typeNames = new List<string>();
             foreach (var comp in components)
             {
-                if (comp == null) continue; // missing script
+                if (comp == null)
+                {
+                    typeNames.Add("Missing Script");
+                    continue;
+                }
                 var typeName = comp.GetType().Name;
                 if (typeName == "Transform" || typeName == "RectTransform") continue;
                 typeNames.Add(typeName);

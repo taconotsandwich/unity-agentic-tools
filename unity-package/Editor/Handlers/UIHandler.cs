@@ -616,14 +616,26 @@ namespace UnityAgenticTools.Server
             int slashIdx = treePath.IndexOf('/');
             if (slashIdx < 0) return null;
 
-            string docIdStr = treePath.Substring(0, slashIdx);
-            string path = treePath.Substring(slashIdx + 1);
+            string elementPath = treePath.Substring(slashIdx + 1).TrimStart('/');
 
-            if (!int.TryParse(docIdStr, out int docInstanceId)) return null;
+            // Always find UIDocuments dynamically -- cached instance IDs go stale after domain reload
+            var uiDocumentType = FindType("UnityEngine.UIElements.UIDocument");
+            if (uiDocumentType == null) return null;
 
-            var docObj = EditorUtility.InstanceIDToObject(docInstanceId);
-            if (docObj == null) return null;
+            var documents = UnityEngine.Object.FindObjectsByType(uiDocumentType, FindObjectsSortMode.None);
+            foreach (var doc in documents)
+            {
+                var comp = doc as Component;
+                if (comp == null || !comp.gameObject.activeInHierarchy) continue;
+                var result = FindElementInDocument(doc, elementPath);
+                if (result != null) return result;
+            }
 
+            return null;
+        }
+
+        private static object FindElementInDocument(UnityEngine.Object docObj, string elementPath)
+        {
             var docType = docObj.GetType();
             var rootProp = docType.GetProperty("rootVisualElement", BindingFlags.Public | BindingFlags.Instance);
             if (rootProp == null) return null;
@@ -631,21 +643,71 @@ namespace UnityAgenticTools.Server
             var root = rootProp.GetValue(docObj);
             if (root == null) return null;
 
-            // Walk the path segments to find the element
-            // For now, use Q<VisualElement>(name) approach
-            var queryMethod = root.GetType().GetMethod("Q", new[] { typeof(string), typeof(string) });
-            if (queryMethod == null) return null;
+            // Walk the path to find the exact element by index
+            var segments = elementPath.Split('/');
+            object current = root;
 
-            // Try to find by the last segment name
-            var segments = path.Split('/');
-            var lastName = segments[segments.Length - 1];
+            for (int s = 0; s < segments.Length; s++)
+            {
+                if (current == null) return null;
+                var segment = segments[s];
 
-            // Strip the index suffix if present (e.g., "Button:2" -> "Button")
-            int colonIdx = lastName.LastIndexOf(':');
-            if (colonIdx > 0)
-                lastName = lastName.Substring(0, colonIdx);
+                // Parse "name:index" format
+                string name = segment;
+                int targetIndex = -1;
+                int colonIdx = segment.LastIndexOf(':');
+                if (colonIdx > 0 && int.TryParse(segment.Substring(colonIdx + 1), out int idx))
+                {
+                    name = segment.Substring(0, colonIdx);
+                    targetIndex = idx;
+                }
 
-            return queryMethod.Invoke(root, new object[] { lastName, null });
+                if (s == segments.Length - 1 && targetIndex < 0)
+                {
+                    // Last segment without index: check if current element already matches
+                    var curName = current.GetType().GetProperty("name", BindingFlags.Public | BindingFlags.Instance)?.GetValue(current) as string;
+                    if (curName == name) return current;
+
+                    // Otherwise search children
+                    var queryMethod = current.GetType().GetMethod("Q", new[] { typeof(string), typeof(string) });
+                    if (queryMethod != null)
+                        return queryMethod.Invoke(current, new object[] { name, null });
+                    return null;
+                }
+
+                // Navigate to the child at the specified index
+                var childCountProp = current.GetType().GetProperty("childCount", BindingFlags.Public | BindingFlags.Instance);
+                if (childCountProp == null) return null;
+
+                int childCount = (int)childCountProp.GetValue(current);
+                var indexer = current.GetType().GetMethod("ElementAt", BindingFlags.Public | BindingFlags.Instance);
+                if (indexer == null) return null;
+
+                if (targetIndex >= 0 && targetIndex < childCount)
+                {
+                    current = indexer.Invoke(current, new object[] { targetIndex });
+                }
+                else
+                {
+                    // No index: find first child with matching name
+                    object found = null;
+                    for (int i = 0; i < childCount; i++)
+                    {
+                        var child = indexer.Invoke(current, new object[] { i });
+                        var nameProp = child?.GetType().GetProperty("name", BindingFlags.Public | BindingFlags.Instance);
+                        var childName = nameProp?.GetValue(child) as string;
+                        if (childName == name || (string.IsNullOrEmpty(childName) && child?.GetType().Name == name))
+                        {
+                            found = child;
+                            break;
+                        }
+                    }
+                    if (found == null) return null;
+                    current = found;
+                }
+            }
+
+            return current;
         }
 
         // --- Query ---

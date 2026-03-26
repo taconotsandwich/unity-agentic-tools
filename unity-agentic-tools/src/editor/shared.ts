@@ -787,6 +787,23 @@ export function resolveScriptGuid(
                 if (guid) return { guid, path: matches[0].filePath };
               }
             }
+            // Fallback: DLL-backed type — find the DLL's GUID in the package cache
+            if (matches[0].filePath?.endsWith('.dll')) {
+              const dllBasename = path.basename(matches[0].filePath).toLowerCase();
+              for (const cacheName of ['package-cache.json', 'local-package-cache.json']) {
+                const cachePath = path.join(projectPath, '.unity-agentic', cacheName);
+                if (!existsSync(cachePath)) continue;
+                try {
+                  const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
+                  for (const [guid, assetPath] of Object.entries(cache)) {
+                    if (assetPath.toLowerCase().endsWith('.dll') &&
+                        path.basename(assetPath).toLowerCase() === dllBasename) {
+                      return { guid, path: assetPath };
+                    }
+                  }
+                } catch { /* ignore corrupt cache */ }
+              }
+            }
           }
         }
         if (matches.length > 1) {
@@ -810,6 +827,23 @@ export function resolveScriptGuid(
                 const pkgPath = path.join(projectPath, m.filePath);
                 if (existsSync(pkgPath + '.meta')) {
                   guid = extractGuidFromMeta(pkgPath + '.meta');
+                }
+              }
+              // Fallback: DLL-backed type — find GUID in package cache
+              if (!guid && m.filePath?.endsWith('.dll')) {
+                const dllBase = path.basename(m.filePath).toLowerCase();
+                for (const cn of ['package-cache.json', 'local-package-cache.json']) {
+                  const cp = path.join(projectPath, '.unity-agentic', cn);
+                  if (!existsSync(cp)) continue;
+                  try {
+                    const c = JSON.parse(readFileSync(cp, 'utf-8')) as Record<string, string>;
+                    for (const [g, p] of Object.entries(c)) {
+                      if (p.toLowerCase().endsWith('.dll') && path.basename(p).toLowerCase() === dllBase) {
+                        guid = g; break;
+                      }
+                    }
+                  } catch {}
+                  if (guid) break;
                 }
               }
               return guid ? { guid, path: m.filePath } : null;

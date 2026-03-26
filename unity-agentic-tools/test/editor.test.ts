@@ -1626,6 +1626,38 @@ describe('removeComponent', () => {
         expect(content).toContain('m_Name: Directional Light');
         expect(content).toContain('m_Name: GameManager');
     });
+
+    it('should not merge adjacent m_Component lines after removal', () => {
+        // Add two components to Player, then remove one and verify
+        // the remaining component lines are on separate lines
+        const add1 = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'BoxCollider'
+        });
+        expect(add1.success).toBe(true);
+
+        const add2 = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'SphereCollider'
+        });
+        expect(add2.success).toBe(true);
+
+        // Remove the first added component
+        const result = removeComponent({
+            file_path: temp_fixture.temp_path,
+            file_id: String(add1.component_id!)
+        });
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // Each "- component:" entry must be on its own line
+        const componentLines = content.match(/- component: \{fileID: \d+\}/g) || [];
+        const mergedLines = content.match(/\}[ \t]*- component:/g) || [];
+        expect(mergedLines.length).toBe(0);
+        expect(componentLines.length).toBeGreaterThan(0);
+    });
 });
 
 // ========== Delete GameObject Tests ==========
