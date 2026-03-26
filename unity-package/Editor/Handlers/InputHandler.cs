@@ -375,42 +375,26 @@ namespace UnityAgenticTools.Server
                 if (mouse == null)
                     throw new InvalidOperationException("No mouse device is currently active.");
 
-                var inputStateType = FindType("UnityEngine.InputSystem.LowLevel.InputState");
+                var inputSystemType = FindType("UnityEngine.InputSystem.InputSystem");
+                var mouseStateType = FindType("UnityEngine.InputSystem.LowLevel.MouseState");
+                if (inputSystemType == null || mouseStateType == null)
+                    throw new InvalidOperationException("InputSystem or MouseState type not found.");
 
-                // Set position
-                var positionProp = mouseType.GetProperty("position", BindingFlags.Public | BindingFlags.Instance);
-                if (positionProp != null)
-                {
-                    var posControl = positionProp.GetValue(mouse);
-                    ChangeInputState(inputStateType, posControl, new Vector2(x, y));
-                }
+                // Queue a coherent MouseState event so both uGUI and UI Toolkit receive it.
+                // Split InputState.Change calls don't synthesize proper pointer events for UI Toolkit.
+                QueueMouseState(inputSystemType, mouseStateType, mouse, x, y,
+                    pressed: mode == "click" || mode == "down");
 
-                // Handle click/down/up
-                if (mode == "click" || mode == "down")
+                if (mode == "click")
                 {
-                    var leftButtonProp = mouseType.GetProperty("leftButton", BindingFlags.Public | BindingFlags.Instance);
-                    if (leftButtonProp != null)
+                    EditorApplication.delayCall += () =>
                     {
-                        var leftButton = leftButtonProp.GetValue(mouse);
-                        ChangeInputState(inputStateType, leftButton, 1f);
-
-                        if (mode == "click")
+                        try
                         {
-                            EditorApplication.delayCall += () =>
-                            {
-                                try { ChangeInputState(inputStateType, leftButton, 0f); } catch { }
-                            };
+                            QueueMouseState(inputSystemType, mouseStateType, mouse, x, y, pressed: false);
                         }
-                    }
-                }
-                else if (mode == "up")
-                {
-                    var leftButtonProp = mouseType.GetProperty("leftButton", BindingFlags.Public | BindingFlags.Instance);
-                    if (leftButtonProp != null)
-                    {
-                        var leftButton = leftButtonProp.GetValue(mouse);
-                        ChangeInputState(inputStateType, leftButton, 0f);
-                    }
+                        catch { }
+                    };
                 }
 
                 return new Dictionary<string, object>
@@ -423,25 +407,49 @@ namespace UnityAgenticTools.Server
             });
         }
 
-        private static void ChangeInputState(Type inputStateType, object control, object value)
+        private static void QueueMouseState(Type inputSystemType, Type mouseStateType,
+            object mouse, float x, float y, bool pressed)
         {
-            if (inputStateType == null || control == null) return;
+            var stateObj = Activator.CreateInstance(mouseStateType);
 
-            var methods = inputStateType.GetMethods(BindingFlags.Public | BindingFlags.Static);
-            foreach (var method in methods)
+            var posField = mouseStateType.GetField("position", BindingFlags.Public | BindingFlags.Instance);
+            posField?.SetValue(stateObj, new Vector2(x, y));
+
+            var buttonsField = mouseStateType.GetField("buttons", BindingFlags.Public | BindingFlags.Instance);
+            buttonsField?.SetValue(stateObj, pressed ? (ushort)1 : (ushort)0);
+
+            // InputSystem.QueueStateEvent<MouseState>(mouse, stateObj)
+            var queueMethods = inputSystemType.GetMethods(BindingFlags.Public | BindingFlags.Static);
+            foreach (var method in queueMethods)
             {
-                if (method.Name == "Change" && method.IsGenericMethod)
+                if (method.Name == "QueueStateEvent" && method.IsGenericMethod)
                 {
-                    var valueType = value.GetType();
-                    var genericMethod = method.MakeGenericMethod(valueType);
+                    var genericMethod = method.MakeGenericMethod(mouseStateType);
+                    var methodParams = genericMethod.GetParameters();
+
+                    // Match the overload: (InputDevice, TState) or (InputDevice, TState, double)
+                    var args = new List<object> { mouse, stateObj };
+                    for (int i = 2; i < methodParams.Length; i++)
+                    {
+                        if (methodParams[i].ParameterType == typeof(double))
+                            args.Add(-1.0);
+                        else
+                            args.Add(null);
+                    }
+
                     try
                     {
-                        genericMethod.Invoke(null, new[] { control, value, null, null });
-                        return;
+                        genericMethod.Invoke(null, args.ToArray());
+                        break;
                     }
                     catch { }
                 }
             }
+
+            // Process the queued event immediately
+            var updateMethod = inputSystemType.GetMethod("Update",
+                BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
+            updateMethod?.Invoke(null, null);
         }
 #endif
 

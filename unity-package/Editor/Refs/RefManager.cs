@@ -26,11 +26,32 @@ namespace UnityAgenticTools.Refs
         private static int _nextUiIndex;
         private static int _nextHierarchyIndex;
 
+        private const string PrefsKey = "UnityAgenticTools.RefSnapshot";
+
+        [Serializable]
+        private class RefSnapshot
+        {
+            public List<SnapshotEntry> uiRefs = new List<SnapshotEntry>();
+            public List<SnapshotEntry> hierarchyRefs = new List<SnapshotEntry>();
+            public int nextUiIndex;
+            public int nextHierarchyIndex;
+        }
+
+        [Serializable]
+        private class SnapshotEntry
+        {
+            public int index;
+            public int instanceId;
+            public string treePath;
+        }
+
         static RefManager()
         {
             EditorApplication.playModeStateChanged += OnPlayModeStateChanged;
             EditorSceneManager.activeSceneChangedInEditMode += OnActiveSceneChanged;
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
+
+            RestoreFromPrefs();
         }
 
         // --- Registration ---
@@ -129,7 +150,15 @@ namespace UnityAgenticTools.Refs
 
         private static void OnBeforeAssemblyReload()
         {
-            ClearAll();
+            if (EditorApplication.isPlayingOrWillChangePlaymode)
+            {
+                SaveToPrefs();
+            }
+            else
+            {
+                EditorPrefs.DeleteKey(PrefsKey);
+                ClearAll();
+            }
         }
 
         private static void ClearAll()
@@ -138,6 +167,51 @@ namespace UnityAgenticTools.Refs
             _hierarchyRefs.Clear();
             _nextUiIndex = 1;
             _nextHierarchyIndex = 1;
+            EditorPrefs.DeleteKey(PrefsKey);
+        }
+
+        // --- Persistence across domain reloads ---
+
+        private static void SaveToPrefs()
+        {
+            var snapshot = new RefSnapshot
+            {
+                nextUiIndex = _nextUiIndex,
+                nextHierarchyIndex = _nextHierarchyIndex,
+            };
+            foreach (var kvp in _uiRefs)
+                snapshot.uiRefs.Add(new SnapshotEntry { index = kvp.Key, instanceId = kvp.Value.InstanceId, treePath = kvp.Value.TreePath });
+            foreach (var kvp in _hierarchyRefs)
+                snapshot.hierarchyRefs.Add(new SnapshotEntry { index = kvp.Key, instanceId = kvp.Value.InstanceId });
+
+            EditorPrefs.SetString(PrefsKey, JsonUtility.ToJson(snapshot));
+        }
+
+        private static void RestoreFromPrefs()
+        {
+            if (!EditorPrefs.HasKey(PrefsKey)) return;
+            try
+            {
+                var json = EditorPrefs.GetString(PrefsKey);
+                var snapshot = JsonUtility.FromJson<RefSnapshot>(json);
+                if (snapshot == null) return;
+
+                _uiRefs.Clear();
+                foreach (var e in snapshot.uiRefs)
+                    _uiRefs[e.index] = new RefEntry { InstanceId = e.instanceId, TreePath = e.treePath };
+                _nextUiIndex = snapshot.nextUiIndex;
+
+                _hierarchyRefs.Clear();
+                foreach (var e in snapshot.hierarchyRefs)
+                    _hierarchyRefs[e.index] = new RefEntry { InstanceId = e.instanceId };
+                _nextHierarchyIndex = snapshot.nextHierarchyIndex;
+
+                EditorPrefs.DeleteKey(PrefsKey);
+            }
+            catch
+            {
+                EditorPrefs.DeleteKey(PrefsKey);
+            }
         }
     }
 }

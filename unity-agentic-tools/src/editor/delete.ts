@@ -54,7 +54,8 @@ export function removeComponent(options: RemoveComponentOptions): RemoveComponen
     const goBlock = doc.find_by_file_id(parentGoId);
     if (goBlock) {
       // Remove the component line using the original string fileID for regex matching
-      const compLinePattern = new RegExp(`\\s*- component: \\{fileID: ${file_id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\}\\n?`);
+      const escaped = file_id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const compLinePattern = new RegExp(`^[ \\t]*- component: \\{fileID: ${escaped}\\}[ \\t]*\\n`, 'm');
       const modifiedRaw = goBlock.raw.replace(compLinePattern, '');
       goBlock.replace_raw(modifiedRaw);
     }

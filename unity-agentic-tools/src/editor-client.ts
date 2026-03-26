@@ -188,6 +188,7 @@ function call_editor_once(options: CallEditorOptions): Promise<RpcResponse> {
  * Open a persistent WebSocket connection for streaming events (e.g., console-follow).
  * Sends the initial RPC request, then calls on_event for each notification received.
  * Returns a cleanup function to close the connection.
+ * Automatically reconnects when the server restarts (e.g., after domain reload).
  */
 export async function stream_editor(options: StreamEditorOptions): Promise<{ close: () => void }> {
     const { method, params, timeout = 30000, on_event } = options;
@@ -197,49 +198,75 @@ export async function stream_editor(options: StreamEditorOptions): Promise<{ clo
         throw new Error(config.error);
     }
 
-    const url = `ws://127.0.0.1:${config.port}/unity-agentic`;
-    const request_id = generate_id();
-
-    const request: RpcRequest = {
-        jsonrpc: "2.0",
-        id: request_id,
-        method,
-        ...(params ? { params } : {}),
-    };
+    const MAX_RECONNECTS = 5;
+    let reconnect_count = 0;
+    let stopped = false;
 
     return new Promise<{ close: () => void }>((resolve, reject) => {
-        let connected = false;
+        let resolved = false;
 
-        const timer = setTimeout(() => {
-            if (!connected) {
-                reject(new Error(`Timeout connecting to ${url}`));
-            }
-        }, timeout);
+        function connect(url: string): void {
+            const ws = new WebSocket(url);
+            const request_id = generate_id();
+            const request: RpcRequest = {
+                jsonrpc: "2.0",
+                id: request_id,
+                method,
+                ...(params ? { params } : {}),
+            };
 
-        const ws = new WebSocket(url);
+            let connected = false;
+            const timer = !resolved
+                ? setTimeout(() => {
+                    if (!connected && !resolved) {
+                        reject(new Error(`Timeout connecting to ${url}`));
+                    }
+                }, timeout)
+                : null;
 
-        ws.onopen = () => {
-            connected = true;
-            clearTimeout(timer);
-            ws.send(JSON.stringify(request));
-            resolve({ close: () => ws.close() });
-        };
-
-        ws.onmessage = (event: MessageEvent) => {
-            try {
-                const data = JSON.parse(String(event.data));
-                if ('method' in data && !('id' in data)) {
-                    on_event(data as RpcEvent);
+            ws.onopen = () => {
+                connected = true;
+                if (timer) clearTimeout(timer);
+                reconnect_count = 0;
+                ws.send(JSON.stringify(request));
+                if (!resolved) {
+                    resolved = true;
+                    resolve({ close: () => { stopped = true; ws.close(); } });
                 }
-            } catch {}
-        };
+            };
 
-        ws.onerror = () => {
-            if (!connected) {
-                clearTimeout(timer);
-                reject(new Error(`WebSocket connection failed to ${url}`));
-            }
-        };
+            ws.onmessage = (event: MessageEvent) => {
+                try {
+                    const data = JSON.parse(String(event.data));
+                    if ('method' in data && !('id' in data)) {
+                        on_event(data as RpcEvent);
+                    }
+                } catch {}
+            };
+
+            ws.onerror = () => {
+                if (!connected && !resolved) {
+                    if (timer) clearTimeout(timer);
+                    reject(new Error(`WebSocket connection failed to ${url}`));
+                }
+            };
+
+            ws.onclose = () => {
+                if (stopped) return;
+                if (!connected && !resolved) return;
+                if (reconnect_count >= MAX_RECONNECTS) return;
+                reconnect_count++;
+                const delay = Math.min(500 * reconnect_count, 3000);
+                setTimeout(() => {
+                    if (stopped) return;
+                    const fresh_config = resolve_config(options);
+                    if ('error' in fresh_config) return;
+                    connect(`ws://127.0.0.1:${fresh_config.port}/unity-agentic`);
+                }, delay);
+            };
+        }
+
+        connect(`ws://127.0.0.1:${config.port}/unity-agentic`);
     });
 }
 
