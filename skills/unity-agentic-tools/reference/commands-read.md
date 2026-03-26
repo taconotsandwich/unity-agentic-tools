@@ -22,7 +22,7 @@
 | `read animator <file>` | AnimatorController (.controller) |
 | `read manifest <project>` | Packages from manifest.json (`--search <pattern>`) |
 | `read input-actions <file>` | Input Actions file (`--summary`, `--maps`, `--actions`, `--bindings`) |
-| `read scriptable-object <file>` | Deprecated -- redirects to `read asset` |
+
 
 ## read scene
 
@@ -90,4 +90,3 @@ View modes for AnimatorController files:
 | Mistake | Fix |
 |---------|-----|
 | `read prefab <file>` | Use `read scene <file>` -- handles both .unity and .prefab |
-| `read scriptable-object <file>` | Deprecated. Use `read asset <file>` |
