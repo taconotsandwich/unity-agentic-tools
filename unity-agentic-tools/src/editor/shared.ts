@@ -887,6 +887,10 @@ export interface ResolvedScript {
   fields?: import('../types').CSharpFieldRef[];
   base_class?: string;
   kind?: string;
+  /** Namespace of the resolved type (populated for DLL-backed scripts) */
+  namespace?: string;
+  /** Class name of the resolved type (populated for DLL-backed scripts) */
+  class_name?: string;
   /** Set when field extraction failed — included as a warning in results */
   extraction_error?: string;
 }
@@ -956,6 +960,8 @@ export function resolve_script_with_fields(
             result.fields = chosen.fields;
             result.base_class = chosen.baseClass ?? undefined;
             result.kind = chosen.kind;
+            result.namespace = chosen.namespace ?? undefined;
+            result.class_name = chosen.name;
           }
         } else {
           result.extraction_error = 'Native extractDllFields function not available';

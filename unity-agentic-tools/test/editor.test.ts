@@ -944,6 +944,54 @@ describe('editTransform', () => {
     });
 });
 
+describe('compute_dll_script_file_id', () => {
+    // Import the function directly for unit testing
+    let compute_dll_script_file_id: (namespace: string, class_name: string) => number;
+
+    beforeEach(async () => {
+        const mod = await import('../src/editor/create');
+        compute_dll_script_file_id = mod.compute_dll_script_file_id;
+    });
+
+    it('should compute a signed 32-bit integer', () => {
+        const result = compute_dll_script_file_id('UnityEngine.UIElements', 'UIDocument');
+        expect(typeof result).toBe('number');
+        expect(result).toBeGreaterThanOrEqual(-2147483648);
+        expect(result).toBeLessThanOrEqual(2147483647);
+    });
+
+    it('should return consistent values for the same input', () => {
+        const a = compute_dll_script_file_id('UnityEngine.UI', 'Image');
+        const b = compute_dll_script_file_id('UnityEngine.UI', 'Image');
+        expect(a).toBe(b);
+    });
+
+    it('should return different values for different types', () => {
+        const a = compute_dll_script_file_id('UnityEngine.UI', 'Image');
+        const b = compute_dll_script_file_id('UnityEngine.UI', 'Button');
+        expect(a).not.toBe(b);
+    });
+
+    it('should handle empty namespace', () => {
+        const result = compute_dll_script_file_id('', 'MyScript');
+        expect(typeof result).toBe('number');
+    });
+
+    it('should produce values distinct from .cs script fileID', () => {
+        const result = compute_dll_script_file_id('UnityEngine.UIElements', 'UIDocument');
+        expect(result).not.toBe(11500000);
+    });
+
+    it('should match Unity FileIDUtil.Compute algorithm (MD4-based)', () => {
+        // These values are computed from Unity's decompiled FileIDUtil.Compute:
+        // input = int32LE(114) + UTF8(fullName), hash = MD4, result = XOR of 4 words
+        const uid = compute_dll_script_file_id('UnityEngine.UIElements', 'UIDocument');
+        expect(uid).toBe(-2127395710);
+        const img = compute_dll_script_file_id('UnityEngine.UI', 'Image');
+        expect(img).toBe(-962828473);
+    });
+});
+
 describe('addComponent', () => {
     let temp_fixture: TempFixture;
 
@@ -2328,7 +2376,7 @@ describe('editComponentByFileId', () => {
         expect(transformBlock![0]).toContain('serializedVersion: 99');
     });
 
-    it('should return error for non-existent property instead of creating it', () => {
+    it('should insert non-existent property on built-in component', () => {
         const result = editComponentByFileId({
             file_path: temp_fixture.temp_path,
             file_id: '1847675924',
@@ -2336,8 +2384,11 @@ describe('editComponentByFileId', () => {
             new_value: 'hello'
         });
 
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('not found');
+        expect(result.success).toBe(true);
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const transformBlock = content.match(/--- !u!4 &1847675924[\s\S]*?(?=--- !u!|$)/);
+        expect(transformBlock).not.toBeNull();
+        expect(transformBlock![0]).toContain('m_NewCustomProp: hello');
     });
 
     it('should reject invalid same-file fileID reference', () => {
@@ -4057,14 +4108,13 @@ describe('batchEditComponentProperties', () => {
         expect(result.error).toContain('999999');
     });
 
-    it('should return error for nonexistent property', () => {
+    it('should insert nonexistent property on built-in component', () => {
         const result = batchEditComponentProperties(
             temp_fixture.temp_path,
             [{ file_id: '508316494', property: 'm_NonExistent', new_value: '42' }]
         );
 
-        expect(result.success).toBe(false);
-        expect(result.error).toContain('m_NonExistent');
+        expect(result.success).toBe(true);
     });
 });
 

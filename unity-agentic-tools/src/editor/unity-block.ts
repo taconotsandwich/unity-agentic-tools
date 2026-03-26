@@ -46,8 +46,16 @@ function escape_regex(str: string): string {
  */
 export function yaml_quote_if_needed(value: string): string {
     if (value === '') return value;
+    // Complete YAML flow collections ({...} or [...]) must not be quoted —
+    // Unity parses them as structured data (vectors, colors, refs), not strings.
+    if (
+        (value.startsWith('{') && value.endsWith('}')) ||
+        (value.startsWith('[') && value.endsWith(']'))
+    ) {
+        return value;
+    }
     // Values that need quoting: contains colon-space, hash, starts with
-    // YAML indicators ({, [, *, &, !, |, >, ', "), or leading/trailing whitespace
+    // YAML indicators ({, [, *, &, !, |, >, ', ", #), or leading/trailing whitespace
     if (
         value.includes(': ') || value.includes(' #') ||
         /^[#\{\[*&!|>'"]/.test(value) ||
@@ -205,9 +213,10 @@ export class UnityBlock {
                     prop_pattern,
                     (_match: string, prefix: string) => prefix + replacement_value
                 );
-            } else if (this._header.class_id === 114) {
-                // Field not present in YAML — insert it (MonoBehaviour only,
-                // since Unity omits default-valued fields from serialization)
+            } else {
+                // Field not present in YAML — insert it.
+                // Unity omits default-valued fields from serialization, so this
+                // enables setting properties that haven't been modified yet.
                 const insert_value = effective_ref ?? yaml_quote_if_needed(value);
                 this._insert_property(path, insert_value);
             }
@@ -253,8 +262,8 @@ export class UnityBlock {
                 );
                 if (block_result !== null) {
                     this._raw = block_result;
-                } else if (this._header.class_id === 114 && parts.length === 2) {
-                    // Parent struct doesn't exist in YAML -- insert it (MonoBehaviour/SO only)
+                } else if (parts.length === 2) {
+                    // Parent struct doesn't exist in YAML -- insert it
                     this._insert_struct_property(parent_prop, sub_field, effective_value);
                 }
             }
