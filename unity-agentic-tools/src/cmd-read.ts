@@ -981,17 +981,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             console.log(JSON.stringify(output, null, 2));
         });
 
-    // Deprecated alias: renamed to "read asset" in 0.2.1
-    cmd.command('scriptable-object')
-        .description('(Deprecated: renamed to "read asset")')
-        .argument('[file]')
-        .allowUnknownOption()
-        .action(() => {
-            console.log(JSON.stringify({
-                error: 'Command "read scriptable-object" has been renamed to "read asset". Use: unity-agentic-tools read asset <file>',
-            }, null, 2));
-            process.exit(1);
-        });
 
     cmd.command('material <file>')
         .description('Read a Unity Material file (.mat) with structured property output')
