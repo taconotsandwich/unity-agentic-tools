@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { UnityBlock } from '../src/editor/unity-block';
+import { UnityBlock, yaml_quote_if_needed } from '../src/editor/unity-block';
 
 // ========== Helpers ==========
 
@@ -223,13 +223,14 @@ describe('UnityBlock', () => {
             expect(block.get_property('m_Materials.Array.data.0')).toContain('fileID: 99999');
         });
 
-        it('should return false when property does not exist (simple)', () => {
+        it('should insert property when it does not exist (simple)', () => {
             const raw_blocks = load_blocks('SampleScene.unity');
             const raw = find_raw_block(raw_blocks, '508316491');
             const block = new UnityBlock(raw);
 
             const modified = block.set_property('m_NonExistent', 'value');
-            expect(modified).toBe(false);
+            expect(modified).toBe(true);
+            expect(block.get_property('m_NonExistent')).toBe('value');
         });
 
         it('should use object_reference when provided', () => {
@@ -654,13 +655,14 @@ describe('UnityBlock', () => {
             expect(block.dirty).toBe(true);
         });
 
-        it('should NOT be dirty after failed set_property', () => {
+        it('should be dirty after set_property inserts new property', () => {
             const raw_blocks = load_blocks('SampleScene.unity');
             const raw = find_raw_block(raw_blocks, '508316491');
             const block = new UnityBlock(raw);
 
             block.set_property('m_NonExistent', 'value');
-            expect(block.dirty).toBe(false);
+            expect(block.dirty).toBe(true);
+            expect(block.get_property('m_NonExistent')).toBe('value');
         });
     });
 
@@ -922,8 +924,10 @@ describe('UnityBlock', () => {
             block.set_property('m_Name', 'value # comment');
             expect(block.raw).toContain("m_Name: 'value # comment'");
 
+            // Flow collections ({...}) are preserved unquoted — Unity parses them as structured data
             block.set_property('m_Name', '{not a ref}');
-            expect(block.raw).toContain("m_Name: '{not a ref}'");
+            expect(block.raw).toContain('m_Name: {not a ref}');
+            expect(block.raw).not.toContain("'{not a ref}'");
         });
 
         it('should not quote values without special characters', () => {
@@ -1035,7 +1039,7 @@ describe('UnityBlock', () => {
             expect(block.raw).toContain('damage: 10');
         });
 
-        it('should not insert nested struct for non-class-114 blocks', () => {
+        it('should insert nested struct for non-class-114 blocks', () => {
             const raw = [
                 '--- !u!4 &508316495\n',
                 'Transform:\n',
@@ -1045,7 +1049,62 @@ describe('UnityBlock', () => {
             const block = new UnityBlock(raw);
 
             const modified = block.set_property('nonExistent.subField', '5');
-            expect(modified).toBe(false);
+            expect(modified).toBe(true);
+            expect(block.raw).toContain('nonExistent:');
+            expect(block.raw).toContain('subField: 5');
         });
+
+        it('should insert missing simple property on a built-in component', () => {
+            const raw = [
+                '--- !u!212 &100001\n',
+                'SpriteRenderer:\n',
+                '  m_ObjectHideFlags: 0\n',
+                '  m_GameObject: {fileID: 9999}\n',
+                '  m_Enabled: 1\n',
+            ].join('');
+            const block = new UnityBlock(raw);
+
+            const modified = block.set_property('m_SortingOrder', '5');
+            expect(modified).toBe(true);
+            expect(block.get_property('m_SortingOrder')).toBe('5');
+        });
+    });
+});
+
+describe('yaml_quote_if_needed', () => {
+    it('should pass through flow mappings unchanged', () => {
+        expect(yaml_quote_if_needed('{r: 0.3, g: 0.5, b: 1.0, a: 1.0}')).toBe('{r: 0.3, g: 0.5, b: 1.0, a: 1.0}');
+    });
+
+    it('should pass through object references unchanged', () => {
+        expect(yaml_quote_if_needed('{fileID: 12345, guid: abc123, type: 3}')).toBe('{fileID: 12345, guid: abc123, type: 3}');
+    });
+
+    it('should pass through flow sequences unchanged', () => {
+        expect(yaml_quote_if_needed('[0, 1, 2]')).toBe('[0, 1, 2]');
+    });
+
+    it('should pass through empty flow collections unchanged', () => {
+        expect(yaml_quote_if_needed('{}')).toBe('{}');
+        expect(yaml_quote_if_needed('[]')).toBe('[]');
+    });
+
+    it('should quote partial/broken flow syntax', () => {
+        expect(yaml_quote_if_needed('{broken')).toBe("'{broken'");
+        expect(yaml_quote_if_needed('[broken')).toBe("'[broken'");
+    });
+
+    it('should quote strings containing colon-space', () => {
+        expect(yaml_quote_if_needed('hello: world')).toBe("'hello: world'");
+    });
+
+    it('should not quote plain values', () => {
+        expect(yaml_quote_if_needed('MyTag')).toBe('MyTag');
+        expect(yaml_quote_if_needed('42')).toBe('42');
+        expect(yaml_quote_if_needed('true')).toBe('true');
+    });
+
+    it('should return empty string unchanged', () => {
+        expect(yaml_quote_if_needed('')).toBe('');
     });
 });

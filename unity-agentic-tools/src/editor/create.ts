@@ -22,6 +22,28 @@ import { read_project_version } from '../build-version';
 // ========== Private Helpers ==========
 
 /**
+ * Compute Unity's file ID for a script type inside a DLL.
+ * Matches Unity's FileIDUtil.Compute(classID, name):
+ *   input = int32LE(classID) + UTF8(namespace.className)
+ *   hash  = MD4(input)
+ *   result = XOR of all four 32-bit LE words of the hash
+ */
+export function compute_dll_script_file_id(namespace: string, class_name: string): number {
+    const { createHash } = require('crypto');
+    const full_name = namespace ? `${namespace}.${class_name}` : class_name;
+    const name_bytes = Buffer.from(full_name, 'utf-8');
+    const input = Buffer.alloc(4 + name_bytes.length);
+    input.writeInt32LE(114, 0); // classID 114 = MonoBehaviour
+    name_bytes.copy(input, 4);
+    const hash: Buffer = createHash('md4').update(input).digest();
+    const a = hash.readInt32LE(0);
+    const b = hash.readInt32LE(4);
+    const c = hash.readInt32LE(8);
+    const d = hash.readInt32LE(12);
+    return a ^ b ^ c ^ d;
+}
+
+/**
  * Look up the m_Layer value from a parent Transform's associated GameObject.
  * Returns 0 for root-level or if lookup fails.
  */
@@ -344,7 +366,8 @@ function createMonoBehaviourYAML(
   gameObjectId: string,
   scriptGuid: string,
   fields?: CSharpFieldRef[],
-  version?: UnityVersion
+  version?: UnityVersion,
+  scriptFileId: number = 11500000
 ): string {
   const field_yaml = fields && fields.length > 0 ? generate_field_yaml(fields, version) : '\n';
   const has_serialize_ref = fields?.some(f => f.hasSerializeReference) ?? false;
@@ -358,7 +381,7 @@ MonoBehaviour:
   m_GameObject: {fileID: ${gameObjectId}}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ${scriptGuid}, type: 3}
+  m_Script: {fileID: ${scriptFileId}, guid: ${scriptGuid}, type: 3}
   m_Name:
   m_EditorClassIdentifier:${field_yaml}${references_section}`;
 }
@@ -1516,7 +1539,14 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
       try { version = read_project_version(project_path); } catch { /* no version info */ }
     }
 
-    componentYAML = createMonoBehaviourYAML(componentId, gameObjectId, resolved.guid, resolved.fields, version);
+    // For DLL-backed scripts, compute Unity's CRC32-based file ID instead of the
+    // default 11500000 used for .cs scripts. This enables package components like UIDocument.
+    let scriptFileId = 11500000;
+    if (resolved.path?.endsWith('.dll') && resolved.class_name) {
+      scriptFileId = compute_dll_script_file_id(resolved.namespace ?? '', resolved.class_name);
+    }
+
+    componentYAML = createMonoBehaviourYAML(componentId, gameObjectId, resolved.guid, resolved.fields, version, scriptFileId);
     scriptGuid = resolved.guid;
     scriptPath = resolved.path || undefined;
     extractionError = resolved.extraction_error;
