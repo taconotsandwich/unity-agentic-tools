@@ -1,4 +1,4 @@
-# update -- 28 commands
+# update -- 31 commands
 
 - [Quick index](#quick-index)
 - [Detail: non-obvious syntax](#detail-non-obvious-syntax)
@@ -29,6 +29,7 @@
 | `update input-actions <file>` | Edit Input Actions |
 | `update animation-curves <file>` | Add/remove/modify animation curves |
 | `update animator-state <file>` | Add/remove states and transitions |
+| `update managed-reference <file> <component_id> <field_path> <type_name>` | Add SerializeReference to a component field |
 
 ## Detail: non-obvious syntax
 
@@ -116,6 +117,18 @@ Colon-separated format for all flags:
 | `--add-control-scheme` | `<name:group>` | `--add-control-scheme Keyboard:KeyboardMouse` |
 | `--remove-control-scheme` | `<name>` | `--remove-control-scheme Keyboard` |
 
+### update managed-reference
+
+Add a `[SerializeReference]` managed reference to a component field.
+
+| Option | Effect |
+|--------|--------|
+| `-p, --project <path>` | Project path for type registry lookup |
+| `--append` | Append to array (do not update field rid) |
+| `--properties <json>` | Initial field values: `'{"damage": "10"}'` |
+
+Type can be `Namespace.ClassName` (registry lookup) or `Assembly Namespace.ClassName` (manual).
+
 ## Prefab subcommands
 
 | Command | What it does |
@@ -126,4 +139,22 @@ Colon-separated format for all flags:
 | `update prefab remove-component <file> <instance> <ref>` | Suppress a component |
 | `update prefab restore-component <file> <instance> <ref>` | Restore suppressed component |
 | `update prefab remove-gameobject <file> <instance> <ref>` | Remove a child GameObject |
+| `update prefab batch-overrides <file> <instance> <json>` | Batch edit multiple property overrides |
+| `update prefab managed-reference <file> <instance> <field_path> <type_name>` | Add SerializeReference to prefab override |
 | `update prefab restore-gameobject <file> <instance> <ref>` | Restore removed child |
+
+### update prefab batch-overrides
+
+JSON format: `[{"property_path":"...","value":"...","target":"...","object_reference":"..."}]`
+
+Accepts both `value` and `new_value` keys. Use `object_reference` or `managed_reference` instead of `value` for reference-type overrides.
+
+### update prefab managed-reference
+
+Add a `[SerializeReference]` managed reference as a prefab override. Auto-generates rid and creates type/data/version override entries.
+
+| Option | Effect |
+|--------|--------|
+| `--target <ref>` | **(required)** Target reference (e.g., `"{fileID: 400000, guid: ..., type: 3}"`) |
+| `--index <n>` | Array index (default: 0) |
+| `-p, --project <path>` | Project path for type registry lookup |

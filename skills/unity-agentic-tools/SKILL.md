@@ -8,7 +8,7 @@ argument-hint: "<read|create|update|delete|editor|search|grep|...>"
 
 # Unity Agentic Tools
 
-CLI: `unity-agentic-tools <command>` -- 119 commands across 4 CRUD groups, live editor bridge, and utilities.
+CLI: `unity-agentic-tools <command>` -- 116 commands across 4 CRUD groups, live editor bridge, and utilities.
 
 All commands accept `-j`/`--json` for structured output. Run `<command> --help` for full options.
 
@@ -45,13 +45,13 @@ Use `--properties` only when component values are needed (saves tokens). Use `--
 
 **create** (14) -- GameObjects, scenes, prefab variants, ScriptableObjects, components, materials, builds, packages, input actions, animations, animators, prefabs. See `reference/commands-create.md`
 
-**update** (28) -- Properties, transforms, settings, tags, layers, sorting layers, parent hierarchy, builds, arrays, batch edits, materials, meta, animations, animators, sibling index, input actions, animation curves, animator states, plus 7 prefab subcommands. See `reference/commands-update.md`
+**update** (31) -- Properties, transforms, settings, tags, layers, sorting layers, parent hierarchy, builds, arrays, batch edits, materials, meta, animations, animators, sibling index, input actions, animation curves, animator states, managed references, plus 9 prefab subcommands. See `reference/commands-update.md`
 
 **delete** (5) -- GameObjects, components, build entries, prefab instances, packages. See `reference/commands-delete.md`
 
 **utilities** (8) -- search, grep, clone, version, docs, setup, cleanup, status. Setting aliases for `read settings`/`update settings`. See `reference/commands-utilities.md`
 
-**editor** (43) -- Live Unity Editor integration via WebSocket. See `reference/commands-editor.md`
+**editor** (37) -- Live Unity Editor integration via WebSocket. See `reference/commands-editor.md`
 
 ## Editor bridge
 
@@ -65,8 +65,6 @@ See `reference/workflows.md` for multi-step checklists (project setup, inspect-e
 
 ## Troubleshooting
 
-- **`read prefab`**: Does not exist. Use `read scene` -- it handles both `.unity` and `.prefab` files
-- **`editor log`**: Does not exist. Use `editor console-logs` (live bridge) or `read log` (disk file)
 - **`get text/value @hN`**: `@hN` is hierarchy ref. `get text`/`get value` need UI refs (`@uN` from `ui-snapshot`). Use `get position`/`get active`/`get component` for hierarchy refs
 - **Editor bridge won't connect**: Ensure Unity is open, check `editor status`, re-run `editor install <project>`
 - **`scene-open` fails**: Use Assets-relative path (`Assets/Scenes/Main.unity`). Run `editor invoke UnityEditor.AssetDatabase Refresh` first for newly created scenes
