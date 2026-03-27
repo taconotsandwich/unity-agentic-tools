@@ -27,7 +27,7 @@ For Claude Code integration, see the [Claude Code plugin](https://github.com/tac
 ### npm
 
 ```bash
-bun add -g unity-agentic-tools
+npm install -g unity-agentic-tools
 ```
 
 ### From Source
