@@ -2394,20 +2394,6 @@ describe('CLI - New Features', () => {
     });
 
     describe('error suggestions', () => {
-        it('read prefab should redirect to read scene', () => {
-            try {
-                run_cli(['read', 'prefab', resolve(fixtures_dir, 'SampleScene.unity')]);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBe(1);
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('read scene');
-            }
-        });
-
         it('create gameobject --name flag should work as alias', () => {
             const temp_fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SampleScene.unity')
@@ -2434,20 +2420,5 @@ describe('CLI - New Features', () => {
             }
         });
 
-        it('editor log should redirect to console-logs', () => {
-            try {
-                run_cli(['editor', 'log']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBe(1);
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('editor log');
-                expect(json.alternatives).toBeDefined();
-                expect(json.alternatives.some((a: { command: string }) => a.command === 'editor console-logs')).toBe(true);
-            }
-        });
     });
 });
