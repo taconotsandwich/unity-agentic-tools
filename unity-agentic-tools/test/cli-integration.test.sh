@@ -122,7 +122,7 @@ cp "$fixture_path" "$tmp_dir/transform-test.unity"
 
 # First create an object to get a known transform ID
 create_output=$(bun dist/cli.js create gameobject "$tmp_dir/transform-test.unity" "TransformTestObj" 2>&1)
-transform_id=$(echo "$create_output" | grep -o '"transform_id": [0-9]*' | grep -o '[0-9]*')
+transform_id=$(echo "$create_output" | grep -o '"transform_id": *"*[0-9]*"*' | grep -o '[0-9]*')
 
 if [ -n "$transform_id" ]; then
     if run_cli "test7" bun dist/cli.js update transform "$tmp_dir/transform-test.unity" "$transform_id" --position "10,20,30" --scale "2,2,2" --json; then
@@ -212,7 +212,7 @@ cp "$fixture_path" "$tmp_dir/workflow-test.unity"
 
 # Create object
 workflow_output=$(bun dist/cli.js create gameobject "$tmp_dir/workflow-test.unity" "WorkflowObject" 2>&1)
-wf_transform_id=$(echo "$workflow_output" | grep -o '"transform_id": [0-9]*' | grep -o '[0-9]*')
+wf_transform_id=$(echo "$workflow_output" | grep -o '"transform_id": *"*[0-9]*"*' | grep -o '[0-9]*')
 
 if [ -n "$wf_transform_id" ]; then
     # Add components
