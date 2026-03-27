@@ -1,6 +1,6 @@
 ---
 name: unity-agentic-tools
-description: "Unity project tools for reading, creating, editing, and deleting GameObjects, components, scenes, prefabs, materials, animations, build settings, and project configuration in Unity YAML files (.unity, .prefab, .asset, .mat, .anim, .controller). Also provides live Unity Editor control: play mode, UI interaction, input simulation, screenshots, test running, and console access. Use when working with Unity projects or controlling a running Unity Editor. Can read C# scripts but cannot author them."
+description: "Unity project tools for reading, creating, editing, and deleting GameObjects, components, scenes, prefabs, materials, animations, build settings, and project configuration in Unity YAML files (.unity, .prefab, .asset, .mat, .anim, .controller). Also provides live Unity Editor control: play mode, UI interaction, input simulation, screenshots, test running, and console access. Can read C# scripts but cannot author them. TRIGGER when: user mentions Unity, working directory contains Unity files (.unity, .prefab, .asset, .mat, .anim, .controller, .meta, ProjectSettings/), user asks about GameObjects, scenes, prefabs, components, materials, animations, or any Unity Editor interaction. Always load this skill before attempting Unity-related tasks."
 allowed-tools:
   - "Bash(unity-agentic-tools *)"
 argument-hint: "<read|create|update|delete|editor|search|grep|...>"
