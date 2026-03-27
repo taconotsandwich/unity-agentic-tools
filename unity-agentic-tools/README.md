@@ -9,7 +9,7 @@ Fast CLI for Unity scene, prefab, and asset files. Extracts GameObject hierarchi
 ## Quick Start
 
 ```bash
-bun add -g unity-agentic-tools
+npm install -g unity-agentic-tools
 unity-agentic-tools read scene MyScene.unity
 unity-agentic-tools read gameobject MyScene.unity "Main Camera" -p
 unity-agentic-tools update transform MyScene.unity "Main Camera" -p 0,5,-10
