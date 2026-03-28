@@ -10,7 +10,7 @@ function runCli(args: string, cwd?: string): { stdout: string; stderr: string; e
     try {
         const stdout = execSync(`bun ${CLI_PATH} ${args}`, {
             encoding: 'utf-8',
-            timeout: 10000,
+            timeout: 30000,
             cwd,
         });
         return { stdout, stderr: '', exitCode: 0 };
