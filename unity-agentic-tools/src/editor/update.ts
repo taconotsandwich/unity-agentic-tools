@@ -2018,20 +2018,49 @@ function applyManagedReference(
 
     const refEntry = `    - rid: ${nextRid}\n      type: {class: ${typeInfo.class_name}, ns: ${typeInfo.namespace}, asm: ${typeInfo.assembly}}\n      data: ${dataBlock}`;
 
-    const refIdsPattern = /(\s*RefIds:\s*\n)/;
+    const refIdsBlockPattern = /(\s*RefIds:\s*\n)/;
+    const refIdsEmptyPattern = /(\s*RefIds:)[ \t]*\[\]/;
     const referencesPattern = /(\s*references:\s*\n\s*version:\s*\d+\s*\n)/;
 
-    if (refIdsPattern.test(raw)) {
-        raw = raw.replace(refIdsPattern, `$1${refEntry}\n`);
+    if (refIdsBlockPattern.test(raw)) {
+        // RefIds already has entries (block-style) -- append new entry
+        raw = raw.replace(refIdsBlockPattern, `$1${refEntry}\n`);
+    } else if (refIdsEmptyPattern.test(raw)) {
+        // RefIds: [] (inline empty) -- convert to block with new entry
+        raw = raw.replace(refIdsEmptyPattern, `$1\n${refEntry}`);
     } else if (referencesPattern.test(raw)) {
         raw = raw.replace(referencesPattern, `$1    RefIds:\n${refEntry}\n`);
     } else {
         raw = raw.trimEnd() + `\n  references:\n    version: 2\n    RefIds:\n${refEntry}\n`;
     }
 
-    if (!append) {
+    const escaped_field = field_path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (append) {
+        // Append new rid entry to the array field
+        // Detect indent of the field line to align the new entry
+        const fieldLineMatch = raw.match(new RegExp(`^([ \\t]*)${escaped_field}:`, 'm'));
+        const fieldIndent = fieldLineMatch ? fieldLineMatch[1] : '  ';
+        const ridEntry = `\n${fieldIndent}  - rid: ${nextRid}`;
+
+        // Case 1: field is empty array []
+        const emptyArrayPattern = new RegExp(
+            `(${escaped_field}:)[ \\t]*\\[\\]`, 'm'
+        );
+        if (emptyArrayPattern.test(raw)) {
+            raw = raw.replace(emptyArrayPattern, `$1${ridEntry}`);
+        } else {
+            // Case 2: field already has entries -- append after last - rid: N
+            const lastRidPattern = new RegExp(
+                `(^[ \\t]*${escaped_field}:[\\s\\S]*?- rid: \\d+)`, 'm'
+            );
+            if (lastRidPattern.test(raw)) {
+                raw = raw.replace(lastRidPattern, `$1${ridEntry}`);
+            }
+        }
+    } else {
+        // Scalar SerializeReference: replace existing rid value
         const fieldRidPattern = new RegExp(
-            `(${field_path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*\\n\\s*rid:[ \\t]*)\\d+`, 'm'
+            `(${escaped_field}:\\s*\\n\\s*rid:[ \\t]*)\\d+`, 'm'
         );
         if (fieldRidPattern.test(raw)) {
             raw = raw.replace(fieldRidPattern, `$1${nextRid}`);

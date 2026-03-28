@@ -5,6 +5,7 @@ import type {
     CreateGameObjectOptions, CreateGameObjectResult,
     AddComponentOptions, AddComponentResult,
     CreatePrefabVariantOptions, CreatePrefabVariantResult,
+    CreatePrefabInstanceOptions, CreatePrefabInstanceResult,
     CreateScriptableObjectOptions, CreateScriptableObjectResult,
     CreateMetaFileOptions, CreateMetaFileResult,
     CreateSceneOptions, CreateSceneResult,
@@ -13,8 +14,8 @@ import type {
 } from '../types';
 import { get_class_id, UNITY_CLASS_IDS } from '../class-ids';
 import { generateGuid, validate_name, validate_file_path, find_unity_project_root } from '../utils';
-import { extractGuidFromMeta, resolve_script_with_fields, resolve_source_prefab } from './shared';
-import { generate_field_yaml } from './yaml-fields';
+import { extractGuidFromMeta, resolve_script_with_fields, resolve_source_prefab, build_type_lookup } from './shared';
+import { generate_field_yaml, json_value_to_yaml_lines } from './yaml-fields';
 import { UnityDocument } from './unity-document';
 import type { UnityVersion } from '../build-version';
 import { read_project_version } from '../build-version';
@@ -367,9 +368,10 @@ function createMonoBehaviourYAML(
   scriptGuid: string,
   fields?: CSharpFieldRef[],
   version?: UnityVersion,
-  scriptFileId: number = 11500000
+  scriptFileId: number = 11500000,
+  type_lookup?: (typeName: string) => CSharpFieldRef[] | null,
 ): string {
-  const field_yaml = fields && fields.length > 0 ? generate_field_yaml(fields, version) : '\n';
+  const field_yaml = fields && fields.length > 0 ? generate_field_yaml(fields, version, '  ', type_lookup) : '\n';
   const has_serialize_ref = fields?.some(f => f.hasSerializeReference) ?? false;
   const references_section = has_serialize_ref ? `  references:\n    version: 2\n    RefIds: []\n` : '';
   return `--- !u!114 &${componentId}
@@ -1115,6 +1117,192 @@ PrefabImporter:
 }
 
 /**
+ * Instantiate a prefab into a scene file as a PrefabInstance.
+ */
+export function createPrefabInstance(options: CreatePrefabInstanceOptions): CreatePrefabInstanceResult {
+    const { scene_path, prefab_path, name, parent, position } = options;
+
+    const pathError = validate_file_path(scene_path, 'write');
+    if (pathError) {
+        return { success: false, file_path: scene_path, error: pathError };
+    }
+
+    if (!scene_path.endsWith('.unity')) {
+        return { success: false, file_path: scene_path, error: 'Scene path must be a .unity file' };
+    }
+
+    if (!prefab_path.endsWith('.prefab')) {
+        return { success: false, file_path: scene_path, error: 'Prefab path must be a .prefab file' };
+    }
+
+    if (!existsSync(scene_path)) {
+        return { success: false, file_path: scene_path, error: `Scene file not found: ${scene_path}` };
+    }
+
+    if (!existsSync(prefab_path)) {
+        return { success: false, file_path: scene_path, error: `Prefab file not found: ${prefab_path}` };
+    }
+
+    const metaPath = prefab_path + '.meta';
+    const sourceGuid = extractGuidFromMeta(metaPath);
+    if (!sourceGuid) {
+        return { success: false, file_path: scene_path, error: `Could not find or read .meta file for prefab: ${metaPath}` };
+    }
+
+    let prefabDoc: UnityDocument;
+    try {
+        prefabDoc = UnityDocument.from_file(prefab_path);
+    } catch (err) {
+        return { success: false, file_path: scene_path, error: `Failed to read prefab: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    const rootInfo = prefabDoc.find_prefab_root();
+    if (!rootInfo) {
+        return { success: false, file_path: scene_path, error: 'Could not find root GameObject in source prefab' };
+    }
+
+    let doc: UnityDocument;
+    try {
+        doc = UnityDocument.from_file(scene_path);
+    } catch (err) {
+        return { success: false, file_path: scene_path, error: `Failed to read scene: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    let parentTransformIdStr = '0';
+    if (parent !== undefined) {
+        if (typeof parent === 'number') {
+            const parentIdStr = String(parent);
+            const parentBlock = doc.find_by_file_id(parentIdStr);
+            if (!parentBlock) {
+                return { success: false, file_path: scene_path, error: `Parent with fileID ${parent} not found. Provide a GameObject or Transform fileID.` };
+            }
+            if (parentBlock.is_stripped) {
+                return { success: false, file_path: scene_path, error: `Parent with fileID ${parent} is a stripped block (inside a PrefabInstance). Cannot parent to stripped transforms.` };
+            }
+            if (parentBlock.class_id === 4) {
+                parentTransformIdStr = parentIdStr;
+            } else if (parentBlock.class_id === 1) {
+                const compMatch = parentBlock.raw.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(\d+)\}/);
+                if (compMatch) {
+                    parentTransformIdStr = compMatch[1];
+                } else {
+                    return { success: false, file_path: scene_path, error: `Parent with fileID ${parent} has no Transform component.` };
+                }
+            } else {
+                return { success: false, file_path: scene_path, error: `Parent with fileID ${parent} is not a GameObject or Transform.` };
+            }
+        } else {
+            const foundResult = findTransformIdByName(doc, parent);
+            if (foundResult === null) {
+                return { success: false, file_path: scene_path, error: `Parent GameObject "${parent}" not found` };
+            }
+            if (typeof foundResult === 'object') {
+                return { success: false, file_path: scene_path, error: foundResult.error };
+            }
+            parentTransformIdStr = foundResult;
+        }
+    }
+
+    const prefabInstanceId = doc.generate_file_id();
+    const strippedGoId = doc.generate_file_id();
+    const strippedTransformId = doc.generate_file_id();
+
+    const instanceName = name || path.basename(prefab_path, '.prefab');
+    const pos = position ?? { x: 0, y: 0, z: 0 };
+
+    const rootGoFileId = rootInfo.game_object.file_id;
+    const rootTransformFileId = rootInfo.transform.file_id;
+
+    const yaml = `--- !u!1 &${strippedGoId} stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: ${rootGoFileId}, guid: ${sourceGuid}, type: 3}
+  m_PrefabInstance: {fileID: ${prefabInstanceId}}
+  m_PrefabAsset: {fileID: 0}
+--- !u!4 &${strippedTransformId} stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+  m_PrefabInstance: {fileID: ${prefabInstanceId}}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1001 &${prefabInstanceId}
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    m_TransformParent: {fileID: ${parentTransformIdStr}}
+    m_Modifications:
+    - target: {fileID: ${rootGoFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_Name
+      value: ${instanceName}
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: ${pos.x}
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: ${pos.y}
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: ${pos.z}
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: ${sourceGuid}, type: 3}
+`;
+
+    doc.append_raw(yaml);
+
+    if (parentTransformIdStr !== '0') {
+        doc.add_child_to_parent(parentTransformIdStr, strippedTransformId);
+    }
+
+    try {
+        doc.save();
+    } catch (err) {
+        return { success: false, file_path: scene_path, error: `Failed to save scene: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    return {
+        success: true,
+        file_path: scene_path,
+        prefab_instance_id: prefabInstanceId,
+        game_object_id: strippedGoId,
+        transform_id: strippedTransformId,
+    };
+}
+
+/**
  * Create a new ScriptableObject .asset file.
  */
 export function createScriptableObject(options: CreateScriptableObjectOptions): CreateScriptableObjectResult {
@@ -1172,8 +1360,9 @@ export function createScriptableObject(options: CreateScriptableObjectOptions): 
   }
 
   const baseName = path.basename(output_path, '.asset');
+  const type_lookup = project_path ? build_type_lookup(project_path) : undefined;
   const field_yaml = resolved.fields && resolved.fields.length > 0
-    ? generate_field_yaml(resolved.fields, version)
+    ? generate_field_yaml(resolved.fields, version, '  ', type_lookup)
     : '\n';
 
   let assetYaml = `%YAML 1.1
@@ -1196,8 +1385,53 @@ MonoBehaviour:
     const doc = UnityDocument.from_string(assetYaml);
     const block = doc.blocks[0];
     if (block) {
+      const complex_entries: Array<[string, unknown]> = [];
       for (const [key, val] of Object.entries(options.initial_values)) {
-        block.set_property(key, val);
+        if (val === null || val === undefined || typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
+          block.set_property(key, String(val ?? ''));
+        } else if (Array.isArray(val) && val.length === 0) {
+          block.set_property(key, '[]');
+        } else if (typeof val === 'object' && val !== null && !Array.isArray(val) && Object.keys(val as Record<string, unknown>).length === 0) {
+          block.set_property(key, '{}');
+        } else {
+          complex_entries.push([key, val]);
+        }
+      }
+      // Insert complex values (objects/arrays) as raw YAML blocks
+      if (complex_entries.length > 0) {
+        let raw = block.raw;
+        for (const [key, val] of complex_entries) {
+          const yaml_lines = json_value_to_yaml_lines(val, '    ');
+          // Check if key already exists and replace, or append after m_EditorClassIdentifier
+          const key_pattern = new RegExp(`^([ \\t]*${key}:)[^\\n]*$`, 'm');
+          const key_match = raw.match(key_pattern);
+          if (key_match && key_match.index !== undefined) {
+            // Find the extent of this key's block (all following lines with deeper indent)
+            const key_indent = key_match[0].match(/^[ \t]*/)?.[0].length ?? 0;
+            const after_key = key_match.index + key_match[0].length;
+            let end = after_key;
+            const remaining = raw.slice(after_key);
+            const remaining_lines = remaining.split('\n');
+            // Skip first element (empty string from split at line boundary)
+            for (let i = 1; i < remaining_lines.length; i++) {
+              const line = remaining_lines[i];
+              if (line.trim() === '') { end += 1 + line.length; continue; }
+              const line_indent = line.match(/^[ \t]*/)?.[0].length ?? 0;
+              if (line_indent > key_indent) {
+                end += 1 + line.length;
+              } else {
+                break;
+              }
+            }
+            const block_yaml = `  ${key}:\n${yaml_lines.join('\n')}`;
+            raw = raw.slice(0, key_match.index) + block_yaml + raw.slice(end);
+          } else {
+            // Append at end of block content (preserves field insertion order)
+            const block_yaml = `  ${key}:\n${yaml_lines.join('\n')}`;
+            raw = raw.trimEnd() + '\n' + block_yaml + '\n';
+          }
+        }
+        block.replace_raw(raw);
       }
       assetYaml = doc.serialize();
     }
@@ -1546,7 +1780,8 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
       scriptFileId = compute_dll_script_file_id(resolved.namespace ?? '', resolved.class_name);
     }
 
-    componentYAML = createMonoBehaviourYAML(componentId, gameObjectId, resolved.guid, resolved.fields, version, scriptFileId);
+    const type_lookup_comp = project_path ? build_type_lookup(project_path) : undefined;
+    componentYAML = createMonoBehaviourYAML(componentId, gameObjectId, resolved.guid, resolved.fields, version, scriptFileId, type_lookup_comp);
     scriptGuid = resolved.guid;
     scriptPath = resolved.path || undefined;
     extractionError = resolved.extraction_error;

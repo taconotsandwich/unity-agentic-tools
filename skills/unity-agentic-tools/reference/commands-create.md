@@ -1,20 +1,21 @@
-# create -- 14 commands
+# create -- 15 commands
 
 | Command | What it does |
 |---------|-------------|
 | `create gameobject <file> <name>` | New GameObject (`-p <parent>`) |
 | `create scene <path>` | New .unity file (`--defaults` for Camera+Light) |
-| `create prefab-variant <source> <output>` | Prefab Variant from source |
-| `create scriptable-object <path> <script>` | New .asset for a script |
+| `create prefab-variant <source> <output>` | Prefab Variant from source (`-n <name>`) |
+| `create prefab-instance <scene> <prefab>` | Instantiate prefab in scene (`-p <parent>`, `--position x,y,z`) |
+| `create scriptable-object <path> <script>` | New .asset (`-p <project>`, `--set <json>` -- supports nested objects/arrays) |
 | `create meta <script_path>` | Generate .meta file (MonoImporter) |
 | `create component <file> <name> <component>` | Add component to GameObject |
 | `create component-copy <file> <src_id> <target>` | Copy component to another object |
-| `create build <project> <scene>` | Add scene to build settings |
+| `create build <project> <scene>` | Add scene to build settings (`--index <n>`) |
 | `create material <path> --shader <guid>` | New Material (.mat) |
 | `create package <project> <name> <version>` | Add package to manifest.json |
 | `create input-actions <path> <name>` | Blank .inputactions file |
 | `create animation <path> [name]` | Blank .anim file (`--sample-rate`, `--loop`) |
-| `create animator <path> [name]` | Blank .controller file |
+| `create animator <path> [name]` | Blank .controller file (`--layer <name>`) |
 | `create prefab <path> [name]` | Blank .prefab file (name defaults to filename) |
 
 ## create material

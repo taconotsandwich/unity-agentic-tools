@@ -179,6 +179,43 @@ else
     failures=$((failures + 1))
 fi
 
+# Test 9b: Create prefab instance in scene
+echo ""
+echo "Test 9b: Create Prefab Instance in Scene"
+cp "$fixture_path" "$tmp_dir/prefab-instance-test.unity"
+
+if run_cli "test9b" bun dist/cli.js create prefab-instance "$tmp_dir/prefab-instance-test.unity" "$prefab_path" --json; then
+    if grep -q "PrefabInstance:" "$tmp_dir/prefab-instance-test.unity" && \
+       grep -q "stripped" "$tmp_dir/prefab-instance-test.unity" && \
+       grep -q "m_SourcePrefab:" "$tmp_dir/prefab-instance-test.unity"; then
+        echo "✓ Create prefab instance works"
+    else
+        echo "✗ Create prefab instance: invalid structure"
+        failures=$((failures + 1))
+    fi
+else
+    echo "✗ Create prefab instance failed"
+    failures=$((failures + 1))
+fi
+
+# Test 9c: Create prefab instance with name and position
+echo ""
+echo "Test 9c: Create Prefab Instance with name and position"
+cp "$fixture_path" "$tmp_dir/prefab-instance-named.unity"
+
+if run_cli "test9c" bun dist/cli.js create prefab-instance "$tmp_dir/prefab-instance-named.unity" "$prefab_path" --name "BossEnemy" --position "10,0,5" --json; then
+    if grep -q "value: BossEnemy" "$tmp_dir/prefab-instance-named.unity" && \
+       grep -q "value: 10" "$tmp_dir/prefab-instance-named.unity"; then
+        echo "✓ Create prefab instance with name and position works"
+    else
+        echo "✗ Create prefab instance: name/position not set"
+        failures=$((failures + 1))
+    fi
+else
+    echo "✗ Create prefab instance with options failed"
+    failures=$((failures + 1))
+fi
+
 # Test 10: Search PrefabInstance by name in file
 echo ""
 echo "Test 10: Search PrefabInstance by name in file"

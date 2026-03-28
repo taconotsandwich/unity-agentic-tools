@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve, join } from 'path';
 import { readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
-import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile, createScene, editPrefabOverride, batchEditPrefabOverrides, editArray, batchEditComponentProperties, removePrefabOverride, addRemovedComponent, removeRemovedComponent, addRemovedGameObject, removeRemovedGameObject, deletePrefabInstance, editManagedReference } from '../src/editor';
+import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, createPrefabInstance, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile, createScene, editPrefabOverride, batchEditPrefabOverrides, editArray, batchEditComponentProperties, removePrefabOverride, addRemovedComponent, removeRemovedComponent, addRemovedGameObject, removeRemovedGameObject, deletePrefabInstance, editManagedReference } from '../src/editor';
 import { UnityDocument } from '../src/editor/unity-document';
 import { create_temp_fixture } from './test-utils';
 import type { TempFixture } from './test-utils';
@@ -1439,6 +1439,198 @@ describe('createPrefabVariant', () => {
     });
 });
 
+describe('createPrefabInstance', () => {
+    const sourcePrefab = resolve(__dirname, 'fixtures', 'SamplePrefab.prefab');
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should instantiate a prefab into a scene at root', () => {
+        const result = createPrefabInstance({
+            scene_path: temp_fixture.temp_path,
+            prefab_path: sourcePrefab,
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.prefab_instance_id).toBeDefined();
+        expect(result.game_object_id).toBeDefined();
+        expect(result.transform_id).toBeDefined();
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('PrefabInstance:');
+        expect(content).toContain('stripped');
+        expect(content).toContain('m_SourcePrefab:');
+        expect(content).toContain('guid: a1b2c3d4e5f6789012345678abcdef12');
+    });
+
+    it('should default instance name to prefab filename stem', () => {
+        createPrefabInstance({
+            scene_path: temp_fixture.temp_path,
+            prefab_path: sourcePrefab,
+        });
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('value: SamplePrefab');
+    });
+
+    it('should use custom name when provided', () => {
+        createPrefabInstance({
+            scene_path: temp_fixture.temp_path,
+            prefab_path: sourcePrefab,
+            name: 'BossEnemy',
+        });
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('value: BossEnemy');
+    });
+
+    it('should set custom position', () => {
+        createPrefabInstance({
+            scene_path: temp_fixture.temp_path,
+            prefab_path: sourcePrefab,
+            position: { x: 5, y: 0, z: 3 },
+        });
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('propertyPath: m_LocalPosition.x\n      value: 5');
+        expect(content).toContain('propertyPath: m_LocalPosition.z\n      value: 3');
+    });
+
+    it('should parent to existing GameObject by name', () => {
+        const result = createPrefabInstance({
+            scene_path: temp_fixture.temp_path,
+            prefab_path: sourcePrefab,
+            parent: 'Player',
+        });
+
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const doc = UnityDocument.from_file(temp_fixture.temp_path);
+
+        const piBlock = doc.find_by_file_id(result.prefab_instance_id!);
+        expect(piBlock).toBeDefined();
+        expect(piBlock!.raw).toContain('m_TransformParent: {fileID: 1847675924}');
+
+        expect(content).toContain(`- {fileID: ${result.transform_id}}`);
+    });
+
+    it('should add exactly 3 blocks to the scene', () => {
+        const contentBefore = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const blocksBefore = (contentBefore.match(/--- !u!/g) || []).length;
+
+        createPrefabInstance({
+            scene_path: temp_fixture.temp_path,
+            prefab_path: sourcePrefab,
+        });
+
+        const contentAfter = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const blocksAfter = (contentAfter.match(/--- !u!/g) || []).length;
+
+        expect(blocksAfter - blocksBefore).toBe(3);
+    });
+
+    it('should preserve existing scene content', () => {
+        createPrefabInstance({
+            scene_path: temp_fixture.temp_path,
+            prefab_path: sourcePrefab,
+        });
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(content).toContain('m_Name: Main Camera');
+        expect(content).toContain('m_Name: Player');
+    });
+
+    it('should generate unique IDs across multiple instantiations', () => {
+        const result1 = createPrefabInstance({
+            scene_path: temp_fixture.temp_path,
+            prefab_path: sourcePrefab,
+            name: 'Enemy1',
+        });
+        const result2 = createPrefabInstance({
+            scene_path: temp_fixture.temp_path,
+            prefab_path: sourcePrefab,
+            name: 'Enemy2',
+        });
+
+        const ids = [
+            result1.prefab_instance_id, result1.game_object_id, result1.transform_id,
+            result2.prefab_instance_id, result2.game_object_id, result2.transform_id,
+        ];
+        const uniqueIds = new Set(ids);
+        expect(uniqueIds.size).toBe(6);
+    });
+
+    it('should fail for non-.unity scene path', () => {
+        const result = createPrefabInstance({
+            scene_path: sourcePrefab,
+            prefab_path: sourcePrefab,
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('.unity');
+    });
+
+    it('should fail for non-.prefab prefab path', () => {
+        const result = createPrefabInstance({
+            scene_path: temp_fixture.temp_path,
+            prefab_path: temp_fixture.temp_path,
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('.prefab');
+    });
+
+    it('should fail when scene file not found', () => {
+        const result = createPrefabInstance({
+            scene_path: '/tmp/nonexistent.unity',
+            prefab_path: sourcePrefab,
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+
+    it('should fail when prefab file not found', () => {
+        const result = createPrefabInstance({
+            scene_path: temp_fixture.temp_path,
+            prefab_path: '/tmp/nonexistent.prefab',
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+
+    it('should fail when prefab has no .meta file', () => {
+        const tempPrefab = join(tmpdir(), 'NoMeta.prefab');
+        writeFileSync(tempPrefab, '%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n');
+        try {
+            const result = createPrefabInstance({
+                scene_path: temp_fixture.temp_path,
+                prefab_path: tempPrefab,
+            });
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('.meta');
+        } finally {
+            try { unlinkSync(tempPrefab); } catch { /* ignore */ }
+        }
+    });
+
+    it('should fail when parent not found', () => {
+        const result = createPrefabInstance({
+            scene_path: temp_fixture.temp_path,
+            prefab_path: sourcePrefab,
+            parent: 'DoesNotExist',
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('not found');
+    });
+});
+
 describe('UnityEditor special cases', () => {
     let temp_fixture: TempFixture;
 
@@ -2127,6 +2319,134 @@ describe('createScriptableObject', () => {
         expect(content).toContain('damage: 50');
         expect(content).toContain('speed: 2.5');
     });
+
+    it('should apply nested object initial_values', () => {
+        const testGuid = 'aabbccdd11223344aabbccdd11223344';
+        const result = createScriptableObject({
+            output_path: outputPath,
+            script: testGuid,
+            initial_values: { stats: { health: 100, armor: 50 } }
+        });
+
+        expect(result.success).toBe(true);
+        const content = readFileSync(outputPath, 'utf-8');
+        expect(content).toContain('stats:');
+        expect(content).toContain('health: 100');
+        expect(content).toContain('armor: 50');
+    });
+
+    it('should apply array initial_values', () => {
+        const testGuid = 'aabbccdd11223344aabbccdd11223344';
+        const result = createScriptableObject({
+            output_path: outputPath,
+            script: testGuid,
+            initial_values: { items: ['sword', 'shield'] }
+        });
+
+        expect(result.success).toBe(true);
+        const content = readFileSync(outputPath, 'utf-8');
+        expect(content).toContain('items:');
+        expect(content).toContain('- sword');
+        expect(content).toContain('- shield');
+    });
+
+    it('should apply mixed flat and nested initial_values', () => {
+        const testGuid = 'aabbccdd11223344aabbccdd11223344';
+        const result = createScriptableObject({
+            output_path: outputPath,
+            script: testGuid,
+            initial_values: {
+                displayName: 'Hero',
+                stats: { health: 100, mana: 50 },
+                level: 5
+            }
+        });
+
+        expect(result.success).toBe(true);
+        const content = readFileSync(outputPath, 'utf-8');
+        expect(content).toContain('displayName: Hero');
+        expect(content).toContain('stats:');
+        expect(content).toContain('health: 100');
+        expect(content).toContain('mana: 50');
+        expect(content).toContain('level: 5');
+    });
+
+    it('should apply deeply nested initial_values', () => {
+        const testGuid = 'aabbccdd11223344aabbccdd11223344';
+        const result = createScriptableObject({
+            output_path: outputPath,
+            script: testGuid,
+            initial_values: {
+                config: {
+                    rendering: {
+                        shadows: { enabled: true, quality: 2 }
+                    }
+                }
+            }
+        });
+
+        expect(result.success).toBe(true);
+        const content = readFileSync(outputPath, 'utf-8');
+        expect(content).toContain('config:');
+        expect(content).toContain('rendering:');
+        expect(content).toContain('shadows:');
+        expect(content).toContain('enabled: true');
+        expect(content).toContain('quality: 2');
+    });
+
+    it('should produce flow mapping for managed-reference-style initial_values', () => {
+        const testGuid = 'aabbccdd11223344aabbccdd11223344';
+        const result = createScriptableObject({
+            output_path: outputPath,
+            script: testGuid,
+            initial_values: {
+                abilityName: 'Fireball',
+                conditions: [],
+                references: {
+                    version: 2,
+                    RefIds: [
+                        {
+                            rid: 1,
+                            type: { class: 'ApplyDamageAction', ns: 'Combat', asm: 'Assembly-CSharp' },
+                            data: { inputType: 1, constantValue: 0 },
+                        }
+                    ]
+                },
+            }
+        });
+
+        expect(result.success).toBe(true);
+        const content = readFileSync(outputPath, 'utf-8');
+        expect(content).toContain('type: {class: ApplyDamageAction, ns: Combat, asm: Assembly-CSharp}');
+        expect(content).toContain('data: {inputType: 1, constantValue: 0}');
+        expect(content).toContain('conditions: []');
+        expect(content).toContain('- rid: 1');
+        expect(content).not.toMatch(/- *\n\s*rid:/);
+    });
+
+    it('should preserve field order for multiple complex initial_values', () => {
+        const testGuid = 'aabbccdd11223344aabbccdd11223344';
+        const result = createScriptableObject({
+            output_path: outputPath,
+            script: testGuid,
+            initial_values: {
+                first: { a: 1, b: 2 },
+                second: { c: 3, d: 4 },
+                third: { e: 5, f: 6 },
+            }
+        });
+
+        expect(result.success).toBe(true);
+        const content = readFileSync(outputPath, 'utf-8');
+        const firstIdx = content.indexOf('first:');
+        const secondIdx = content.indexOf('second:');
+        const thirdIdx = content.indexOf('third:');
+        expect(firstIdx).toBeGreaterThan(-1);
+        expect(secondIdx).toBeGreaterThan(-1);
+        expect(thirdIdx).toBeGreaterThan(-1);
+        expect(firstIdx).toBeLessThan(secondIdx);
+        expect(secondIdx).toBeLessThan(thirdIdx);
+    });
 });
 
 // ========== Managed Reference Tests ==========
@@ -2161,6 +2481,9 @@ MonoBehaviour:
             expect(content).toContain('rawDamage: 10');
             expect(content).toContain('inputType: 1');
             expect(content).toContain('class: MyAction');
+            // Bug 3 fix: array field should be updated with the new rid
+            expect(content).toContain('- rid: 1');
+            expect(content).not.toMatch(/myActions:[ \t]*\[\]/);
         } finally {
             try { unlinkSync(tempPath); } catch {}
         }

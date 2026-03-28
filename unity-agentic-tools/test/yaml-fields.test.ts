@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { yaml_default_for_type, generate_field_yaml } from '../src/editor/yaml-fields';
+import { yaml_default_for_type, generate_field_yaml, json_value_to_yaml_lines } from '../src/editor/yaml-fields';
 import type { CSharpFieldRef } from '../src/types';
 import type { UnityVersion } from '../src/build-version';
 
@@ -244,5 +244,167 @@ describe('generate_field_yaml', () => {
         expect(yaml).toContain('behaviour:');
         expect(yaml).toContain('  rid: 0');
         expect(yaml).toContain('speed: 0');
+    });
+
+    it('should expand serializable struct fields via type_lookup', () => {
+        const fields: CSharpFieldRef[] = [
+            make_field('health', 'int'),
+            make_field('trigger', 'PassiveTrigger'),
+        ];
+        const type_lookup = (typeName: string) => {
+            if (typeName === 'PassiveTrigger') {
+                return [
+                    make_field('conditions', 'List<Condition>'),
+                    make_field('triggerType', 'int'),
+                ];
+            }
+            return null;
+        };
+        const yaml = generate_field_yaml(fields, undefined, '  ', type_lookup);
+        expect(yaml).toContain('health: 0');
+        expect(yaml).toContain('trigger:');
+        expect(yaml).toContain('    conditions: []');
+        expect(yaml).toContain('    triggerType: 0');
+        expect(yaml).not.toContain('{fileID: 0}');
+    });
+
+    it('should fall back to {fileID: 0} when type_lookup returns null', () => {
+        const fields: CSharpFieldRef[] = [
+            make_field('target', 'SomeUnknownType'),
+        ];
+        const type_lookup = () => null;
+        const yaml = generate_field_yaml(fields, undefined, '  ', type_lookup);
+        expect(yaml).toContain('target: {fileID: 0}');
+    });
+});
+
+describe('json_value_to_yaml_lines', () => {
+    it('should convert string primitives', () => {
+        expect(json_value_to_yaml_lines('hello')).toEqual(['hello']);
+    });
+
+    it('should quote strings that need quoting', () => {
+        expect(json_value_to_yaml_lines('has: colon')).toEqual(["'has: colon'"]);
+    });
+
+    it('should convert numbers', () => {
+        expect(json_value_to_yaml_lines(42)).toEqual(['42']);
+        expect(json_value_to_yaml_lines(3.14)).toEqual(['3.14']);
+    });
+
+    it('should convert booleans', () => {
+        expect(json_value_to_yaml_lines(true)).toEqual(['true']);
+        expect(json_value_to_yaml_lines(false)).toEqual(['false']);
+    });
+
+    it('should convert null', () => {
+        expect(json_value_to_yaml_lines(null)).toEqual(['']);
+    });
+
+    it('should convert empty array', () => {
+        expect(json_value_to_yaml_lines([])).toEqual(['[]']);
+    });
+
+    it('should convert simple array', () => {
+        const lines = json_value_to_yaml_lines(['a', 'b', 'c']);
+        expect(lines).toEqual([
+            '  - a',
+            '  - b',
+            '  - c',
+        ]);
+    });
+
+    it('should convert empty object', () => {
+        expect(json_value_to_yaml_lines({})).toEqual(['{}']);
+    });
+
+    it('should convert flat object', () => {
+        const lines = json_value_to_yaml_lines({ health: 100, armor: 50 });
+        expect(lines).toEqual([
+            '  health: 100',
+            '  armor: 50',
+        ]);
+    });
+
+    it('should convert nested object as flow mapping', () => {
+        const lines = json_value_to_yaml_lines({ stats: { health: 100, mana: 50 } });
+        expect(lines).toEqual([
+            '  stats: {health: 100, mana: 50}',
+        ]);
+    });
+
+    it('should convert deeply nested structures with leaf flow mapping', () => {
+        const lines = json_value_to_yaml_lines({
+            a: { b: { c: 'deep' } }
+        });
+        expect(lines).toEqual([
+            '  a:',
+            '    b: {c: deep}',
+        ]);
+    });
+
+    it('should convert array of all-scalar objects as flow mappings', () => {
+        const lines = json_value_to_yaml_lines([
+            { name: 'sword', damage: 10 },
+            { name: 'shield', defense: 5 },
+        ]);
+        expect(lines).toEqual([
+            '  - {name: sword, damage: 10}',
+            '  - {name: shield, defense: 5}',
+        ]);
+    });
+
+    it('should handle custom indent', () => {
+        const lines = json_value_to_yaml_lines({ x: 1 }, '    ');
+        expect(lines).toEqual(['    x: 1']);
+    });
+
+    it('should inline empty collections on same line as key', () => {
+        const lines = json_value_to_yaml_lines({ conditions: [], config: {} });
+        expect(lines).toEqual([
+            '  conditions: []',
+            '  config: {}',
+        ]);
+    });
+
+    it('should use compact list format for complex array items', () => {
+        const lines = json_value_to_yaml_lines([
+            { rid: 1, type: { class: 'Foo', ns: 'Bar', asm: 'Baz' }, data: { x: 10 } },
+        ]);
+        expect(lines).toEqual([
+            '  - rid: 1',
+            '    type: {class: Foo, ns: Bar, asm: Baz}',
+            '    data: {x: 10}',
+        ]);
+    });
+
+    it('should put array items at same indent as parent key', () => {
+        const lines = json_value_to_yaml_lines({
+            RefIds: [
+                { rid: 1, type: { class: 'X', ns: 'Y', asm: 'Z' } },
+            ]
+        });
+        expect(lines).toEqual([
+            '  RefIds:',
+            '  - rid: 1',
+            '    type: {class: X, ns: Y, asm: Z}',
+        ]);
+    });
+
+    it('should handle mixed flow-mappable and complex values', () => {
+        const lines = json_value_to_yaml_lines({
+            version: 2,
+            RefIds: [
+                { rid: 1, type: { class: 'A', ns: '', asm: 'B' }, data: { nested: { deep: 1 } } },
+            ]
+        });
+        expect(lines).toEqual([
+            '  version: 2',
+            '  RefIds:',
+            '  - rid: 1',
+            '    type: {class: A, ns: , asm: B}',
+            '    data:',
+            '      nested: {deep: 1}',
+        ]);
     });
 });
