@@ -1076,3 +1076,71 @@ function resolve_enum_fields(fields: import('../types').CSharpFieldRef[], projec
     // Registry read failed — skip enum resolution
   }
 }
+
+/**
+ * Build a lookup function that resolves type names to their serialized fields.
+ * Searches the project's Assets/ directory for TypeName.cs files, then extracts
+ * fields on-demand via the native Rust module. Results are cached per type.
+ *
+ * Used by generate_field_yaml to expand [Serializable] struct/class fields
+ * instead of defaulting to {fileID: 0}.
+ */
+export function build_type_lookup(
+    project_path: string
+): ((typeName: string) => import('../types').CSharpFieldRef[] | null) {
+    let extractFn: ((filePath: string) => import('../types').CSharpTypeInfo[] | null) | null = null;
+    try {
+        const { getNativeExtractSerializedFields } = require('../scanner');
+        extractFn = getNativeExtractSerializedFields();
+    } catch { /* native module unavailable */ }
+    if (!extractFn) return () => null;
+
+    // Build index of .cs files by basename for fast lookup
+    const assetsDir = path.join(project_path, 'Assets');
+    const csIndex = new Map<string, string>();
+    try {
+        const { readdirSync } = require('fs') as typeof import('fs');
+        const entries = readdirSync(assetsDir, { recursive: true, withFileTypes: false }) as string[];
+        for (const entry of entries) {
+            if (typeof entry === 'string' && entry.endsWith('.cs')) {
+                const basename = entry.substring(entry.lastIndexOf('/') + 1).replace(/\.cs$/, '');
+                if (!csIndex.has(basename)) {
+                    csIndex.set(basename, path.join(assetsDir, entry));
+                }
+            }
+        }
+    } catch { /* directory read failed */ }
+    if (csIndex.size === 0) return () => null;
+
+    const cache = new Map<string, import('../types').CSharpFieldRef[] | null>();
+
+    return (typeName: string) => {
+        if (cache.has(typeName)) return cache.get(typeName) ?? null;
+
+        const shortName = typeName.includes('.') ? typeName.substring(typeName.lastIndexOf('.') + 1) : typeName;
+        const csPath = csIndex.get(shortName);
+        if (!csPath || !existsSync(csPath)) {
+            cache.set(typeName, null);
+            return null;
+        }
+
+        try {
+            const typeInfos = extractFn!(csPath);
+            if (!typeInfos || typeInfos.length === 0) {
+                cache.set(typeName, null);
+                return null;
+            }
+            const match = typeInfos.find((t: import('../types').CSharpTypeInfo) => t.name === shortName);
+            if (match && match.fields && match.fields.length > 0) {
+                resolve_enum_fields(match.fields, project_path);
+                cache.set(typeName, match.fields);
+                return match.fields;
+            }
+            cache.set(typeName, null);
+            return null;
+        } catch {
+            cache.set(typeName, null);
+            return null;
+        }
+    };
+}

@@ -3,6 +3,7 @@ export {
     createGameObject,
     createScene,
     createPrefabVariant,
+    createPrefabInstance,
     createScriptableObject,
     createMetaFile,
     addComponent,
@@ -46,7 +47,7 @@ export {
 } from './duplicate';
 
 // Re-export shared helpers that are part of the public API
-export { validateUnityYAML, resolve_script_with_fields } from './shared';
+export { validateUnityYAML, resolve_script_with_fields, build_type_lookup } from './shared';
 export type { ResolvedScript } from './shared';
 
 // YAML field generation

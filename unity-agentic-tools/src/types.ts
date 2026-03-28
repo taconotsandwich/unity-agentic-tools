@@ -192,6 +192,23 @@ export interface CreateGameObjectResult {
   error?: string;
 }
 
+export interface CreatePrefabInstanceOptions {
+  scene_path: string;
+  prefab_path: string;
+  name?: string;
+  parent?: string | number;
+  position?: { x: number; y: number; z: number };
+}
+
+export interface CreatePrefabInstanceResult {
+  success: boolean;
+  file_path: string;
+  prefab_instance_id?: string;
+  game_object_id?: string;
+  transform_id?: string;
+  error?: string;
+}
+
 // Quaternion for rotation representation
 export interface Quaternion {
   x: number;
@@ -307,8 +324,8 @@ export interface CreateScriptableObjectOptions {
   output_path: string;
   script: string;
   project_path?: string;
-  /** Initial field values to set after generating the asset (e.g. {"damage": "10"}) */
-  initial_values?: Record<string, string>;
+  /** Initial field values to set after generating the asset. Supports nested objects/arrays. */
+  initial_values?: Record<string, unknown>;
 }
 
 export interface CreateScriptableObjectResult {

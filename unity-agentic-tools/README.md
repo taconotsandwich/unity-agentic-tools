@@ -15,13 +15,13 @@ unity-agentic-tools read gameobject MyScene.unity "Main Camera" -p
 unity-agentic-tools update transform MyScene.unity "Main Camera" -p 0,5,-10
 ```
 
-## Commands (125 total)
+## Commands (126 total)
 
 ### Read (21)
 `read scene` | `read gameobject` | `read asset` | `read scriptable-object` | `read material` | `read dependencies` | `read dependents` | `read unused` | `read settings` | `read build` | `read overrides` | `read component` | `read reference` | `read script` | `read scripts` | `read log` | `read meta` | `read animation` | `read animator` | `read manifest` | `read input-actions`
 
-### Create (14)
-`create gameobject` | `create scene` | `create prefab-variant` | `create scriptable-object` | `create meta` | `create component` | `create component-copy` | `create build` | `create material` | `create package` | `create input-actions` | `create animation` | `create animator` | `create prefab`
+### Create (15)
+`create gameobject` | `create scene` | `create prefab-variant` | `create prefab-instance` | `create scriptable-object` | `create meta` | `create component` | `create component-copy` | `create build` | `create material` | `create package` | `create input-actions` | `create animation` | `create animator` | `create prefab`
 
 ### Update (28)
 `update gameobject` | `update component` | `update transform` | `update scriptable-object` | `update settings` | `update tag` | `update layer` | `update sorting-layer` | `update parent` | `update build` | `update array` | `update batch` | `update batch-components` | `update material` | `update meta` | `update animation` | `update animator` | `update sibling-index` | `update input-actions` | `update animation-curves` | `update animator-state` | `update prefab` (7 subcommands)

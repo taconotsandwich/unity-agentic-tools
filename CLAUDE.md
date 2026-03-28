@@ -60,10 +60,10 @@ unity-package/      Unity Editor bridge (C# UPM package)
 - `update prefab` is a nested command group with 9 subcommands: `unpack`, `override`, `batch-overrides`, `managed-reference`, `remove-override`, `remove-component`, `restore-component`, `remove-gameobject`, `restore-gameobject`
 - `editor` is a live bridge command group with 43 subcommands, built in `cmd-editor.ts`
 
-### Command Counts (116 total)
+### Command Counts (117 total)
 
 - **Top-level**: clone, search, grep, version, docs, setup, cleanup, status (8)
-- **create**: gameobject, scene, prefab-variant, scriptable-object, meta, component, component-copy, build, material, package, input-actions, animation, animator, prefab (14)
+- **create**: gameobject, scene, prefab-variant, prefab-instance, scriptable-object, meta, component, component-copy, build, material, package, input-actions, animation, animator, prefab (15)
 - **read**: scene, gameobject, asset, material, dependencies, dependents, unused, settings, build, overrides, component, reference, target, script, scripts, log, meta, animation, animator, manifest, input-actions (21)
 - **update**: gameobject, component, transform, scriptable-object, settings, tag, layer, sorting-layer, parent, build, array, batch, batch-components, material, meta, animation, animator, sibling-index, input-actions, animation-curves, animator-state, managed-reference + prefab subgroup (9) (31)
 - **delete**: gameobject, component, build, prefab, package (5)
