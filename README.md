@@ -2,8 +2,6 @@
 
 A CLI for reading and editing Unity scenes, prefabs, and assets with minimal token usage. Powered by a native Rust backend (napi-rs) for fast parsing of large files.
 
-For Claude Code integration, see the [Claude Code plugin](https://github.com/taconotsandwich/unity-agentic-tools-claude-plugin).
-
 ## Features
 
 - **Scene Analysis** - List hierarchies, search GameObjects, inspect components with pagination
