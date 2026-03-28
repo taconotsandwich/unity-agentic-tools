@@ -1,6 +1,6 @@
 {
   "name": "com.unity-agentic-tools.editor-bridge",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "displayName": "Unity Agentic Tools - Editor Bridge",
   "description": "WebSocket bridge for live Unity Editor integration with unity-agentic-tools CLI",
   "unity": "2021.3",
