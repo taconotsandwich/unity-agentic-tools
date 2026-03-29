@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { randomBytes } from 'crypto';
+import { ensure_parent_dir } from './utils';
 
 // ========== Interfaces ==========
 
@@ -81,6 +82,7 @@ export function load_input_actions(file: string): InputActionsFile | { error: st
  * Save an .inputactions file with 4-space indent.
  */
 export function save_input_actions(file: string, data: InputActionsFile): void {
+    ensure_parent_dir(file);
     writeFileSync(file, JSON.stringify(data, null, 4) + '\n', 'utf-8');
 }
 
