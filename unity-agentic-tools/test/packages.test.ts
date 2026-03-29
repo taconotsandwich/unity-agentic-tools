@@ -130,11 +130,12 @@ describe('packages', () => {
             }
         });
 
-        test('saves with sorted keys', () => {
+        test('preserves original key order', () => {
             add_package(tmp_dir, 'com.unity.aaaa', '1.0.0');
             const raw = readFileSync(join(tmp_dir, 'Packages', 'manifest.json'), 'utf-8');
             const deps = Object.keys(JSON.parse(raw).dependencies);
-            expect(deps[0]).toBe('com.unity.aaaa');
+            // New package appended at end, existing order preserved
+            expect(deps[deps.length - 1]).toBe('com.unity.aaaa');
         });
     });
 
