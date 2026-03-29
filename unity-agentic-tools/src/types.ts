@@ -262,6 +262,8 @@ export interface AssetObject {
 export interface RemoveComponentOptions {
   file_path: string;
   file_id: string;
+  game_object?: string;
+  project_path?: string;
 }
 
 export interface RemoveComponentResult {
@@ -270,6 +272,24 @@ export interface RemoveComponentResult {
   removed_file_id?: string;
   removed_class_id?: number;
   error?: string;
+}
+
+export interface BatchRemoveComponentOptions {
+  project_path: string;
+  component_type: string;
+  game_object?: string;
+  dry_run?: boolean;
+}
+
+export interface BatchRemoveComponentResult {
+  success: boolean;
+  project_path: string;
+  component: string;
+  files_scanned: number;
+  files_modified: number;
+  removals: Array<{ file: string; file_id: string; class_id: number }>;
+  skipped: number;
+  errors: Array<{ file: string; error: string }>;
 }
 
 // Delete GameObject types
