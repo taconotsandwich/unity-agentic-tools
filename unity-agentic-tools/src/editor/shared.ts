@@ -787,14 +787,24 @@ export function resolveScriptGuid(
                 if (guid) return { guid, path: matches[0].filePath };
               }
             }
-            // Fallback: DLL-backed type — find the DLL's GUID in the package cache
+            // Fallback: DLL-backed type — find the source .cs by class name in package caches
+            // Unity references scripts by the .cs file's GUID even when compiled into a DLL
             if (matches[0].filePath?.endsWith('.dll')) {
+              const classNameLower = targetName.toLowerCase();
               const dllBasename = path.basename(matches[0].filePath).toLowerCase();
               for (const cacheName of ['package-cache.json', 'local-package-cache.json']) {
                 const cachePath = path.join(projectPath, '.unity-agentic', cacheName);
                 if (!existsSync(cachePath)) continue;
                 try {
                   const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
+                  // First: find .cs source file matching the class name
+                  for (const [guid, assetPath] of Object.entries(cache)) {
+                    if (assetPath.endsWith('.cs') &&
+                        path.basename(assetPath, '.cs').toLowerCase() === classNameLower) {
+                      return { guid, path: assetPath };
+                    }
+                  }
+                  // Second: find the DLL itself (for DLL-only references)
                   for (const [guid, assetPath] of Object.entries(cache)) {
                     if (assetPath.toLowerCase().endsWith('.dll') &&
                         path.basename(assetPath).toLowerCase() === dllBasename) {
@@ -829,17 +839,27 @@ export function resolveScriptGuid(
                   guid = extractGuidFromMeta(pkgPath + '.meta');
                 }
               }
-              // Fallback: DLL-backed type — find GUID in package cache
+              // Fallback: DLL-backed type — find source .cs by class name in package cache
               if (!guid && m.filePath?.endsWith('.dll')) {
+                const clsLower = (m.name ?? targetName).toLowerCase();
                 const dllBase = path.basename(m.filePath).toLowerCase();
                 for (const cn of ['package-cache.json', 'local-package-cache.json']) {
                   const cp = path.join(projectPath, '.unity-agentic', cn);
                   if (!existsSync(cp)) continue;
                   try {
                     const c = JSON.parse(readFileSync(cp, 'utf-8')) as Record<string, string>;
+                    // First: find .cs source matching class name
                     for (const [g, p] of Object.entries(c)) {
-                      if (p.toLowerCase().endsWith('.dll') && path.basename(p).toLowerCase() === dllBase) {
+                      if (p.endsWith('.cs') && path.basename(p, '.cs').toLowerCase() === clsLower) {
                         guid = g; break;
+                      }
+                    }
+                    // Second: find the DLL itself
+                    if (!guid) {
+                      for (const [g, p] of Object.entries(c)) {
+                        if (p.toLowerCase().endsWith('.dll') && path.basename(p).toLowerCase() === dllBase) {
+                          guid = g; break;
+                        }
                       }
                     }
                   } catch {}
@@ -874,8 +894,12 @@ export function resolveScriptGuid(
             );
           }
         }
-      } catch {
-        // Registry read failed
+      } catch (err) {
+        // Re-throw intentional resolution errors (ambiguity, etc.)
+        if (err instanceof Error && err.message.startsWith('Ambiguous type')) {
+          throw err;
+        }
+        // Registry read/parse failed -- continue to fallback strategies
       }
     }
 
