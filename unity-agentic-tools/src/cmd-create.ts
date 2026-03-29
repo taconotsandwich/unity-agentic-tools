@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { existsSync, writeFileSync } from 'fs';
 import { basename } from 'path';
 import { randomBytes } from 'crypto';
+import { ensure_parent_dir } from './utils';
 import {
     createGameObject,
     createScene,
@@ -315,6 +316,7 @@ Material:
   m_BuildTextureStacks: []
 `;
 
+            ensure_parent_dir(output_path);
             writeFileSync(output_path, mat_content, 'utf-8');
 
             // Generate .meta file
@@ -493,6 +495,7 @@ AnimationClip:
   m_Events: []
 `;
 
+            ensure_parent_dir(output_path);
             writeFileSync(output_path, anim_content, 'utf-8');
 
             // Generate .meta file
@@ -583,6 +586,7 @@ AnimatorStateMachine:
   m_DefaultState: {fileID: 0}
 `;
 
+            ensure_parent_dir(output_path);
             writeFileSync(output_path, ctrl_content, 'utf-8');
 
             const guid = randomBytes(16).toString('hex');
@@ -659,6 +663,7 @@ Transform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 `;
 
+            ensure_parent_dir(output_path);
             writeFileSync(output_path, prefab_content, 'utf-8');
 
             const guid = randomBytes(16).toString('hex');

@@ -1,4 +1,5 @@
 import { writeFileSync, readFileSync, existsSync } from 'fs';
+import { ensure_parent_dir } from '../utils';
 import * as path from 'path';
 import { load_guid_cache } from '../guid-cache';
 import type {
@@ -903,6 +904,7 @@ Light:
 
   // Write the scene file
   try {
+    ensure_parent_dir(output_path);
     writeFileSync(output_path, yaml, 'utf-8');
   } catch (err) {
     return {
@@ -1072,6 +1074,7 @@ PrefabInstance:
 
   // Write the variant prefab
   try {
+    ensure_parent_dir(output_path);
     writeFileSync(output_path, variantYaml, 'utf-8');
   } catch (err) {
     return {
@@ -1438,6 +1441,7 @@ MonoBehaviour:
   }
 
   try {
+    ensure_parent_dir(output_path);
     writeFileSync(output_path, assetYaml, 'utf-8');
   } catch (err) {
     return { success: false, output_path, error: `Failed to write asset file: ${err instanceof Error ? err.message : String(err)}` };
@@ -1733,12 +1737,16 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
     if (!resolved) {
       const hints: string[] = [];
       if (project_path) {
+        const agenticDir = path.join(project_path, '.unity-agentic');
         const cacheExists = load_guid_cache(project_path) !== null;
-        const registryExists = existsSync(path.join(project_path, '.unity-agentic', 'type-registry.json'));
+        const registryExists = existsSync(path.join(agenticDir, 'type-registry.json'));
+        const pkgCacheExists = existsSync(path.join(agenticDir, 'package-cache.json'));
         if (!cacheExists && !registryExists) {
-          hints.push(`No GUID cache or type registry found at ${path.join(project_path, '.unity-agentic/')}. Run "unity-agentic-tools setup" first.`);
+          hints.push(`No GUID cache or type registry found at ${agenticDir}/. Run "unity-agentic-tools setup" first.`);
         } else if (!registryExists) {
           hints.push('Type registry not found. Re-run "unity-agentic-tools setup" to rebuild.');
+        } else if (!pkgCacheExists) {
+          hints.push('Package cache not found. Re-run "unity-agentic-tools setup" to index package scripts.');
         }
       } else {
         hints.push('No Unity project detected. Provide --project or run from inside a Unity project directory.');
