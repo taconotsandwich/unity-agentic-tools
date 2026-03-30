@@ -52,7 +52,8 @@ describe('doc-indexer CLI integration', () => {
     });
 
     it('clear subcommand should execute without error', () => {
-        const result = runCli('clear');
+        const storagePath = join(temp_dir, 'index.json');
+        const result = runCli(`--storage-path ${storagePath} clear`);
         expect(result.stderr).not.toContain('does not exist');
         expect(result.stdout).toContain('Cleared');
     });

@@ -4,6 +4,7 @@ import { readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync, existsSync 
 import { tmpdir } from 'os';
 import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, createPrefabInstance, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile, createScene, editPrefabOverride, batchEditPrefabOverrides, editArray, batchEditComponentProperties, removePrefabOverride, addRemovedComponent, removeRemovedComponent, addRemovedGameObject, removeRemovedGameObject, deletePrefabInstance, editManagedReference } from '../src/editor';
 import { UnityDocument } from '../src/editor/unity-document';
+import { resolveAssetPathToPPtr } from '../src/editor/shared';
 import { create_temp_fixture } from './test-utils';
 import type { TempFixture } from './test-utils';
 
@@ -1850,6 +1851,89 @@ describe('removeComponent', () => {
         expect(mergedLines.length).toBe(0);
         expect(componentLines.length).toBeGreaterThan(0);
     });
+
+    it('should produce one component entry per line with no newline bleed', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'AudioSource'
+        });
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        // No line should contain multiple YAML block markers
+        const lines = content.split('\n');
+        for (const line of lines) {
+            const blockMarkers = (line.match(/--- !u!/g) || []).length;
+            expect(blockMarkers).toBeLessThanOrEqual(1);
+        }
+
+        // Each component entry should be on its own line
+        const goPattern = /--- !u!1 &1847675923[\s\S]*?(?=--- !u!|$)/;
+        const goMatch = content.match(goPattern);
+        expect(goMatch).not.toBeNull();
+        const compLines = goMatch![0].split('\n').filter(l => l.includes('component: {fileID:'));
+        for (const cl of compLines) {
+            expect(cl.trim()).toMatch(/^- component: \{fileID: \d+\}$/);
+        }
+    });
+
+    it('should fail when target GameObject has no m_Component array', () => {
+        // Corrupt the scene by stripping m_Component and its entries from Player GO
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const lines = content.split('\n');
+        const filtered: string[] = [];
+        let skipping = false;
+        for (const line of lines) {
+            if (/^\s*m_Component:\s*$/.test(line)) {
+                skipping = true;
+                continue;
+            }
+            if (skipping && /^\s*-\s*component:/.test(line)) {
+                continue;
+            }
+            skipping = false;
+            filtered.push(line);
+        }
+        writeFileSync(temp_fixture.temp_path, filtered.join('\n'), 'utf-8');
+
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'BoxCollider'
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('m_Component');
+    });
+
+    it('should warn about dangling PPtr references after removal', () => {
+        // Add a BoxCollider and then create a reference to it from another component
+        const addResult = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'BoxCollider'
+        });
+        expect(addResult.success).toBe(true);
+        const colliderIdStr = String(addResult.component_id!);
+
+        // Manually inject a PPtr reference to the new component from the MeshRenderer block
+        const doc = UnityDocument.from_file(temp_fixture.temp_path);
+        const meshRenderer = doc.find_by_file_id('1847675926');
+        if (meshRenderer) {
+            const raw = meshRenderer.raw + `  m_FakeRef: {fileID: ${colliderIdStr}}\n`;
+            meshRenderer.replace_raw(raw);
+            doc.save();
+        }
+
+        const result = removeComponent({
+            file_path: temp_fixture.temp_path,
+            file_id: colliderIdStr,
+        });
+        expect(result.success).toBe(true);
+        expect(result.warning).toBeDefined();
+        expect(result.warning).toContain('Dangling references');
+        expect(result.warning).toContain('1847675926');
+    });
 });
 
 // ========== Delete GameObject Tests ==========
@@ -2973,6 +3057,94 @@ describe('editComponentByFileId - block-style YAML paths', () => {
 
 });
 
+describe('block raw newline invariant', () => {
+    let temp_fixture: TempFixture;
+
+    beforeEach(() => {
+        temp_fixture = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SampleScene.unity')
+        );
+    });
+
+    afterEach(() => {
+        temp_fixture.cleanup_fn();
+    });
+
+    it('should never produce merged block lines after set_property', () => {
+        // Create a GO and component, then update properties and verify no line merging
+        const goResult = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'TestObj'
+        });
+        expect(goResult.success).toBe(true);
+
+        const compResult = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'TestObj',
+            component_type: 'BoxCollider'
+        });
+        expect(compResult.success).toBe(true);
+        const compId = String(compResult.component_id!);
+
+        // Update multiple properties
+        editComponentByFileId({
+            file_path: temp_fixture.temp_path,
+            file_id: compId,
+            property: 'm_Enabled',
+            new_value: '0'
+        });
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+
+        // No line should contain a YAML block separator merged with other content
+        const lines = content.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.includes('--- !u!') && !line.startsWith('--- !u!')) {
+                throw new Error(`Merged block at line ${i + 1}: "${line}"`);
+            }
+        }
+
+        // Every block separator must be on its own line
+        const blockStarts = content.match(/--- !u!\d+ &-?\d+/g) || [];
+        for (const bs of blockStarts) {
+            const idx = content.indexOf(bs);
+            if (idx > 0 && content[idx - 1] !== '\n') {
+                throw new Error(`Block separator not preceded by newline: "${content.slice(Math.max(0, idx - 20), idx + bs.length)}"`);
+            }
+        }
+    });
+
+    it('should preserve block separation after block-to-inline conversion', () => {
+        // Directly test the UnityBlock set_property with a block-style value at end of block
+        const blockYaml = `--- !u!114 &200
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_Script: {fileID: 11500000, guid: abc123, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  myList:
+    - item1
+    - item2
+`;
+        const doc = UnityDocument.from_string(
+            `%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n${blockYaml}--- !u!4 &300\nTransform:\n  m_ObjectHideFlags: 0\n`
+        );
+
+        // Convert block-style myList to inline value
+        const block = doc.find_by_file_id('200')!;
+        expect(block).not.toBeNull();
+        block.set_property('myList', 'newValue');
+
+        const serialized = doc.serialize();
+
+        // Block 300 must still start on its own line
+        expect(serialized).toContain('\n--- !u!4 &300\n');
+        // No merged lines
+        expect(serialized).not.toMatch(/newValue--- !u!/);
+    });
+});
+
 describe('editComponentByFileId - ParticleSystem block-style paths', () => {
     let temp_fixture: TempFixture;
 
@@ -3864,6 +4036,60 @@ MonoBehaviour:
             expect(result.success).toBe(true);
             const content = readFileSync(tempPath, 'utf-8');
             expect(content).toContain('targetScope: 1');
+        } finally {
+            try { unlinkSync(tempPath); } catch {}
+        }
+    });
+
+    it('should reject garbage values when current is null ref ({fileID: 0})', () => {
+        const tempPath = join(tmpdir(), 'nullref-reject.unity');
+        const yaml = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_Script: {fileID: 11500000, guid: abc123, type: 3}
+  m_Name: TestMono
+  m_EditorClassIdentifier:
+  nullField: {fileID: 0}
+`;
+        writeFileSync(tempPath, yaml, 'utf-8');
+        try {
+            const result = editComponentByFileId({
+                file_path: tempPath,
+                file_id: '11400000',
+                property: 'nullField',
+                new_value: 'banana'
+            });
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('null reference');
+        } finally {
+            try { unlinkSync(tempPath); } catch {}
+        }
+    });
+
+    it('should accept valid reference when current is null ref ({fileID: 0})', () => {
+        const tempPath = join(tmpdir(), 'nullref-accept.unity');
+        const yaml = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_Script: {fileID: 11500000, guid: abc123, type: 3}
+  m_Name: TestMono
+  m_EditorClassIdentifier:
+  nullField: {fileID: 0}
+`;
+        writeFileSync(tempPath, yaml, 'utf-8');
+        try {
+            // Use {fileID: 11400000} which exists in this document
+            const result = editComponentByFileId({
+                file_path: tempPath,
+                file_id: '11400000',
+                property: 'nullField',
+                new_value: '{fileID: 11400000}'
+            });
+            expect(result.success).toBe(true);
         } finally {
             try { unlinkSync(tempPath); } catch {}
         }
@@ -5091,6 +5317,153 @@ describe('editPrefabOverride - bracket auto-quoting', () => {
             expect(content).toContain("propertyPath: 'patrolPoints.Array.data[0].managedReferenceType'");
         } finally {
             temp.cleanup_fn();
+        }
+    });
+});
+
+// ========== Asset Path to PPtr Resolution ==========
+
+describe('resolveAssetPathToPPtr', () => {
+    let projectDir: string;
+    let cacheDir: string;
+
+    beforeEach(() => {
+        projectDir = join(tmpdir(), `pptr-test-${Date.now()}`);
+        cacheDir = join(projectDir, '.unity-agentic');
+        mkdirSync(cacheDir, { recursive: true });
+        mkdirSync(join(projectDir, 'Assets'), { recursive: true });
+
+        // Create a GUID cache with test assets
+        const cache: Record<string, string> = {
+            'aabbccdd11223344aabbccdd11223344': 'Assets/Input/MyActions.inputactions',
+            'ff00ff00ff00ff00ff00ff00ff00ff00': 'Assets/Materials/TestMat.mat',
+            '1234567890abcdef1234567890abcdef': 'Assets/Animations/Walk.anim',
+            'abcdef01234567890abcdef012345678': 'Assets/Animations/MainController.controller',
+        };
+        writeFileSync(join(cacheDir, 'guid-cache.json'), JSON.stringify(cache), 'utf-8');
+    });
+
+    afterEach(() => {
+        rmSync(projectDir, { recursive: true, force: true });
+    });
+
+    it('should pass through existing PPtr values unchanged', () => {
+        const result = resolveAssetPathToPPtr(
+            '{fileID: 11400000, guid: abc, type: 2}',
+            join(projectDir, 'Assets/Scenes/Test.unity'),
+            projectDir
+        );
+        expect(result).toBeUndefined();
+    });
+
+    it('should pass through non-asset values unchanged', () => {
+        expect(resolveAssetPathToPPtr('42', '/tmp/test.unity')).toBeUndefined();
+        expect(resolveAssetPathToPPtr('hello', '/tmp/test.unity')).toBeUndefined();
+        expect(resolveAssetPathToPPtr('{fileID: 0}', '/tmp/test.unity')).toBeUndefined();
+    });
+
+    it('should resolve .inputactions by name from GUID cache', () => {
+        const result = resolveAssetPathToPPtr(
+            'MyActions.inputactions',
+            join(projectDir, 'Assets/Scenes/Test.unity'),
+            projectDir
+        );
+        expect(result).toBe('{fileID: 11400000, guid: aabbccdd11223344aabbccdd11223344, type: 2}');
+    });
+
+    it('should resolve .mat by name from GUID cache', () => {
+        const result = resolveAssetPathToPPtr(
+            'TestMat.mat',
+            join(projectDir, 'Assets/Scenes/Test.unity'),
+            projectDir
+        );
+        expect(result).toBe('{fileID: 2100000, guid: ff00ff00ff00ff00ff00ff00ff00ff00, type: 2}');
+    });
+
+    it('should resolve .anim by name from GUID cache', () => {
+        const result = resolveAssetPathToPPtr(
+            'Walk.anim',
+            join(projectDir, 'Assets/Scenes/Test.unity'),
+            projectDir
+        );
+        expect(result).toBe('{fileID: 7400000, guid: 1234567890abcdef1234567890abcdef, type: 2}');
+    });
+
+    it('should resolve .controller by name from GUID cache', () => {
+        const result = resolveAssetPathToPPtr(
+            'MainController.controller',
+            join(projectDir, 'Assets/Scenes/Test.unity'),
+            projectDir
+        );
+        expect(result).toBe('{fileID: 9100000, guid: abcdef01234567890abcdef012345678, type: 2}');
+    });
+
+    it('should return null when asset not found in cache', () => {
+        const result = resolveAssetPathToPPtr(
+            'NonExistent.inputactions',
+            join(projectDir, 'Assets/Scenes/Test.unity'),
+            projectDir
+        );
+        expect(result).toBeNull();
+    });
+
+    it('should resolve full Assets/ path from GUID cache', () => {
+        const result = resolveAssetPathToPPtr(
+            'Assets/Input/MyActions.inputactions',
+            join(projectDir, 'Assets/Scenes/Test.unity'),
+            projectDir
+        );
+        expect(result).toBe('{fileID: 11400000, guid: aabbccdd11223344aabbccdd11223344, type: 2}');
+    });
+});
+
+describe('editComponentByFileId - asset path resolution', () => {
+    it('should resolve asset path to PPtr in component property', () => {
+        // Set up a temp project with GUID cache
+        const projectDir = join(tmpdir(), `pptr-edit-${Date.now()}`);
+        const cacheDir = join(projectDir, '.unity-agentic');
+        mkdirSync(cacheDir, { recursive: true });
+        mkdirSync(join(projectDir, 'Assets', 'Scenes'), { recursive: true });
+
+        const cache: Record<string, string> = {
+            'aabbccdd11223344aabbccdd11223344': 'Assets/Input/MyActions.inputactions',
+        };
+        writeFileSync(join(cacheDir, 'guid-cache.json'), JSON.stringify(cache), 'utf-8');
+
+        // Create a scene file with a MonoBehaviour having a null ref
+        const scenePath = join(projectDir, 'Assets', 'Scenes', 'Test.unity');
+        const yaml = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &500
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: abc123, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  fallbackInputAsset: {fileID: 0}
+`;
+        writeFileSync(scenePath, yaml, 'utf-8');
+
+        try {
+            const result = editComponentByFileId({
+                file_path: scenePath,
+                file_id: '500',
+                property: 'fallbackInputAsset',
+                new_value: 'MyActions.inputactions',
+                project_path: projectDir,
+            });
+            expect(result.success).toBe(true);
+
+            const content = readFileSync(scenePath, 'utf-8');
+            expect(content).toContain('fallbackInputAsset: {fileID: 11400000, guid: aabbccdd11223344aabbccdd11223344, type: 2}');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
         }
     });
 });

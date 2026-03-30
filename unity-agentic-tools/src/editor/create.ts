@@ -24,6 +24,70 @@ import { read_project_version } from '../build-version';
 // ========== Private Helpers ==========
 
 /**
+ * Pure-JS MD4 hash (RFC 1320). Needed because OpenSSL 3.x removed MD4.
+ * Returns a 16-byte Buffer.
+ */
+function md4(data: Buffer): Buffer {
+    function F(x: number, y: number, z: number): number { return (x & y) | (~x & z); }
+    function G(x: number, y: number, z: number): number { return (x & y) | (x & z) | (y & z); }
+    function H(x: number, y: number, z: number): number { return x ^ y ^ z; }
+    function rotl(x: number, n: number): number { return ((x << n) | (x >>> (32 - n))) >>> 0; }
+
+    const len = data.length;
+    const bitLen = len * 8;
+    const padded_len = (len + 9 + 63) & ~63;
+    const buf = Buffer.alloc(padded_len);
+    data.copy(buf);
+    buf[len] = 0x80;
+    buf.writeUInt32LE(bitLen >>> 0, padded_len - 8);
+    buf.writeUInt32LE(Math.floor(bitLen / 0x100000000) >>> 0, padded_len - 4);
+
+    let a0 = 0x67452301;
+    let b0 = 0xefcdab89;
+    let c0 = 0x98badcfe;
+    let d0 = 0x10325476;
+
+    const R1_K = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];
+    const R1_S = [3,7,11,19,3,7,11,19,3,7,11,19,3,7,11,19];
+    const R2_K = [0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15];
+    const R2_S = [3,5,9,13,3,5,9,13,3,5,9,13,3,5,9,13];
+    const R3_K = [0,8,4,12,2,10,6,14,1,9,5,13,3,11,7,15];
+    const R3_S = [3,9,11,15,3,9,11,15,3,9,11,15,3,9,11,15];
+
+    for (let i = 0; i < padded_len; i += 64) {
+        const X: number[] = [];
+        for (let j = 0; j < 16; j++) X[j] = buf.readUInt32LE(i + j * 4);
+
+        let a = a0, b = b0, c = c0, d = d0;
+
+        for (let j = 0; j < 16; j++) {
+            const t = (a + F(b, c, d) + X[R1_K[j]]) >>> 0;
+            a = d; d = c; c = b; b = rotl(t, R1_S[j]);
+        }
+        for (let j = 0; j < 16; j++) {
+            const t = (a + G(b, c, d) + X[R2_K[j]] + 0x5a827999) >>> 0;
+            a = d; d = c; c = b; b = rotl(t, R2_S[j]);
+        }
+        for (let j = 0; j < 16; j++) {
+            const t = (a + H(b, c, d) + X[R3_K[j]] + 0x6ed9eba1) >>> 0;
+            a = d; d = c; c = b; b = rotl(t, R3_S[j]);
+        }
+
+        a0 = (a0 + a) >>> 0;
+        b0 = (b0 + b) >>> 0;
+        c0 = (c0 + c) >>> 0;
+        d0 = (d0 + d) >>> 0;
+    }
+
+    const result = Buffer.alloc(16);
+    result.writeUInt32LE(a0, 0);
+    result.writeUInt32LE(b0, 4);
+    result.writeUInt32LE(c0, 8);
+    result.writeUInt32LE(d0, 12);
+    return result;
+}
+
+/**
  * Compute Unity's file ID for a script type inside a DLL.
  * Matches Unity's FileIDUtil.Compute(classID, name):
  *   input = int32LE(classID) + UTF8(namespace.className)
@@ -31,13 +95,12 @@ import { read_project_version } from '../build-version';
  *   result = XOR of all four 32-bit LE words of the hash
  */
 export function compute_dll_script_file_id(namespace: string, class_name: string): number {
-    const { createHash } = require('crypto');
     const full_name = namespace ? `${namespace}.${class_name}` : class_name;
     const name_bytes = Buffer.from(full_name, 'utf-8');
     const input = Buffer.alloc(4 + name_bytes.length);
     input.writeInt32LE(114, 0); // classID 114 = MonoBehaviour
     name_bytes.copy(input, 4);
-    const hash: Buffer = createHash('md4').update(input).digest();
+    const hash = md4(input);
     const a = hash.readInt32LE(0);
     const b = hash.readInt32LE(4);
     const c = hash.readInt32LE(8);
@@ -55,13 +118,13 @@ function get_layer_from_parent(doc: UnityDocument, parentTransformId: string): n
     const parentTransform = doc.find_by_file_id(parentTransformId);
     if (!parentTransform) return 0;
 
-    const goMatch = parentTransform.raw.match(/m_GameObject:\s*\{fileID:\s*(\d+)\}/);
+    const goMatch = parentTransform.raw.match(/m_GameObject:[ \t]*\{fileID:[ \t]*(\d+)\}/);
     if (!goMatch) return 0;
 
     const parentGo = doc.find_by_file_id(goMatch[1]);
     if (!parentGo) return 0;
 
-    const layerMatch = parentGo.raw.match(/m_Layer:\s*(\d+)/);
+    const layerMatch = parentGo.raw.match(/m_Layer:[ \t]*(\d+)/);
     return layerMatch ? parseInt(layerMatch[1], 10) : 0;
 }
 
@@ -346,16 +409,20 @@ ${defaults}`;
 /**
  * Add a component reference to a GameObject's m_Component array.
  */
-function addComponentToGameObject(doc: UnityDocument, gameObjectId: string, componentId: string): void {
+function addComponentToGameObject(doc: UnityDocument, gameObjectId: string, componentId: string): boolean {
   const goBlock = doc.find_by_file_id(gameObjectId);
-  if (!goBlock) return;
+  if (!goBlock) return false;
 
-  let raw = goBlock.raw;
-  raw = raw.replace(
-    /(m_Component:\s*\n(?:\s*-\s*component:\s*\{fileID:\s*\d+\}\s*\n)*)/,
+  const raw = goBlock.raw;
+  const updated = raw.replace(
+    /(m_Component:[ \t]*\n(?:[ \t]*-[ \t]*component:[ \t]*\{fileID:[ \t]*\d+\}[ \t]*\n)*)/,
     `$1  - component: {fileID: ${componentId}}\n`
   );
-  goBlock.replace_raw(raw);
+
+  if (updated === raw) return false;
+
+  goBlock.replace_raw(updated);
+  return true;
 }
 
 /**
@@ -456,7 +523,7 @@ export function createGameObject(options: CreateGameObjectOptions): CreateGameOb
         parentTransformIdStr = parentIdStr;
       } else if (parentBlock.class_id === 1) {
         // It's a GO, find its transform
-        const compMatch = parentBlock.raw.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(\d+)\}/);
+        const compMatch = parentBlock.raw.match(/m_Component:[ \t]*\n[ \t]*-[ \t]*component:[ \t]*\{fileID:[ \t]*(\d+)\}/);
         if (compMatch) {
           parentTransformIdStr = compMatch[1];
         } else {
@@ -1185,7 +1252,7 @@ export function createPrefabInstance(options: CreatePrefabInstanceOptions): Crea
             if (parentBlock.class_id === 4) {
                 parentTransformIdStr = parentIdStr;
             } else if (parentBlock.class_id === 1) {
-                const compMatch = parentBlock.raw.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(\d+)\}/);
+                const compMatch = parentBlock.raw.match(/m_Component:[ \t]*\n[ \t]*-[ \t]*component:[ \t]*\{fileID:[ \t]*(\d+)\}/);
                 if (compMatch) {
                     parentTransformIdStr = compMatch[1];
                 } else {
@@ -1700,7 +1767,7 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
   let duplicateWarning: string | undefined;
   const goBlock = doc.find_by_file_id(gameObjectIdStr);
   if (goBlock && classId !== null) {
-    const compRefs = [...goBlock.raw.matchAll(/component:\s*\{fileID:\s*(\d+)\}/g)].map(m => m[1]);
+    const compRefs = [...goBlock.raw.matchAll(/component:[ \t]*\{fileID:[ \t]*(\d+)\}/g)].map(m => m[1]);
     for (const refId of compRefs) {
       const compBlock = doc.find_by_file_id(refId);
       if (compBlock && compBlock.class_id === classId) {
@@ -1799,11 +1866,39 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
   if (variantInfo) {
     appendToAddedComponents(doc, variantInfo.prefab_instance_id, variantInfo.source_ref, componentIdStr);
   } else {
-    addComponentToGameObject(doc, gameObjectIdStr, componentIdStr);
+    const added = addComponentToGameObject(doc, gameObjectIdStr, componentIdStr);
+    if (!added) {
+      return {
+        success: false,
+        file_path,
+        error: `Failed to add component reference to GameObject ${gameObjectIdStr}: m_Component array not found or malformed`,
+      };
+    }
   }
 
   // Append component block to document
   doc.append_raw(componentYAML);
+
+  // Validate document integrity before saving
+  if (!doc.validate()) {
+    return {
+      success: false,
+      file_path,
+      error: 'Validation failed after adding component. The generated YAML may be malformed.',
+    };
+  }
+
+  // Verify the component was wired (non-variant path)
+  if (!variantInfo) {
+    const goBlockAfter = doc.find_by_file_id(gameObjectIdStr);
+    if (!goBlockAfter || !goBlockAfter.raw.includes(`component: {fileID: ${componentIdStr}}`)) {
+      return {
+        success: false,
+        file_path,
+        error: `Component block appended but reference not found in GameObject ${gameObjectIdStr}'s m_Component list`,
+      };
+    }
+  }
 
   // Save
   const saveResult = doc.save();
@@ -1879,12 +1974,15 @@ export function copyComponent(options: CopyComponentOptions): CopyComponentResul
     `$1${newId}`
   );
   clonedBlock = clonedBlock.replace(
-    /m_GameObject:\s*\{fileID:\s*\d+\}/,
+    /m_GameObject:[ \t]*\{fileID:[ \t]*\d+\}/,
     `m_GameObject: {fileID: ${targetGoId}}`
   );
 
   // Add component reference to target GO
-  addComponentToGameObject(doc, targetGoIdStr, newIdStr);
+  const added = addComponentToGameObject(doc, targetGoIdStr, newIdStr);
+  if (!added) {
+    return { success: false, file_path, error: `Failed to wire component to target GameObject ${targetGoIdStr}: m_Component array not found or malformed` };
+  }
 
   // Append cloned block
   doc.append_raw(clonedBlock);

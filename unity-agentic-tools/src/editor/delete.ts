@@ -132,7 +132,7 @@ export function removeComponent(options: RemoveComponentOptions): RemoveComponen
   const resolved_file_id = found.file_id;
 
   // Extract m_GameObject from the component block and remove the component reference
-  const goMatch = found.raw.match(/m_GameObject:\s*\{fileID:\s*(-?\d+)\}/);
+  const goMatch = found.raw.match(/m_GameObject:[ \t]*\{fileID:[ \t]*(-?\d+)\}/);
   if (goMatch) {
     const parentGoId = goMatch[1];
     const goBlock = doc.find_by_file_id(parentGoId);
@@ -140,7 +140,19 @@ export function removeComponent(options: RemoveComponentOptions): RemoveComponen
       const escaped = resolved_file_id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const compLinePattern = new RegExp(`^[ \\t]*- component: \\{fileID: ${escaped}\\}[ \\t]*\\n`, 'm');
       const modifiedRaw = goBlock.raw.replace(compLinePattern, '');
+      if (modifiedRaw === goBlock.raw) {
+        // Component reference line not found in parent GO -- warn but proceed
+      }
       goBlock.replace_raw(modifiedRaw);
+    }
+  }
+
+  // Check for dangling PPtr references to the deleted component
+  const dangling: string[] = [];
+  for (const block of doc.blocks) {
+    if (block.file_id === resolved_file_id) continue;
+    if (block.raw.includes(`{fileID: ${resolved_file_id}}`)) {
+      dangling.push(block.file_id);
     }
   }
 
@@ -159,7 +171,10 @@ export function removeComponent(options: RemoveComponentOptions): RemoveComponen
     success: true,
     file_path,
     removed_file_id: resolved_file_id,
-    removed_class_id: found.class_id
+    removed_class_id: found.class_id,
+    warning: dangling.length > 0
+      ? `Dangling references to deleted component found in blocks: ${dangling.join(', ')}`
+      : undefined,
   };
 }
 
@@ -240,7 +255,7 @@ export function deleteGameObject(options: DeleteGameObjectOptions): DeleteGameOb
 
   // Collect all component fileIDs from the GO
   const componentIds = new Set<string>();
-  const compMatches = goBlock.raw.matchAll(/component:\s*\{fileID:\s*(-?\d+)\}/g);
+  const compMatches = goBlock.raw.matchAll(/component:[ \t]*\{fileID:[ \t]*(-?\d+)\}/g);
   for (const cm of compMatches) {
     componentIds.add(cm[1]);
   }
@@ -253,7 +268,7 @@ export function deleteGameObject(options: DeleteGameObjectOptions): DeleteGameOb
     const block = doc.find_by_file_id(compId);
     if (block && block.class_id === 4) {
       transformId = compId;
-      const fatherMatch = block.raw.match(/m_Father:\s*\{fileID:\s*(-?\d+)\}/);
+      const fatherMatch = block.raw.match(/m_Father:[ \t]*\{fileID:[ \t]*(-?\d+)\}/);
       if (fatherMatch) {
         fatherId = fatherMatch[1];
       }
@@ -352,7 +367,7 @@ export function deletePrefabInstance(options: DeletePrefabInstanceOptions): Dele
   const allToRemove = new Set<string>([piId]);
 
   // Collect ALL stripped blocks referencing this PI (any class_id)
-  const piRefPattern = new RegExp(`m_PrefabInstance:\\s*\\{fileID:\\s*${piId}\\}`);
+  const piRefPattern = new RegExp(`m_PrefabInstance:[ \\t]*\\{fileID:[ \\t]*${piId}\\}`);
   for (const block of doc.blocks) {
     if (block.is_stripped && piRefPattern.test(block.raw)) {
       allToRemove.add(block.file_id);
@@ -365,7 +380,7 @@ export function deletePrefabInstance(options: DeletePrefabInstanceOptions): Dele
   const addedGOMatch = piBlock.raw.match(addedGOPattern);
   if (addedGOMatch) {
     const addedGOSection = addedGOMatch[1];
-    const goMatches = addedGOSection.matchAll(/fileID:\s*(\d+)/g);
+    const goMatches = addedGOSection.matchAll(/fileID:[ \t]*(\d+)/g);
     for (const match of goMatches) {
       const goId = match[1];
       allToRemove.add(goId);
@@ -374,7 +389,7 @@ export function deletePrefabInstance(options: DeletePrefabInstanceOptions): Dele
       const goBlock = doc.find_by_file_id(goId);
       if (goBlock) {
         // Find transform
-        const compMatch = goBlock.raw.match(/component:\s*\{fileID:\s*(\d+)\}/);
+        const compMatch = goBlock.raw.match(/component:[ \t]*\{fileID:[ \t]*(\d+)\}/);
         if (compMatch) {
           const transformId = compMatch[1];
           allToRemove.add(transformId);
@@ -394,14 +409,14 @@ export function deletePrefabInstance(options: DeletePrefabInstanceOptions): Dele
   const addedCompMatch = piBlock.raw.match(addedCompPattern);
   if (addedCompMatch) {
     const addedCompSection = addedCompMatch[1];
-    const compMatches = addedCompSection.matchAll(/fileID:\s*(\d+)/g);
+    const compMatches = addedCompSection.matchAll(/fileID:[ \t]*(\d+)/g);
     for (const match of compMatches) {
       allToRemove.add(match[1]);
     }
   }
 
   // Find parent transform (m_TransformParent from PI block)
-  const parentMatch = piBlock.raw.match(/m_TransformParent:\s*\{fileID:\s*(\d+)\}/);
+  const parentMatch = piBlock.raw.match(/m_TransformParent:[ \t]*\{fileID:[ \t]*(\d+)\}/);
   const parentTransformId = parentMatch ? parentMatch[1] : '0';
 
   // Find stripped root transform (first stripped block referencing this PI)
