@@ -270,6 +270,36 @@ export async function stream_editor(options: StreamEditorOptions): Promise<{ clo
     });
 }
 
+/**
+ * Quick connectivity check: attempts a WebSocket handshake and immediately closes.
+ * Returns whether the bridge is reachable within the timeout.
+ */
+export async function ping_editor(port: number, timeout_ms: number = 2000): Promise<{ reachable: boolean; error?: string }> {
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+            resolve({ reachable: false, error: `Timeout after ${timeout_ms}ms` });
+        }, timeout_ms);
+
+        try {
+            const ws = new WebSocket(`ws://127.0.0.1:${port}/unity-agentic`);
+
+            ws.onopen = () => {
+                clearTimeout(timer);
+                try { ws.close(); } catch { /* ignore */ }
+                resolve({ reachable: true });
+            };
+
+            ws.onerror = (err: Event) => {
+                clearTimeout(timer);
+                resolve({ reachable: false, error: String(err) });
+            };
+        } catch (err) {
+            clearTimeout(timer);
+            resolve({ reachable: false, error: String(err) });
+        }
+    });
+}
+
 function resolve_config(options: CallEditorOptions): EditorConfig | { error: string } {
     if (options.port) {
         return { port: options.port, pid: 0, version: "unknown" };

@@ -272,6 +272,7 @@ export interface RemoveComponentResult {
   removed_file_id?: string;
   removed_class_id?: number;
   error?: string;
+  warning?: string;
 }
 
 export interface BatchRemoveComponentOptions {
@@ -414,6 +415,7 @@ export interface EditComponentByFileIdOptions {
   file_id: string;  // The file ID of the component to edit (from --- !u!<class_id> &<file_id>)
   property: string;  // Property name (with or without m_ prefix)
   new_value: string;
+  project_path?: string;  // Unity project root (for asset path -> PPtr resolution)
 }
 
 export interface EditComponentResult {
@@ -621,6 +623,7 @@ export interface ProjectSearchResult {
   project_path: string;
   total_files_scanned: number;
   total_matches: number;
+  files_with_errors?: number;
   cursor?: number;
   truncated: boolean;
   matches: ProjectSearchMatch[];

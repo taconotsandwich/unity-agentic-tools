@@ -18,6 +18,7 @@ import { read_settings } from '../settings';
 import { UnityDocument } from './unity-document';
 import { yaml_quote_if_needed } from './unity-block';
 import { UnityBlock } from './unity-block';
+import { resolveAssetPathToPPtr } from './shared';
 
 // ========== Private Helpers ==========
 
@@ -70,10 +71,15 @@ function validate_value_type(current_value: string, new_value: string): string |
 
     // 1. Reference: current is {fileID:...} -> new must also be {fileID:...}
     //    Exception: {fileID: 0} is ambiguous -- could be a null reference OR an enum
-    //    default placeholder from yaml_default_for_type. Allow any value through.
+    //    default placeholder from yaml_default_for_type. Accept references and valid scalars.
     if (/^\{fileID:/.test(current)) {
         if (/^\{fileID:[ \t]*0[ \t]*\}$/.test(current)) {
-            return null;
+            if (/^\{fileID:/.test(incoming)) return null;
+            if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(incoming)) return null;
+            if (/^(true|false|yes|no|on|off)$/i.test(incoming)) return null;
+            if (/^'[^']*'$/.test(incoming) || /^"[^"]*"$/.test(incoming)) return null;
+            if (/^\{.*:.*\}$/.test(incoming)) return null;
+            return `Current value is a null reference ({fileID: 0}). New value "${incoming}" is not a valid reference, number, boolean, quoted string, or compound value.`;
         }
         if (!/^\{fileID:/.test(incoming)) {
             return `Expected a reference value ({fileID: ...}), got "${incoming}"`;
@@ -370,7 +376,21 @@ export function editProperty(options: PropertyEditOptions): EditResult {
  * Works with any Unity class type (Transform, MeshRenderer, MonoBehaviour, etc.)
  */
 export function editComponentByFileId(options: EditComponentByFileIdOptions): EditComponentResult {
-  const { file_path, file_id, property, new_value } = options;
+  const { file_path, file_id, property, project_path } = options;
+  let { new_value } = options;
+
+  // Resolve asset paths (e.g., "MyActions.inputactions") to cross-file PPtrs
+  const resolved = resolveAssetPathToPPtr(new_value, file_path, project_path);
+  if (resolved === null) {
+    return {
+      success: false,
+      file_path,
+      error: `Could not resolve "${new_value}" to asset reference. Ensure GUID cache exists (run "setup <project>" first).`,
+    };
+  }
+  if (resolved !== undefined) {
+    new_value = resolved;
+  }
 
   // Validate file path security
   const pathError = validate_file_path(file_path, 'write');

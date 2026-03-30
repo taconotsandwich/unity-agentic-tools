@@ -936,6 +936,79 @@ export function resolveScriptGuid(
   return null;
 }
 
+// ─── Asset Path to PPtr Resolution ────────────────────────────────────
+
+/** Maps asset file extension to the main-object fileID and PPtr type. */
+const ASSET_PPTR_MAP: Record<string, { fileID: number; type: number }> = {
+  '.inputactions': { fileID: 11400000, type: 2 },
+  '.asset':        { fileID: 11400000, type: 2 },
+  '.mat':          { fileID: 2100000,  type: 2 },
+  '.prefab':       { fileID: 100100000, type: 2 },
+  '.controller':   { fileID: 9100000,  type: 2 },
+  '.anim':         { fileID: 7400000,  type: 2 },
+};
+
+const ASSET_EXTENSIONS = new Set(Object.keys(ASSET_PPTR_MAP));
+
+/**
+ * Resolve an asset path (e.g., "MyActions.inputactions") to a cross-file PPtr string.
+ *
+ * Returns:
+ * - `string`    = resolved PPtr (e.g., "{fileID: 11400000, guid: abc..., type: 2}")
+ * - `undefined` = value is not an asset path, no resolution attempted
+ * - `null`      = value IS an asset path but resolution failed (GUID not found)
+ */
+export function resolveAssetPathToPPtr(
+  value: string,
+  file_path: string,
+  project_path?: string,
+): string | null | undefined {
+  // Already a PPtr -- pass through
+  if (value.startsWith('{fileID:') || value.startsWith('{')) return undefined;
+
+  const ext = path.extname(value).toLowerCase();
+  if (!ASSET_EXTENSIONS.has(ext)) return undefined;
+
+  // Resolve project root
+  const resolved_project = project_path || find_unity_project_root(path.dirname(file_path));
+  if (!resolved_project) return null;
+
+  const mapping = ASSET_PPTR_MAP[ext];
+  let guid: string | null = null;
+
+  // Strategy 1: full or relative path with .meta file
+  const basename_val = path.basename(value, ext);
+  if (value.includes('/') || value.includes('\\')) {
+    const abs = path.isAbsolute(value) ? value : path.join(resolved_project, value);
+    guid = extractGuidFromMeta(abs + '.meta');
+  }
+
+  // Strategy 2: GUID cache lookup by name
+  if (!guid) {
+    const cache = load_guid_cache_for_file(file_path, resolved_project);
+    if (cache) {
+      const found = cache.find_by_name(basename_val, ext);
+      if (found) guid = found.guid;
+    }
+  }
+
+  // Strategy 3: scan common locations for .meta file
+  if (!guid) {
+    const candidates = [
+      path.join(resolved_project, 'Assets', value),
+      path.join(resolved_project, value),
+    ];
+    for (const candidate of candidates) {
+      guid = extractGuidFromMeta(candidate + '.meta');
+      if (guid) break;
+    }
+  }
+
+  if (!guid) return null;
+
+  return `{fileID: ${mapping.fileID}, guid: ${guid}, type: ${mapping.type}}`;
+}
+
 /**
  * Resolved script info with optional field data.
  */

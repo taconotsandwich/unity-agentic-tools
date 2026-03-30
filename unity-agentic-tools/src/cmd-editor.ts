@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { resolve } from 'path';
-import { call_editor, stream_editor, read_editor_config } from './editor-client';
+import { call_editor, stream_editor, read_editor_config, ping_editor } from './editor-client';
 import { add_package, remove_package } from './packages';
 import type { CallEditorOptions, RpcResponse } from './types';
 
@@ -75,11 +75,15 @@ export function build_editor_command(): Command {
                 return;
             }
 
+            const ping = await ping_editor(config.port, 2000);
+
             console.log(JSON.stringify({
                 port: config.port,
                 pid: config.pid,
                 version: config.version,
                 project_path,
+                bridge_reachable: ping.reachable,
+                ...(ping.reachable ? {} : { bridge_error: ping.error }),
             }, null, 2));
         });
 

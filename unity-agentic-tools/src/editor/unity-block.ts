@@ -723,7 +723,7 @@ export class UnityBlock {
                 `Invalid Unity YAML block header in replacement text: "${new_text.slice(0, 80)}"`
             );
         }
-        this._raw = new_text;
+        this._raw = new_text.endsWith('\n') ? new_text : new_text + '\n';
         this._header = header;
         this._dirty = true;
         this._format_cache.clear();
@@ -740,9 +740,14 @@ export class UnityBlock {
 
     /**
      * Compare old and new raw text; if changed, set dirty and return true.
+     * Enforces the invariant that block raw always ends with \n (required for
+     * serialize() which joins blocks with '' -- missing \n merges blocks).
      */
     private _check_dirty(old_raw: string): boolean {
         if (this._raw !== old_raw) {
+            if (!this._raw.endsWith('\n')) {
+                this._raw += '\n';
+            }
             this._dirty = true;
             return true;
         }
