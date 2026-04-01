@@ -53,6 +53,7 @@ export {
 export {
     deleteGameObject,
     removeComponent,
+    removeComponentBatch,
     deletePrefabInstance,
 } from './editor';
 

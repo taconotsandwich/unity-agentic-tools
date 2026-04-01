@@ -20,11 +20,13 @@ namespace UnityAgenticTools.Server
         private static Thread _listenThread;
         private static CancellationTokenSource _cts;
         private static int _port;
-        private static bool _running;
+        private static volatile bool _running;
 
         private static readonly ConcurrentQueue<Action> _mainThreadQueue = new ConcurrentQueue<Action>();
         private static readonly List<WebSocketConnection> _connections = new List<WebSocketConnection>();
         private static readonly object _connectionsLock = new object();
+
+        private const string CachedAutoStartKey = "UnityAgenticTools.CachedAutoStart";
 
         public static int Port => _port;
         public static bool IsRunning => _running;
@@ -46,10 +48,18 @@ namespace UnityAgenticTools.Server
             AssemblyReloadEvents.afterAssemblyReload += OnAfterAssemblyReload;
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
 
-            if (EditorServerSettings.instance.autoStart)
+            // Defer settings access to avoid ScriptableSingleton asset load stall
+            // during InitializeOnLoad (causes timeouts on heavy projects in Unity 6.4+)
+            EditorApplication.delayCall += () =>
             {
-                Start();
-            }
+                if (_running) return;
+                var autoStart = EditorServerSettings.instance.autoStart;
+                EditorPrefs.SetBool(CachedAutoStartKey, autoStart);
+                if (autoStart)
+                {
+                    Start();
+                }
+            };
         }
 
         public static void Start()
@@ -200,18 +210,40 @@ namespace UnityAgenticTools.Server
 
         public static void Broadcast(string json)
         {
+            WebSocketConnection[] snapshot;
             lock (_connectionsLock)
             {
-                for (int i = _connections.Count - 1; i >= 0; i--)
+                snapshot = _connections.ToArray();
+            }
+
+            var failed = new List<WebSocketConnection>();
+            foreach (var conn in snapshot)
+            {
+                try
                 {
-                    try
+                    conn.SendAsync(json).ContinueWith(t =>
                     {
-                        _connections[i].SendAsync(json).Wait();
-                    }
-                    catch
-                    {
-                        _connections.RemoveAt(i);
-                    }
+                        if (t.IsFaulted)
+                        {
+                            lock (_connectionsLock)
+                            {
+                                _connections.Remove(conn);
+                            }
+                        }
+                    });
+                }
+                catch
+                {
+                    failed.Add(conn);
+                }
+            }
+
+            if (failed.Count > 0)
+            {
+                lock (_connectionsLock)
+                {
+                    foreach (var conn in failed)
+                        _connections.Remove(conn);
                 }
             }
         }
@@ -310,6 +342,8 @@ namespace UnityAgenticTools.Server
 
         private static void OnBeforeAssemblyReload()
         {
+            // Cache settings before reload while ScriptableSingleton is accessible
+            try { EditorPrefs.SetBool(CachedAutoStartKey, EditorServerSettings.instance.autoStart); } catch { }
             Stop();
         }
 
@@ -322,9 +356,11 @@ namespace UnityAgenticTools.Server
             EditorApplication.update += PumpMainThreadQueue;
             Debug.Log("[UnityAgenticTools] Re-registered main thread pump after assembly reload");
 
-            if (EditorServerSettings.instance.autoStart)
+            // Use cached autoStart value to avoid ScriptableSingleton asset load stall
+            // during assembly reload (causes timeouts on heavy projects in Unity 6.4+)
+            if (EditorPrefs.GetBool(CachedAutoStartKey, true))
             {
-                Start();
+                EditorApplication.delayCall += Start;
             }
         }
 

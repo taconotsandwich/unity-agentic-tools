@@ -1054,6 +1054,40 @@ describe('UnityBlock', () => {
             expect(block.raw).toContain('subField: 5');
         });
 
+        it('should not create m_-prefixed duplicate when unprefixed variant exists', () => {
+            const raw = [
+                '--- !u!114 &11400000\n',
+                'MonoBehaviour:\n',
+                '  m_ObjectHideFlags: 0\n',
+                '  m_Script: {fileID: 11500000, guid: abc123, type: 3}\n',
+                '  m_EditorClassIdentifier:\n',
+                '  passiveTrigger: {fileID: 0}\n',
+            ].join('');
+            const block = new UnityBlock(raw);
+
+            const modified = block.set_property('m_passiveTrigger.conditions', '[]');
+            expect(modified).toBe(false);
+            expect(block.raw).not.toContain('m_passiveTrigger:');
+            expect(block.raw).toContain('passiveTrigger:');
+        });
+
+        it('should not bleed newline when replacing block-style field value', () => {
+            const raw = [
+                '--- !u!114 &11400000\n',
+                'MonoBehaviour:\n',
+                '  m_EditorClassIdentifier:\n',
+                '  myRef:\n',
+                '    rid: 0\n',
+                '  nextField: 5\n',
+            ].join('');
+            const block = new UnityBlock(raw);
+
+            const modified = block.set_property('myRef', 'SomeValue');
+            expect(modified).toBe(true);
+            expect(block.raw).toContain('myRef: SomeValue');
+            expect(block.raw).not.toMatch(/myRef:\s*\n\s*SomeValue/);
+        });
+
         it('should insert missing simple property on a built-in component', () => {
             const raw = [
                 '--- !u!212 &100001\n',

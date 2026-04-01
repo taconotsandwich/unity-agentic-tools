@@ -1,10 +1,12 @@
 import { writeFileSync, readFileSync, existsSync } from 'fs';
+import { ensure_parent_dir } from '../utils';
 import * as path from 'path';
 import { load_guid_cache } from '../guid-cache';
 import type {
     CreateGameObjectOptions, CreateGameObjectResult,
     AddComponentOptions, AddComponentResult,
     CreatePrefabVariantOptions, CreatePrefabVariantResult,
+    CreatePrefabInstanceOptions, CreatePrefabInstanceResult,
     CreateScriptableObjectOptions, CreateScriptableObjectResult,
     CreateMetaFileOptions, CreateMetaFileResult,
     CreateSceneOptions, CreateSceneResult,
@@ -13,13 +15,77 @@ import type {
 } from '../types';
 import { get_class_id, UNITY_CLASS_IDS } from '../class-ids';
 import { generateGuid, validate_name, validate_file_path, find_unity_project_root } from '../utils';
-import { extractGuidFromMeta, resolve_script_with_fields, resolve_source_prefab } from './shared';
-import { generate_field_yaml } from './yaml-fields';
+import { extractGuidFromMeta, resolve_script_with_fields, resolve_source_prefab, build_type_lookup } from './shared';
+import { generate_field_yaml, json_value_to_yaml_lines } from './yaml-fields';
 import { UnityDocument } from './unity-document';
 import type { UnityVersion } from '../build-version';
 import { read_project_version } from '../build-version';
 
 // ========== Private Helpers ==========
+
+/**
+ * Pure-JS MD4 hash (RFC 1320). Needed because OpenSSL 3.x removed MD4.
+ * Returns a 16-byte Buffer.
+ */
+function md4(data: Buffer): Buffer {
+    function F(x: number, y: number, z: number): number { return (x & y) | (~x & z); }
+    function G(x: number, y: number, z: number): number { return (x & y) | (x & z) | (y & z); }
+    function H(x: number, y: number, z: number): number { return x ^ y ^ z; }
+    function rotl(x: number, n: number): number { return ((x << n) | (x >>> (32 - n))) >>> 0; }
+
+    const len = data.length;
+    const bitLen = len * 8;
+    const padded_len = (len + 9 + 63) & ~63;
+    const buf = Buffer.alloc(padded_len);
+    data.copy(buf);
+    buf[len] = 0x80;
+    buf.writeUInt32LE(bitLen >>> 0, padded_len - 8);
+    buf.writeUInt32LE(Math.floor(bitLen / 0x100000000) >>> 0, padded_len - 4);
+
+    let a0 = 0x67452301;
+    let b0 = 0xefcdab89;
+    let c0 = 0x98badcfe;
+    let d0 = 0x10325476;
+
+    const R1_K = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];
+    const R1_S = [3,7,11,19,3,7,11,19,3,7,11,19,3,7,11,19];
+    const R2_K = [0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15];
+    const R2_S = [3,5,9,13,3,5,9,13,3,5,9,13,3,5,9,13];
+    const R3_K = [0,8,4,12,2,10,6,14,1,9,5,13,3,11,7,15];
+    const R3_S = [3,9,11,15,3,9,11,15,3,9,11,15,3,9,11,15];
+
+    for (let i = 0; i < padded_len; i += 64) {
+        const X: number[] = [];
+        for (let j = 0; j < 16; j++) X[j] = buf.readUInt32LE(i + j * 4);
+
+        let a = a0, b = b0, c = c0, d = d0;
+
+        for (let j = 0; j < 16; j++) {
+            const t = (a + F(b, c, d) + X[R1_K[j]]) >>> 0;
+            a = d; d = c; c = b; b = rotl(t, R1_S[j]);
+        }
+        for (let j = 0; j < 16; j++) {
+            const t = (a + G(b, c, d) + X[R2_K[j]] + 0x5a827999) >>> 0;
+            a = d; d = c; c = b; b = rotl(t, R2_S[j]);
+        }
+        for (let j = 0; j < 16; j++) {
+            const t = (a + H(b, c, d) + X[R3_K[j]] + 0x6ed9eba1) >>> 0;
+            a = d; d = c; c = b; b = rotl(t, R3_S[j]);
+        }
+
+        a0 = (a0 + a) >>> 0;
+        b0 = (b0 + b) >>> 0;
+        c0 = (c0 + c) >>> 0;
+        d0 = (d0 + d) >>> 0;
+    }
+
+    const result = Buffer.alloc(16);
+    result.writeUInt32LE(a0, 0);
+    result.writeUInt32LE(b0, 4);
+    result.writeUInt32LE(c0, 8);
+    result.writeUInt32LE(d0, 12);
+    return result;
+}
 
 /**
  * Compute Unity's file ID for a script type inside a DLL.
@@ -29,13 +95,12 @@ import { read_project_version } from '../build-version';
  *   result = XOR of all four 32-bit LE words of the hash
  */
 export function compute_dll_script_file_id(namespace: string, class_name: string): number {
-    const { createHash } = require('crypto');
     const full_name = namespace ? `${namespace}.${class_name}` : class_name;
     const name_bytes = Buffer.from(full_name, 'utf-8');
     const input = Buffer.alloc(4 + name_bytes.length);
     input.writeInt32LE(114, 0); // classID 114 = MonoBehaviour
     name_bytes.copy(input, 4);
-    const hash: Buffer = createHash('md4').update(input).digest();
+    const hash = md4(input);
     const a = hash.readInt32LE(0);
     const b = hash.readInt32LE(4);
     const c = hash.readInt32LE(8);
@@ -53,13 +118,13 @@ function get_layer_from_parent(doc: UnityDocument, parentTransformId: string): n
     const parentTransform = doc.find_by_file_id(parentTransformId);
     if (!parentTransform) return 0;
 
-    const goMatch = parentTransform.raw.match(/m_GameObject:\s*\{fileID:\s*(\d+)\}/);
+    const goMatch = parentTransform.raw.match(/m_GameObject:[ \t]*\{fileID:[ \t]*(\d+)\}/);
     if (!goMatch) return 0;
 
     const parentGo = doc.find_by_file_id(goMatch[1]);
     if (!parentGo) return 0;
 
-    const layerMatch = parentGo.raw.match(/m_Layer:\s*(\d+)/);
+    const layerMatch = parentGo.raw.match(/m_Layer:[ \t]*(\d+)/);
     return layerMatch ? parseInt(layerMatch[1], 10) : 0;
 }
 
@@ -344,16 +409,20 @@ ${defaults}`;
 /**
  * Add a component reference to a GameObject's m_Component array.
  */
-function addComponentToGameObject(doc: UnityDocument, gameObjectId: string, componentId: string): void {
+function addComponentToGameObject(doc: UnityDocument, gameObjectId: string, componentId: string): boolean {
   const goBlock = doc.find_by_file_id(gameObjectId);
-  if (!goBlock) return;
+  if (!goBlock) return false;
 
-  let raw = goBlock.raw;
-  raw = raw.replace(
-    /(m_Component:\s*\n(?:\s*-\s*component:\s*\{fileID:\s*\d+\}\s*\n)*)/,
+  const raw = goBlock.raw;
+  const updated = raw.replace(
+    /(m_Component:[ \t]*\n(?:[ \t]*-[ \t]*component:[ \t]*\{fileID:[ \t]*\d+\}[ \t]*\n)*)/,
     `$1  - component: {fileID: ${componentId}}\n`
   );
-  goBlock.replace_raw(raw);
+
+  if (updated === raw) return false;
+
+  goBlock.replace_raw(updated);
+  return true;
 }
 
 /**
@@ -367,9 +436,10 @@ function createMonoBehaviourYAML(
   scriptGuid: string,
   fields?: CSharpFieldRef[],
   version?: UnityVersion,
-  scriptFileId: number = 11500000
+  scriptFileId: number = 11500000,
+  type_lookup?: (typeName: string) => CSharpFieldRef[] | null,
 ): string {
-  const field_yaml = fields && fields.length > 0 ? generate_field_yaml(fields, version) : '\n';
+  const field_yaml = fields && fields.length > 0 ? generate_field_yaml(fields, version, '  ', type_lookup) : '\n';
   const has_serialize_ref = fields?.some(f => f.hasSerializeReference) ?? false;
   const references_section = has_serialize_ref ? `  references:\n    version: 2\n    RefIds: []\n` : '';
   return `--- !u!114 &${componentId}
@@ -453,7 +523,7 @@ export function createGameObject(options: CreateGameObjectOptions): CreateGameOb
         parentTransformIdStr = parentIdStr;
       } else if (parentBlock.class_id === 1) {
         // It's a GO, find its transform
-        const compMatch = parentBlock.raw.match(/m_Component:\s*\n\s*-\s*component:\s*\{fileID:\s*(\d+)\}/);
+        const compMatch = parentBlock.raw.match(/m_Component:[ \t]*\n[ \t]*-[ \t]*component:[ \t]*\{fileID:[ \t]*(\d+)\}/);
         if (compMatch) {
           parentTransformIdStr = compMatch[1];
         } else {
@@ -901,6 +971,7 @@ Light:
 
   // Write the scene file
   try {
+    ensure_parent_dir(output_path);
     writeFileSync(output_path, yaml, 'utf-8');
   } catch (err) {
     return {
@@ -1070,6 +1141,7 @@ PrefabInstance:
 
   // Write the variant prefab
   try {
+    ensure_parent_dir(output_path);
     writeFileSync(output_path, variantYaml, 'utf-8');
   } catch (err) {
     return {
@@ -1112,6 +1184,192 @@ PrefabImporter:
     source_guid: sourceGuid,
     prefab_instance_id: prefabInstanceId
   };
+}
+
+/**
+ * Instantiate a prefab into a scene file as a PrefabInstance.
+ */
+export function createPrefabInstance(options: CreatePrefabInstanceOptions): CreatePrefabInstanceResult {
+    const { scene_path, prefab_path, name, parent, position } = options;
+
+    const pathError = validate_file_path(scene_path, 'write');
+    if (pathError) {
+        return { success: false, file_path: scene_path, error: pathError };
+    }
+
+    if (!scene_path.endsWith('.unity')) {
+        return { success: false, file_path: scene_path, error: 'Scene path must be a .unity file' };
+    }
+
+    if (!prefab_path.endsWith('.prefab')) {
+        return { success: false, file_path: scene_path, error: 'Prefab path must be a .prefab file' };
+    }
+
+    if (!existsSync(scene_path)) {
+        return { success: false, file_path: scene_path, error: `Scene file not found: ${scene_path}` };
+    }
+
+    if (!existsSync(prefab_path)) {
+        return { success: false, file_path: scene_path, error: `Prefab file not found: ${prefab_path}` };
+    }
+
+    const metaPath = prefab_path + '.meta';
+    const sourceGuid = extractGuidFromMeta(metaPath);
+    if (!sourceGuid) {
+        return { success: false, file_path: scene_path, error: `Could not find or read .meta file for prefab: ${metaPath}` };
+    }
+
+    let prefabDoc: UnityDocument;
+    try {
+        prefabDoc = UnityDocument.from_file(prefab_path);
+    } catch (err) {
+        return { success: false, file_path: scene_path, error: `Failed to read prefab: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    const rootInfo = prefabDoc.find_prefab_root();
+    if (!rootInfo) {
+        return { success: false, file_path: scene_path, error: 'Could not find root GameObject in source prefab' };
+    }
+
+    let doc: UnityDocument;
+    try {
+        doc = UnityDocument.from_file(scene_path);
+    } catch (err) {
+        return { success: false, file_path: scene_path, error: `Failed to read scene: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    let parentTransformIdStr = '0';
+    if (parent !== undefined) {
+        if (typeof parent === 'number') {
+            const parentIdStr = String(parent);
+            const parentBlock = doc.find_by_file_id(parentIdStr);
+            if (!parentBlock) {
+                return { success: false, file_path: scene_path, error: `Parent with fileID ${parent} not found. Provide a GameObject or Transform fileID.` };
+            }
+            if (parentBlock.is_stripped) {
+                return { success: false, file_path: scene_path, error: `Parent with fileID ${parent} is a stripped block (inside a PrefabInstance). Cannot parent to stripped transforms.` };
+            }
+            if (parentBlock.class_id === 4) {
+                parentTransformIdStr = parentIdStr;
+            } else if (parentBlock.class_id === 1) {
+                const compMatch = parentBlock.raw.match(/m_Component:[ \t]*\n[ \t]*-[ \t]*component:[ \t]*\{fileID:[ \t]*(\d+)\}/);
+                if (compMatch) {
+                    parentTransformIdStr = compMatch[1];
+                } else {
+                    return { success: false, file_path: scene_path, error: `Parent with fileID ${parent} has no Transform component.` };
+                }
+            } else {
+                return { success: false, file_path: scene_path, error: `Parent with fileID ${parent} is not a GameObject or Transform.` };
+            }
+        } else {
+            const foundResult = findTransformIdByName(doc, parent);
+            if (foundResult === null) {
+                return { success: false, file_path: scene_path, error: `Parent GameObject "${parent}" not found` };
+            }
+            if (typeof foundResult === 'object') {
+                return { success: false, file_path: scene_path, error: foundResult.error };
+            }
+            parentTransformIdStr = foundResult;
+        }
+    }
+
+    const prefabInstanceId = doc.generate_file_id();
+    const strippedGoId = doc.generate_file_id();
+    const strippedTransformId = doc.generate_file_id();
+
+    const instanceName = name || path.basename(prefab_path, '.prefab');
+    const pos = position ?? { x: 0, y: 0, z: 0 };
+
+    const rootGoFileId = rootInfo.game_object.file_id;
+    const rootTransformFileId = rootInfo.transform.file_id;
+
+    const yaml = `--- !u!1 &${strippedGoId} stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: ${rootGoFileId}, guid: ${sourceGuid}, type: 3}
+  m_PrefabInstance: {fileID: ${prefabInstanceId}}
+  m_PrefabAsset: {fileID: 0}
+--- !u!4 &${strippedTransformId} stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+  m_PrefabInstance: {fileID: ${prefabInstanceId}}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1001 &${prefabInstanceId}
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    m_TransformParent: {fileID: ${parentTransformIdStr}}
+    m_Modifications:
+    - target: {fileID: ${rootGoFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_Name
+      value: ${instanceName}
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: ${pos.x}
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: ${pos.y}
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: ${pos.z}
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: ${sourceGuid}, type: 3}
+`;
+
+    doc.append_raw(yaml);
+
+    if (parentTransformIdStr !== '0') {
+        doc.add_child_to_parent(parentTransformIdStr, strippedTransformId);
+    }
+
+    try {
+        doc.save();
+    } catch (err) {
+        return { success: false, file_path: scene_path, error: `Failed to save scene: ${err instanceof Error ? err.message : String(err)}` };
+    }
+
+    return {
+        success: true,
+        file_path: scene_path,
+        prefab_instance_id: prefabInstanceId,
+        game_object_id: strippedGoId,
+        transform_id: strippedTransformId,
+    };
 }
 
 /**
@@ -1172,8 +1430,9 @@ export function createScriptableObject(options: CreateScriptableObjectOptions): 
   }
 
   const baseName = path.basename(output_path, '.asset');
+  const type_lookup = project_path ? build_type_lookup(project_path) : undefined;
   const field_yaml = resolved.fields && resolved.fields.length > 0
-    ? generate_field_yaml(resolved.fields, version)
+    ? generate_field_yaml(resolved.fields, version, '  ', type_lookup)
     : '\n';
 
   let assetYaml = `%YAML 1.1
@@ -1196,14 +1455,60 @@ MonoBehaviour:
     const doc = UnityDocument.from_string(assetYaml);
     const block = doc.blocks[0];
     if (block) {
+      const complex_entries: Array<[string, unknown]> = [];
       for (const [key, val] of Object.entries(options.initial_values)) {
-        block.set_property(key, val);
+        if (val === null || val === undefined || typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
+          block.set_property(key, String(val ?? ''));
+        } else if (Array.isArray(val) && val.length === 0) {
+          block.set_property(key, '[]');
+        } else if (typeof val === 'object' && val !== null && !Array.isArray(val) && Object.keys(val as Record<string, unknown>).length === 0) {
+          block.set_property(key, '{}');
+        } else {
+          complex_entries.push([key, val]);
+        }
+      }
+      // Insert complex values (objects/arrays) as raw YAML blocks
+      if (complex_entries.length > 0) {
+        let raw = block.raw;
+        for (const [key, val] of complex_entries) {
+          const yaml_lines = json_value_to_yaml_lines(val, '    ');
+          // Check if key already exists and replace, or append after m_EditorClassIdentifier
+          const key_pattern = new RegExp(`^([ \\t]*${key}:)[^\\n]*$`, 'm');
+          const key_match = raw.match(key_pattern);
+          if (key_match && key_match.index !== undefined) {
+            // Find the extent of this key's block (all following lines with deeper indent)
+            const key_indent = key_match[0].match(/^[ \t]*/)?.[0].length ?? 0;
+            const after_key = key_match.index + key_match[0].length;
+            let end = after_key;
+            const remaining = raw.slice(after_key);
+            const remaining_lines = remaining.split('\n');
+            // Skip first element (empty string from split at line boundary)
+            for (let i = 1; i < remaining_lines.length; i++) {
+              const line = remaining_lines[i];
+              if (line.trim() === '') { end += 1 + line.length; continue; }
+              const line_indent = line.match(/^[ \t]*/)?.[0].length ?? 0;
+              if (line_indent > key_indent) {
+                end += 1 + line.length;
+              } else {
+                break;
+              }
+            }
+            const block_yaml = `  ${key}:\n${yaml_lines.join('\n')}`;
+            raw = raw.slice(0, key_match.index) + block_yaml + raw.slice(end);
+          } else {
+            // Append at end of block content (preserves field insertion order)
+            const block_yaml = `  ${key}:\n${yaml_lines.join('\n')}`;
+            raw = raw.trimEnd() + '\n' + block_yaml + '\n';
+          }
+        }
+        block.replace_raw(raw);
       }
       assetYaml = doc.serialize();
     }
   }
 
   try {
+    ensure_parent_dir(output_path);
     writeFileSync(output_path, assetYaml, 'utf-8');
   } catch (err) {
     return { success: false, output_path, error: `Failed to write asset file: ${err instanceof Error ? err.message : String(err)}` };
@@ -1462,7 +1767,7 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
   let duplicateWarning: string | undefined;
   const goBlock = doc.find_by_file_id(gameObjectIdStr);
   if (goBlock && classId !== null) {
-    const compRefs = [...goBlock.raw.matchAll(/component:\s*\{fileID:\s*(\d+)\}/g)].map(m => m[1]);
+    const compRefs = [...goBlock.raw.matchAll(/component:[ \t]*\{fileID:[ \t]*(\d+)\}/g)].map(m => m[1]);
     for (const refId of compRefs) {
       const compBlock = doc.find_by_file_id(refId);
       if (compBlock && compBlock.class_id === classId) {
@@ -1499,12 +1804,16 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
     if (!resolved) {
       const hints: string[] = [];
       if (project_path) {
+        const agenticDir = path.join(project_path, '.unity-agentic');
         const cacheExists = load_guid_cache(project_path) !== null;
-        const registryExists = existsSync(path.join(project_path, '.unity-agentic', 'type-registry.json'));
+        const registryExists = existsSync(path.join(agenticDir, 'type-registry.json'));
+        const pkgCacheExists = existsSync(path.join(agenticDir, 'package-cache.json'));
         if (!cacheExists && !registryExists) {
-          hints.push(`No GUID cache or type registry found at ${path.join(project_path, '.unity-agentic/')}. Run "unity-agentic-tools setup" first.`);
+          hints.push(`No GUID cache or type registry found at ${agenticDir}/. Run "unity-agentic-tools setup" first.`);
         } else if (!registryExists) {
           hints.push('Type registry not found. Re-run "unity-agentic-tools setup" to rebuild.');
+        } else if (!pkgCacheExists) {
+          hints.push('Package cache not found. Re-run "unity-agentic-tools setup" to index package scripts.');
         }
       } else {
         hints.push('No Unity project detected. Provide --project or run from inside a Unity project directory.');
@@ -1546,7 +1855,8 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
       scriptFileId = compute_dll_script_file_id(resolved.namespace ?? '', resolved.class_name);
     }
 
-    componentYAML = createMonoBehaviourYAML(componentId, gameObjectId, resolved.guid, resolved.fields, version, scriptFileId);
+    const type_lookup_comp = project_path ? build_type_lookup(project_path) : undefined;
+    componentYAML = createMonoBehaviourYAML(componentId, gameObjectId, resolved.guid, resolved.fields, version, scriptFileId, type_lookup_comp);
     scriptGuid = resolved.guid;
     scriptPath = resolved.path || undefined;
     extractionError = resolved.extraction_error;
@@ -1556,11 +1866,39 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
   if (variantInfo) {
     appendToAddedComponents(doc, variantInfo.prefab_instance_id, variantInfo.source_ref, componentIdStr);
   } else {
-    addComponentToGameObject(doc, gameObjectIdStr, componentIdStr);
+    const added = addComponentToGameObject(doc, gameObjectIdStr, componentIdStr);
+    if (!added) {
+      return {
+        success: false,
+        file_path,
+        error: `Failed to add component reference to GameObject ${gameObjectIdStr}: m_Component array not found or malformed`,
+      };
+    }
   }
 
   // Append component block to document
   doc.append_raw(componentYAML);
+
+  // Validate document integrity before saving
+  if (!doc.validate()) {
+    return {
+      success: false,
+      file_path,
+      error: 'Validation failed after adding component. The generated YAML may be malformed.',
+    };
+  }
+
+  // Verify the component was wired (non-variant path)
+  if (!variantInfo) {
+    const goBlockAfter = doc.find_by_file_id(gameObjectIdStr);
+    if (!goBlockAfter || !goBlockAfter.raw.includes(`component: {fileID: ${componentIdStr}}`)) {
+      return {
+        success: false,
+        file_path,
+        error: `Component block appended but reference not found in GameObject ${gameObjectIdStr}'s m_Component list`,
+      };
+    }
+  }
 
   // Save
   const saveResult = doc.save();
@@ -1636,12 +1974,15 @@ export function copyComponent(options: CopyComponentOptions): CopyComponentResul
     `$1${newId}`
   );
   clonedBlock = clonedBlock.replace(
-    /m_GameObject:\s*\{fileID:\s*\d+\}/,
+    /m_GameObject:[ \t]*\{fileID:[ \t]*\d+\}/,
     `m_GameObject: {fileID: ${targetGoId}}`
   );
 
   // Add component reference to target GO
-  addComponentToGameObject(doc, targetGoIdStr, newIdStr);
+  const added = addComponentToGameObject(doc, targetGoIdStr, newIdStr);
+  if (!added) {
+    return { success: false, file_path, error: `Failed to wire component to target GameObject ${targetGoIdStr}: m_Component array not found or malformed` };
+  }
 
   // Append cloned block
   doc.append_raw(clonedBlock);

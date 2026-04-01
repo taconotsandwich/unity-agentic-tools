@@ -73,6 +73,7 @@ unity-agentic-tools create scene <path>                       # New .unity file
 unity-agentic-tools create component <file> <name> <type>     # Add component
 unity-agentic-tools create component-copy <file> <src> <tgt>  # Copy component
 unity-agentic-tools create prefab-variant <source> <output>   # Prefab Variant
+unity-agentic-tools create prefab-instance <scene> <prefab>  # Instantiate prefab in scene
 unity-agentic-tools create scriptable-object <output> <script># ScriptableObject .asset
 unity-agentic-tools create meta <script_path>                 # Generate .meta file
 unity-agentic-tools create material <output>                  # New Material .mat

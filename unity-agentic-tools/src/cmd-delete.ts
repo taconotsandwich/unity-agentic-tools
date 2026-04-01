@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { deleteGameObject, removeComponent, deletePrefabInstance } from './editor';
+import { deleteGameObject, removeComponent, removeComponentBatch, deletePrefabInstance } from './editor';
 import { remove_scene } from './build-editor';
 import { remove_package } from './packages';
 
@@ -20,17 +20,31 @@ export function build_delete_command(): Command {
             if (!result.success) process.exitCode = 1;
         });
 
-    cmd.command('component <file> <file_id>')
-        .description('Remove a component from a Unity file by file ID')
+    cmd.command('component <file_or_project> <component>')
+        .description('Remove a component by file ID or type name (e.g., "Rigidbody", "StandaloneInputModule")')
+        .option('--on <game_object>', 'Scope to a specific GameObject (name or fileID)')
+        .option('-p, --project <path>', 'Unity project path (for script GUID lookup)')
+        .option('--all', 'Remove from all scenes and prefabs in the project (first arg becomes project path)')
         .option('-j, --json', 'Output as JSON')
-        .action((file, file_id, _options) => {
-            const result = removeComponent({
-                file_path: file,
-                file_id: file_id,
-            });
-
-            console.log(JSON.stringify(result, null, 2));
-            if (!result.success) process.exitCode = 1;
+        .action((file_or_project, component, options) => {
+            if (options.all) {
+                const result = removeComponentBatch({
+                    project_path: file_or_project,
+                    component_type: component,
+                    game_object: options.on,
+                });
+                console.log(JSON.stringify(result, null, 2));
+                if (!result.success) process.exitCode = 1;
+            } else {
+                const result = removeComponent({
+                    file_path: file_or_project,
+                    file_id: component,
+                    game_object: options.on,
+                    project_path: options.project,
+                });
+                console.log(JSON.stringify(result, null, 2));
+                if (!result.success) process.exitCode = 1;
+            }
         });
 
     cmd.command('build <project_path> <scene_path>')

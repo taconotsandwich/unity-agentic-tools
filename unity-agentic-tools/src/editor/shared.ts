@@ -787,14 +787,24 @@ export function resolveScriptGuid(
                 if (guid) return { guid, path: matches[0].filePath };
               }
             }
-            // Fallback: DLL-backed type — find the DLL's GUID in the package cache
+            // Fallback: DLL-backed type — find the source .cs by class name in package caches
+            // Unity references scripts by the .cs file's GUID even when compiled into a DLL
             if (matches[0].filePath?.endsWith('.dll')) {
+              const classNameLower = targetName.toLowerCase();
               const dllBasename = path.basename(matches[0].filePath).toLowerCase();
               for (const cacheName of ['package-cache.json', 'local-package-cache.json']) {
                 const cachePath = path.join(projectPath, '.unity-agentic', cacheName);
                 if (!existsSync(cachePath)) continue;
                 try {
                   const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
+                  // First: find .cs source file matching the class name
+                  for (const [guid, assetPath] of Object.entries(cache)) {
+                    if (assetPath.endsWith('.cs') &&
+                        path.basename(assetPath, '.cs').toLowerCase() === classNameLower) {
+                      return { guid, path: assetPath };
+                    }
+                  }
+                  // Second: find the DLL itself (for DLL-only references)
                   for (const [guid, assetPath] of Object.entries(cache)) {
                     if (assetPath.toLowerCase().endsWith('.dll') &&
                         path.basename(assetPath).toLowerCase() === dllBasename) {
@@ -829,17 +839,27 @@ export function resolveScriptGuid(
                   guid = extractGuidFromMeta(pkgPath + '.meta');
                 }
               }
-              // Fallback: DLL-backed type — find GUID in package cache
+              // Fallback: DLL-backed type — find source .cs by class name in package cache
               if (!guid && m.filePath?.endsWith('.dll')) {
+                const clsLower = (m.name ?? targetName).toLowerCase();
                 const dllBase = path.basename(m.filePath).toLowerCase();
                 for (const cn of ['package-cache.json', 'local-package-cache.json']) {
                   const cp = path.join(projectPath, '.unity-agentic', cn);
                   if (!existsSync(cp)) continue;
                   try {
                     const c = JSON.parse(readFileSync(cp, 'utf-8')) as Record<string, string>;
+                    // First: find .cs source matching class name
                     for (const [g, p] of Object.entries(c)) {
-                      if (p.toLowerCase().endsWith('.dll') && path.basename(p).toLowerCase() === dllBase) {
+                      if (p.endsWith('.cs') && path.basename(p, '.cs').toLowerCase() === clsLower) {
                         guid = g; break;
+                      }
+                    }
+                    // Second: find the DLL itself
+                    if (!guid) {
+                      for (const [g, p] of Object.entries(c)) {
+                        if (p.toLowerCase().endsWith('.dll') && path.basename(p).toLowerCase() === dllBase) {
+                          guid = g; break;
+                        }
                       }
                     }
                   } catch {}
@@ -874,8 +894,12 @@ export function resolveScriptGuid(
             );
           }
         }
-      } catch {
-        // Registry read failed
+      } catch (err) {
+        // Re-throw intentional resolution errors (ambiguity, etc.)
+        if (err instanceof Error && err.message.startsWith('Ambiguous type')) {
+          throw err;
+        }
+        // Registry read/parse failed -- continue to fallback strategies
       }
     }
 
@@ -910,6 +934,79 @@ export function resolveScriptGuid(
   }
 
   return null;
+}
+
+// ─── Asset Path to PPtr Resolution ────────────────────────────────────
+
+/** Maps asset file extension to the main-object fileID and PPtr type. */
+const ASSET_PPTR_MAP: Record<string, { fileID: number; type: number }> = {
+  '.inputactions': { fileID: 11400000, type: 2 },
+  '.asset':        { fileID: 11400000, type: 2 },
+  '.mat':          { fileID: 2100000,  type: 2 },
+  '.prefab':       { fileID: 100100000, type: 2 },
+  '.controller':   { fileID: 9100000,  type: 2 },
+  '.anim':         { fileID: 7400000,  type: 2 },
+};
+
+const ASSET_EXTENSIONS = new Set(Object.keys(ASSET_PPTR_MAP));
+
+/**
+ * Resolve an asset path (e.g., "MyActions.inputactions") to a cross-file PPtr string.
+ *
+ * Returns:
+ * - `string`    = resolved PPtr (e.g., "{fileID: 11400000, guid: abc..., type: 2}")
+ * - `undefined` = value is not an asset path, no resolution attempted
+ * - `null`      = value IS an asset path but resolution failed (GUID not found)
+ */
+export function resolveAssetPathToPPtr(
+  value: string,
+  file_path: string,
+  project_path?: string,
+): string | null | undefined {
+  // Already a PPtr -- pass through
+  if (value.startsWith('{fileID:') || value.startsWith('{')) return undefined;
+
+  const ext = path.extname(value).toLowerCase();
+  if (!ASSET_EXTENSIONS.has(ext)) return undefined;
+
+  // Resolve project root
+  const resolved_project = project_path || find_unity_project_root(path.dirname(file_path));
+  if (!resolved_project) return null;
+
+  const mapping = ASSET_PPTR_MAP[ext];
+  let guid: string | null = null;
+
+  // Strategy 1: full or relative path with .meta file
+  const basename_val = path.basename(value, ext);
+  if (value.includes('/') || value.includes('\\')) {
+    const abs = path.isAbsolute(value) ? value : path.join(resolved_project, value);
+    guid = extractGuidFromMeta(abs + '.meta');
+  }
+
+  // Strategy 2: GUID cache lookup by name
+  if (!guid) {
+    const cache = load_guid_cache_for_file(file_path, resolved_project);
+    if (cache) {
+      const found = cache.find_by_name(basename_val, ext);
+      if (found) guid = found.guid;
+    }
+  }
+
+  // Strategy 3: scan common locations for .meta file
+  if (!guid) {
+    const candidates = [
+      path.join(resolved_project, 'Assets', value),
+      path.join(resolved_project, value),
+    ];
+    for (const candidate of candidates) {
+      guid = extractGuidFromMeta(candidate + '.meta');
+      if (guid) break;
+    }
+  }
+
+  if (!guid) return null;
+
+  return `{fileID: ${mapping.fileID}, guid: ${guid}, type: ${mapping.type}}`;
 }
 
 /**
@@ -1075,4 +1172,72 @@ function resolve_enum_fields(fields: import('../types').CSharpFieldRef[], projec
   } catch {
     // Registry read failed — skip enum resolution
   }
+}
+
+/**
+ * Build a lookup function that resolves type names to their serialized fields.
+ * Searches the project's Assets/ directory for TypeName.cs files, then extracts
+ * fields on-demand via the native Rust module. Results are cached per type.
+ *
+ * Used by generate_field_yaml to expand [Serializable] struct/class fields
+ * instead of defaulting to {fileID: 0}.
+ */
+export function build_type_lookup(
+    project_path: string
+): ((typeName: string) => import('../types').CSharpFieldRef[] | null) {
+    let extractFn: ((filePath: string) => import('../types').CSharpTypeInfo[] | null) | null = null;
+    try {
+        const { getNativeExtractSerializedFields } = require('../scanner');
+        extractFn = getNativeExtractSerializedFields();
+    } catch { /* native module unavailable */ }
+    if (!extractFn) return () => null;
+
+    // Build index of .cs files by basename for fast lookup
+    const assetsDir = path.join(project_path, 'Assets');
+    const csIndex = new Map<string, string>();
+    try {
+        const { readdirSync } = require('fs') as typeof import('fs');
+        const entries = readdirSync(assetsDir, { recursive: true, withFileTypes: false }) as string[];
+        for (const entry of entries) {
+            if (typeof entry === 'string' && entry.endsWith('.cs')) {
+                const basename = entry.substring(entry.lastIndexOf('/') + 1).replace(/\.cs$/, '');
+                if (!csIndex.has(basename)) {
+                    csIndex.set(basename, path.join(assetsDir, entry));
+                }
+            }
+        }
+    } catch { /* directory read failed */ }
+    if (csIndex.size === 0) return () => null;
+
+    const cache = new Map<string, import('../types').CSharpFieldRef[] | null>();
+
+    return (typeName: string) => {
+        if (cache.has(typeName)) return cache.get(typeName) ?? null;
+
+        const shortName = typeName.includes('.') ? typeName.substring(typeName.lastIndexOf('.') + 1) : typeName;
+        const csPath = csIndex.get(shortName);
+        if (!csPath || !existsSync(csPath)) {
+            cache.set(typeName, null);
+            return null;
+        }
+
+        try {
+            const typeInfos = extractFn!(csPath);
+            if (!typeInfos || typeInfos.length === 0) {
+                cache.set(typeName, null);
+                return null;
+            }
+            const match = typeInfos.find((t: import('../types').CSharpTypeInfo) => t.name === shortName);
+            if (match && match.fields && match.fields.length > 0) {
+                resolve_enum_fields(match.fields, project_path);
+                cache.set(typeName, match.fields);
+                return match.fields;
+            }
+            cache.set(typeName, null);
+            return null;
+        } catch {
+            cache.set(typeName, null);
+            return null;
+        }
+    };
 }

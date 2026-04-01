@@ -192,6 +192,23 @@ export interface CreateGameObjectResult {
   error?: string;
 }
 
+export interface CreatePrefabInstanceOptions {
+  scene_path: string;
+  prefab_path: string;
+  name?: string;
+  parent?: string | number;
+  position?: { x: number; y: number; z: number };
+}
+
+export interface CreatePrefabInstanceResult {
+  success: boolean;
+  file_path: string;
+  prefab_instance_id?: string;
+  game_object_id?: string;
+  transform_id?: string;
+  error?: string;
+}
+
 // Quaternion for rotation representation
 export interface Quaternion {
   x: number;
@@ -245,6 +262,8 @@ export interface AssetObject {
 export interface RemoveComponentOptions {
   file_path: string;
   file_id: string;
+  game_object?: string;
+  project_path?: string;
 }
 
 export interface RemoveComponentResult {
@@ -253,6 +272,25 @@ export interface RemoveComponentResult {
   removed_file_id?: string;
   removed_class_id?: number;
   error?: string;
+  warning?: string;
+}
+
+export interface BatchRemoveComponentOptions {
+  project_path: string;
+  component_type: string;
+  game_object?: string;
+  dry_run?: boolean;
+}
+
+export interface BatchRemoveComponentResult {
+  success: boolean;
+  project_path: string;
+  component: string;
+  files_scanned: number;
+  files_modified: number;
+  removals: Array<{ file: string; file_id: string; class_id: number }>;
+  skipped: number;
+  errors: Array<{ file: string; error: string }>;
 }
 
 // Delete GameObject types
@@ -307,8 +345,8 @@ export interface CreateScriptableObjectOptions {
   output_path: string;
   script: string;
   project_path?: string;
-  /** Initial field values to set after generating the asset (e.g. {"damage": "10"}) */
-  initial_values?: Record<string, string>;
+  /** Initial field values to set after generating the asset. Supports nested objects/arrays. */
+  initial_values?: Record<string, unknown>;
 }
 
 export interface CreateScriptableObjectResult {
@@ -377,6 +415,7 @@ export interface EditComponentByFileIdOptions {
   file_id: string;  // The file ID of the component to edit (from --- !u!<class_id> &<file_id>)
   property: string;  // Property name (with or without m_ prefix)
   new_value: string;
+  project_path?: string;  // Unity project root (for asset path -> PPtr resolution)
 }
 
 export interface EditComponentResult {
@@ -584,6 +623,7 @@ export interface ProjectSearchResult {
   project_path: string;
   total_files_scanned: number;
   total_matches: number;
+  files_with_errors?: number;
   cursor?: number;
   truncated: boolean;
   matches: ProjectSearchMatch[];

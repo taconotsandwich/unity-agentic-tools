@@ -8,9 +8,13 @@ argument-hint: "<read|create|update|delete|editor|search|grep|...>"
 
 # Unity Agentic Tools
 
-CLI: `unity-agentic-tools <command>` -- 116 commands across 4 CRUD groups, live editor bridge, and utilities.
+CLI: `unity-agentic-tools <command>` -- 117 commands across 4 CRUD groups, live editor bridge, and utilities.
 
-All commands accept `-j`/`--json` for structured output. Run `<command> --help` for full options.
+**CRITICAL: Use the CLI for ALL Unity operations. NEVER manually read, edit, write, or grep Unity files (.unity, .prefab, .asset, .mat, .anim, .controller, .meta, ProjectSettings/) using Read, Edit, Write, or Grep tools. NEVER manually edit Unity C# scripts or Editor bridge code. The CLI handles YAML parsing, GUID preservation, and safe editing. Manual file access will break things.**
+
+All commands accept `-j`/`--json` for structured output.
+
+**IMPORTANT: After loading this skill, ALWAYS run `unity-agentic-tools --help` first to see available commands and match the right command to your file type. Run `unity-agentic-tools <group> --help` (e.g. `read --help`) before using a subcommand you haven't used yet.**
 
 Run `unity-agentic-tools setup -p <project>` before first use. Run `unity-agentic-tools status` to check readiness.
 
@@ -43,7 +47,7 @@ Use `--properties` only when component values are needed (saves tokens). Use `--
 
 **read** (21) -- Scene hierarchy, GameObjects, components, assets, materials, animations, dependencies, settings, build, overrides, scripts, logs, meta, manifests, input actions. See `reference/commands-read.md`
 
-**create** (14) -- GameObjects, scenes, prefab variants, ScriptableObjects, components, materials, builds, packages, input actions, animations, animators, prefabs. See `reference/commands-create.md`
+**create** (15) -- GameObjects, scenes, prefab variants, prefab instances, ScriptableObjects, components, materials, builds, packages, input actions, animations, animators, prefabs. See `reference/commands-create.md`
 
 **update** (31) -- Properties, transforms, settings, tags, layers, sorting layers, parent hierarchy, builds, arrays, batch edits, materials, meta, animations, animators, sibling index, input actions, animation curves, animator states, managed references, plus 9 prefab subcommands. See `reference/commands-update.md`
 

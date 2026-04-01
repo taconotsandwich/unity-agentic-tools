@@ -31,16 +31,10 @@ export function load_manifest(project_path: string): { manifest: PackageManifest
 }
 
 /**
- * Save a manifest to disk with sorted dependency keys and 2-space indent.
+ * Save a manifest to disk preserving original key order, with 2-space indent.
  */
 export function save_manifest(manifest_path: string, manifest: PackageManifest): void {
-    // Sort dependencies alphabetically
-    const sorted_deps: Record<string, string> = {};
-    for (const key of Object.keys(manifest.dependencies).sort()) {
-        sorted_deps[key] = manifest.dependencies[key];
-    }
-    const output = { ...manifest, dependencies: sorted_deps };
-    writeFileSync(manifest_path, JSON.stringify(output, null, 2) + '\n', 'utf-8');
+    writeFileSync(manifest_path, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
 }
 
 /**

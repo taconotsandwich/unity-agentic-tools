@@ -274,6 +274,7 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
 
     const scanner = new UnityScanner();
     const matches: ProjectSearchMatch[] = [];
+    let files_with_errors = 0;
 
     for (const file of files) {
         try {
@@ -388,7 +389,7 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
 
             if (max_matches !== undefined && matches.length >= max_matches) break;
         } catch {
-            // Skip files that can't be parsed
+            files_with_errors++;
             continue;
         }
     }
@@ -398,6 +399,7 @@ export function search_project(options: ProjectSearchOptions): ProjectSearchResu
         project_path,
         total_files_scanned: files.length,
         total_matches: matches.length,
+        files_with_errors: files_with_errors > 0 ? files_with_errors : undefined,
         cursor: 0,
         truncated: max_matches !== undefined && matches.length >= max_matches,
         matches,

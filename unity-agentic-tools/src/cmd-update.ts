@@ -98,7 +98,8 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
     cmd.command('component <file> <file_id> <property> <value>')
         .description('Edit any component property by file ID. Supports dotted paths (m_LocalPosition.x) and array paths (m_Materials.Array.data[0]). Quote paths with brackets or use dot notation (data.0) to avoid shell glob expansion')
         .option('-j, --json', 'Output as JSON')
-        .action((file, file_id, property, value, _options) => {
+        .option('-p, --project <path>', 'Unity project path (for asset reference resolution)')
+        .action((file, file_id, property, value, options) => {
             // Validate m_RootOrder: must be a non-negative integer
             if (property === 'm_RootOrder') {
                 const num = Number(value);
@@ -114,6 +115,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 file_id: file_id,
                 property: property,
                 new_value: value,
+                project_path: options.project,
             });
 
             console.log(JSON.stringify(result, null, 2));

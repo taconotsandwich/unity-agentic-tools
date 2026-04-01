@@ -8,23 +8,23 @@
 
 | Command | What it does |
 |---------|-------------|
-| `update gameobject <file> <name> <prop> <value>` | Edit property by object name |
+| `update gameobject <file> <name> <prop> <value>` | Edit property by object name (`-p <project>`) |
 | `update component <file> <file_id> <prop> <value>` | Edit component by fileID |
 | `update transform <file> <identifier> -p x,y,z -r x,y,z -s x,y,z` | Position/rotation/scale |
-| `update scriptable-object <file> <prop> <value>` | Edit first MonoBehaviour in .asset |
+| `update scriptable-object <file> <prop> <value>` | Edit first MonoBehaviour in .asset (`--file-id <id>`) |
 | `update settings <project> -s <alias> --property <p> --value <v>` | Edit setting |
 | `update tag <project> add\|remove <tag>` | Add/remove tag |
 | `update layer <project> <index> <name>` | Set named layer (3-31) |
 | `update sorting-layer <project> add\|remove <name>` | Add/remove sorting layer |
-| `update parent <file> <name> <new_parent>` | Reparent ("root" for scene root) |
+| `update parent <file> <name> <new_parent>` | Reparent ("root" for scene root, `--by-id`) |
 | `update build <project> <scene>` | Enable/disable/move scene (`--enable`, `--disable`, `--move <idx>`) |
 | `update array <file> <file_id> <array_prop> <action> [args]` | Array element operations |
 | `update batch <file> <json>` | Batch edit GameObject properties |
 | `update batch-components <file> <json>` | Batch edit components by fileID |
 | `update material <file>` | Edit Material properties |
 | `update meta [file]` | Edit .meta importer settings |
-| `update animation <file>` | Edit AnimationClip settings/events |
-| `update animator <file>` | Edit AnimatorController parameters |
+| `update animation <file>` | Edit AnimationClip settings/events (`--set`, `--add-event`, `--remove-event`) |
+| `update animator <file>` | Edit parameters (`--add-parameter`, `--type`, `--remove-parameter`, `--set-default`) |
 | `update sibling-index <file> <name> <index>` | Set sibling index |
 | `update input-actions <file>` | Edit Input Actions |
 | `update animation-curves <file>` | Add/remove/modify animation curves |
@@ -82,6 +82,23 @@ Actions: `insert <index> <value>`, `append <value>`, `remove <index>`.
 
 Alternative: `insert <value> --index <n>`, `remove --index <n>`.
 
+### update animation
+
+| Flag | Format |
+|------|--------|
+| `--set <property=value>` | Edit clip settings (repeatable) |
+| `--add-event <time,function[,data]>` | Add animation event (repeatable) |
+| `--remove-event <index>` | Remove event by index |
+
+### update animator
+
+| Flag | Format |
+|------|--------|
+| `--add-parameter <name>` | Add parameter (requires `--type`) |
+| `--type <float\|int\|bool\|trigger>` | Parameter type (companion to `--add-parameter`) |
+| `--remove-parameter <name>` | Remove parameter |
+| `--set-default <param=value>` | Set default value (repeatable) |
+
 ### update animation-curves
 
 | Flag | Format |
@@ -133,8 +150,8 @@ Type can be `Namespace.ClassName` (registry lookup) or `Assembly Namespace.Class
 
 | Command | What it does |
 |---------|-------------|
-| `update prefab unpack <file> <instance>` | Unpack to standalone objects |
-| `update prefab override <file> <instance> <path> <value>` | Edit/add property override |
+| `update prefab unpack <file> <instance>` | Unpack to standalone objects (`-p <project>`) |
+| `update prefab override <file> <instance> <path> <value>` | Edit/add override (`--target`, `--object-reference`, `--managed-reference`) |
 | `update prefab remove-override <file> <instance> <path>` | Revert to prefab default |
 | `update prefab remove-component <file> <instance> <ref>` | Suppress a component |
 | `update prefab restore-component <file> <instance> <ref>` | Restore suppressed component |

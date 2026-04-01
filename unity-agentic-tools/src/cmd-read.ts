@@ -294,7 +294,7 @@ function get_editor_log_path(): string | null {
     return null;
 }
 
-interface LogEntry {
+export interface LogEntry {
     line_number: number;
     level: 'error' | 'warning' | 'info' | 'import_error';
     message: string;
@@ -316,12 +316,14 @@ function parse_log_line_timestamp(line: string): Date | null {
 }
 
 /** Parse Unity Editor.log lines into structured entries. */
-function parse_log_entries(lines: string[]): LogEntry[] {
+export function parse_log_entries(lines: string[]): LogEntry[] {
     const entries: LogEntry[] = [];
-    const error_re = /^(error|exception|Error|Exception|ERROR)/i;
-    const warning_re = /^(warning|Warning|WARNING)/i;
+    const error_re = /\b(error|exception)\b/i;
+    const runtime_error_re = /\b(NullReferenceException|IndexOutOfRangeException|ArgumentException|MissingReferenceException|StackOverflowException|DivideByZeroException|InvalidOperationException|KeyNotFoundException|FormatException|ObjectDisposedException|MissingComponentException|UnassignedReferenceException)\b/;
+    const warning_re = /\bwarning\b/i;
     const compile_re = /Assets\/.*\.cs\(\d+,\d+\):\s*error\s+CS/;
     const import_error_re = /Failed to import|Error while importing|Could not create asset|Unable to import|Shader error in|Import of asset .* failed/i;
+    const assertion_re = /^Assertion failed/;
     const stack_re = /^\s+at\s+|^\s*\(Filename:/;
 
     for (let i = 0; i < lines.length; i++) {
@@ -330,7 +332,8 @@ function parse_log_entries(lines: string[]): LogEntry[] {
 
         let level: LogEntry['level'] = 'info';
         if (import_error_re.test(line)) level = 'import_error';
-        else if (error_re.test(line) || compile_re.test(line)) level = 'error';
+        else if (compile_re.test(line)) level = 'error';
+        else if (error_re.test(line) || runtime_error_re.test(line) || assertion_re.test(line)) level = 'error';
         else if (warning_re.test(line)) level = 'warning';
 
         // Collect stack trace lines
@@ -1766,12 +1769,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 }
             }
 
-            // Apply --search filter
-            if (options.search) {
-                const re = new RegExp(options.search as string, 'i');
-                lines = lines.filter(l => re.test(l));
-            }
-
             // Parse structured entries for error/warning/compile-errors modes
             if (options.errors || options.warnings || options.compileErrors || options.importErrors) {
                 const entries = parse_log_entries(lines);
@@ -1785,6 +1782,13 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     filtered = entries.filter(e => e.level === 'error' || e.level === 'import_error');
                 } else if (options.warnings) {
                     filtered = entries.filter(e => e.level === 'warning');
+                }
+                // Apply --search AFTER level classification to avoid fragmenting entries
+                if (options.search) {
+                    const re = new RegExp(options.search as string, 'i');
+                    filtered = filtered.filter(e =>
+                        re.test(e.message) || (e.stack_trace && e.stack_trace.some(s => re.test(s)))
+                    );
                 }
                 const tail_filtered = parseInt(options.tail as string, 10);
                 if (isNaN(tail_filtered) || tail_filtered < 1) {
@@ -1800,6 +1804,12 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     entries: shown,
                 }, null, 2));
                 return;
+            }
+
+            // Apply --search filter (plain tail mode only)
+            if (options.search) {
+                const re = new RegExp(options.search as string, 'i');
+                lines = lines.filter(l => re.test(l));
             }
 
             // Default: show last N lines

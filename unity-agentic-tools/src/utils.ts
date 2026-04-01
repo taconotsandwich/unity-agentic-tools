@@ -1,4 +1,4 @@
-import { writeFileSync, renameSync, existsSync, unlinkSync, accessSync, constants as fsConstants } from 'fs';
+import { writeFileSync, renameSync, existsSync, unlinkSync, accessSync, mkdirSync, constants as fsConstants } from 'fs';
 import { resolve, dirname, join } from 'path';
 
 /**
@@ -19,6 +19,16 @@ export function find_unity_project_root(startDir?: string): string | null {
     }
 
     return null;
+}
+
+/**
+ * Ensure the parent directory of a file path exists, creating it recursively if needed.
+ */
+export function ensure_parent_dir(file_path: string): void {
+    const dir = dirname(file_path);
+    if (dir && dir !== '.' && !existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+    }
 }
 
 export interface AtomicWriteResult {
