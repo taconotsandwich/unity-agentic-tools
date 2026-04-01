@@ -213,13 +213,41 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Wait for npm propagation
+      - name: Wait for npm package availability
         shell: bash
-        run: sleep 30
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for attempt in {1..30}; do
+            PUBLISHED_VERSION="$(npm view "unity-agentic-tools@${VERSION}" version 2>/dev/null || true)"
+            PUBLISHED_VERSION="${PUBLISHED_VERSION//\"/}"
+
+            if [ "$PUBLISHED_VERSION" = "$VERSION" ]; then
+              echo "Package unity-agentic-tools@${VERSION} is available"
+              exit 0
+            fi
+
+            echo "Attempt ${attempt}/30: package not available yet, retrying in 20s"
+            sleep 20
+          done
+
+          echo "ERROR: unity-agentic-tools@${VERSION} did not appear on npm in time"
+          exit 1
 
       - name: Install published package
         shell: bash
-        run: npm install -g unity-agentic-tools@${GITHUB_REF_NAME#v}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for attempt in {1..5}; do
+            if npm install -g "unity-agentic-tools@${VERSION}"; then
+              exit 0
+            fi
+
+            echo "Attempt ${attempt}/5: install failed, retrying in 10s"
+            sleep 10
+          done
+
+          echo "ERROR: failed to install unity-agentic-tools@${VERSION}"
+          exit 1
 
       - name: Verify native module loads
         shell: bash

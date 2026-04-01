@@ -4,24 +4,24 @@
 |---------|-------------|
 | `read scene <file>` | GameObject hierarchy (scenes and prefabs) |
 | `read gameobject <file> <id>` | Single object by name or fileID (`-c <type>`, `--properties`) |
-| `read component <file> <file_id>` | Single component by fileID |
-| `read asset <file>` | Any Unity YAML asset (.asset, .mat, .anim). Mesh auto-decode (`--raw` to skip) |
-| `read material <file>` | Material with structured property output |
-| `read reference <file> <file_id>` | Trace fileID references |
+| `read component <file> <file_id>` | Single component by fileID (`--properties`) |
+| `read asset <file>` | Any Unity YAML asset (.asset, .mat, .anim). Mesh auto-decode (`--raw` to skip, `--properties`) |
+| `read material <file>` | Material with structured property output (`--project`, `--summary`) |
+| `read reference <file> <file_id>` | Trace fileID references (`--direction in\|out\|both`, `--depth <n>`) |
 | `read dependencies <file>` | GUIDs referenced by this file |
-| `read dependents <project> <guid>` | Files referencing a GUID (reverse lookup) |
-| `read unused <project>` | Assets with zero inbound GUID references |
+| `read dependents <project> <guid>` | Files referencing a GUID (reverse lookup, `--type <type>`) |
+| `read unused <project>` | Assets with zero inbound GUID refs (`--type`, `--ignore <glob>`, `--max <n>`) |
 | `read settings <project> -s <alias>` | Project settings by alias (see commands-utilities.md) |
 | `read build <project>` | Build settings (scene list, build profiles) |
-| `read overrides <file> <instance>` | PrefabInstance override modifications |
+| `read overrides <file> <instance>` | PrefabInstance override modifications (`--flat`) |
 | `read script <file>` | C# type declarations from .cs or .NET DLL |
 | `read scripts` | List C# types from registry |
 | `read log` | Unity Editor.log |
-| `read meta <file>` | .meta importer settings |
-| `read animation <file>` | AnimationClip (.anim) |
+| `read meta <file>` | .meta importer settings (`--summary`) |
+| `read animation <file>` | AnimationClip (.anim) (`--summary`, `--paths`, `--curves`) |
 | `read animator <file>` | AnimatorController (.controller) |
 | `read manifest <project>` | Packages from manifest.json (`--search <pattern>`) |
-| `read target <file> <name> [component_type]` | Build `--target` reference string for prefab override commands |
+| `read target <file> <name> [component_type]` | Build `--target` reference string for prefab override commands (`-p <project>`) |
 | `read input-actions <file>` | Input Actions file (`--summary`, `--maps`, `--actions`, `--bindings`) |
 
 

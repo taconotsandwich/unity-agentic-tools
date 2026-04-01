@@ -8,6 +8,7 @@
 
 import type { CSharpFieldRef } from '../types';
 import type { UnityVersion } from '../build-version';
+import { yaml_quote_if_needed } from './unity-block';
 
 // ========== Type-to-YAML Default Value Maps ==========
 
@@ -188,6 +189,7 @@ export function generate_field_yaml(
     fields: CSharpFieldRef[],
     version?: UnityVersion,
     indent: string = '  ',
+    type_lookup?: (typeName: string) => CSharpFieldRef[] | null,
 ): string {
     const lines: string[] = [];
 
@@ -211,6 +213,21 @@ export function generate_field_yaml(
             continue;
         }
 
+        // Check if this is an unknown type that the type registry knows as a serializable struct
+        if (default_value === '{fileID: 0}' && type_lookup) {
+            const struct_fields = type_lookup(field.typeName);
+            if (struct_fields && struct_fields.length > 0) {
+                lines.push(`${indent}${field.name}:`);
+                const nested = generate_field_yaml(struct_fields, version, indent + '  ', type_lookup);
+                // nested format: '\nfield1: val\nfield2: val\n' -- strip leading/trailing \n
+                const nested_lines = nested.slice(1).replace(/\n$/, '').split('\n');
+                for (const nl of nested_lines) {
+                    lines.push(nl);
+                }
+                continue;
+            }
+        }
+
         // Multi-line values (block structs like Bounds) need special handling
         if (default_value.includes('\n')) {
             lines.push(`${indent}${field.name}:`);
@@ -223,4 +240,99 @@ export function generate_field_yaml(
     }
 
     return lines.length > 0 ? '\n' + lines.join('\n') + '\n' : '\n';
+}
+
+// ========== JSON-to-YAML Conversion ==========
+
+/**
+ * Convert a JSON value to Unity YAML lines at the given indent level.
+ * Returns an array of lines (without trailing newline).
+ *
+ * Primitives return a single-element array with the scalar value.
+ * Objects return block-style key: value pairs.
+ * Arrays return - prefixed elements.
+ */
+export function json_value_to_yaml_lines(value: unknown, indent: string = '  '): string[] {
+    if (value === null || value === undefined) {
+        return [''];
+    }
+    if (typeof value === 'string') {
+        return [yaml_quote_if_needed(value)];
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return [String(value)];
+    }
+    if (Array.isArray(value)) {
+        if (value.length === 0) return ['[]'];
+        const lines: string[] = [];
+        for (const item of value) {
+            if (is_scalar(item) || is_empty_collection(item)) {
+                const scalar = json_value_to_yaml_lines(item);
+                lines.push(`${indent}- ${scalar[0]}`);
+            } else if (is_flow_mappable(item)) {
+                lines.push(`${indent}- ${to_flow_mapping(item as Record<string, unknown>)}`);
+            } else {
+                // Complex item: compact format (merge - with first child line)
+                const child_lines = json_value_to_yaml_lines(item, indent + '  ');
+                lines.push(`${indent}- ${child_lines[0].trimStart()}`);
+                for (let i = 1; i < child_lines.length; i++) {
+                    lines.push(child_lines[i]);
+                }
+            }
+        }
+        return lines;
+    }
+    if (typeof value === 'object') {
+        const entries = Object.entries(value as Record<string, unknown>);
+        if (entries.length === 0) return ['{}'];
+        const lines: string[] = [];
+        for (const [key, val] of entries) {
+            if (is_scalar(val) || is_empty_collection(val)) {
+                const scalar = json_value_to_yaml_lines(val);
+                lines.push(`${indent}${key}: ${scalar[0]}`);
+            } else if (is_flow_mappable(val)) {
+                lines.push(`${indent}${key}: ${to_flow_mapping(val as Record<string, unknown>)}`);
+            } else {
+                // Complex value: key on its own line, children indented below
+                // Arrays use same indent (Unity convention: list items at parent key level)
+                const child_indent = Array.isArray(val) ? indent : indent + '  ';
+                lines.push(`${indent}${key}:`);
+                const child_lines = json_value_to_yaml_lines(val, child_indent);
+                for (const cl of child_lines) {
+                    lines.push(cl);
+                }
+            }
+        }
+        return lines;
+    }
+    return [String(value)];
+}
+
+function is_scalar(value: unknown): boolean {
+    return value === null || value === undefined ||
+        typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+}
+
+function is_empty_collection(value: unknown): boolean {
+    if (Array.isArray(value)) return value.length === 0;
+    if (typeof value === 'object' && value !== null) return Object.keys(value as Record<string, unknown>).length === 0;
+    return false;
+}
+
+function is_flow_mappable(value: unknown): boolean {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return false;
+    return entries.every(([, v]) => is_scalar(v) || is_empty_collection(v));
+}
+
+function to_flow_mapping(obj: Record<string, unknown>): string {
+    const parts = Object.entries(obj).map(([k, v]) => {
+        if (v === null || v === undefined) return `${k}: `;
+        if (typeof v === 'string') return `${k}: ${yaml_quote_if_needed(v)}`;
+        if (Array.isArray(v) && v.length === 0) return `${k}: []`;
+        if (typeof v === 'object' && v !== null && Object.keys(v as Record<string, unknown>).length === 0) return `${k}: {}`;
+        return `${k}: ${String(v)}`;
+    });
+    return `{${parts.join(', ')}}`;
 }

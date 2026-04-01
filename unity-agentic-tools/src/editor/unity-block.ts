@@ -204,15 +204,40 @@ export class UnityBlock {
         // Handle simple paths (no dots, no arrays)
         if (!path.includes('.') && !path.includes('Array')) {
             const prop_pattern = new RegExp(
-                `(^\\s*${escape_regex(path)}:\\s*)(.*)$`,
+                `(^\\s*${escape_regex(path)}:[ \\t]*)(.*)$`,
                 'm'
             );
-            if (prop_pattern.test(this._raw)) {
+            const match = this._raw.match(prop_pattern);
+            if (match && match.index !== undefined) {
                 const replacement_value = effective_ref ?? yaml_quote_if_needed(value);
-                this._raw = this._raw.replace(
-                    prop_pattern,
-                    (_match: string, prefix: string) => prefix + replacement_value
-                );
+                const current_inline = match[2];
+
+                if (current_inline.trim() === '') {
+                    // Block-style value (value on next line) -- remove block lines and set inline
+                    const key_indent = (match[0].match(/^[ \t]*/)?.[0] || '').length;
+                    const after = match.index + match[0].length;
+                    let end = after;
+                    const rest = this._raw.slice(after);
+                    const rest_lines = rest.split('\n');
+                    for (let i = 1; i < rest_lines.length; i++) {
+                        const line = rest_lines[i];
+                        if (line.trim() === '') { end += 1 + line.length; continue; }
+                        const line_indent = (line.match(/^[ \t]*/)?.[0] || '').length;
+                        if (line_indent > key_indent) {
+                            end += 1 + line.length;
+                        } else {
+                            break;
+                        }
+                    }
+                    const prefix = match[1].trimEnd() + ' ';
+                    this._raw = this._raw.slice(0, match.index) + prefix + replacement_value + this._raw.slice(end);
+                } else {
+                    // Inline value -- simple replacement
+                    this._raw = this._raw.replace(
+                        prop_pattern,
+                        (_match: string, prefix: string) => prefix + replacement_value
+                    );
+                }
             } else {
                 // Field not present in YAML — insert it.
                 // Unity omits default-valued fields from serialization, so this
@@ -345,6 +370,12 @@ export class UnityBlock {
         // Guard: don't insert if parent already exists (shouldn't reach here, but safety)
         const parent_pattern = new RegExp(`^[ \t]*${escape_regex(parent)}:`, 'm');
         if (parent_pattern.test(this._raw)) {
+            return;
+        }
+        // Guard: don't insert if the m_-prefixed (or unprefixed) variant already exists
+        const alt = parent.startsWith('m_') ? parent.slice(2) : 'm_' + parent;
+        const alt_pattern = new RegExp(`^[ \\t]*${escape_regex(alt)}:`, 'm');
+        if (alt_pattern.test(this._raw)) {
             return;
         }
 
@@ -692,7 +723,7 @@ export class UnityBlock {
                 `Invalid Unity YAML block header in replacement text: "${new_text.slice(0, 80)}"`
             );
         }
-        this._raw = new_text;
+        this._raw = new_text.endsWith('\n') ? new_text : new_text + '\n';
         this._header = header;
         this._dirty = true;
         this._format_cache.clear();
@@ -709,9 +740,14 @@ export class UnityBlock {
 
     /**
      * Compare old and new raw text; if changed, set dirty and return true.
+     * Enforces the invariant that block raw always ends with \n (required for
+     * serialize() which joins blocks with '' -- missing \n merges blocks).
      */
     private _check_dirty(old_raw: string): boolean {
         if (this._raw !== old_raw) {
+            if (!this._raw.endsWith('\n')) {
+                this._raw += '\n';
+            }
             this._dirty = true;
             return true;
         }

@@ -2,10 +2,12 @@ import { Command } from 'commander';
 import { existsSync, writeFileSync } from 'fs';
 import { basename } from 'path';
 import { randomBytes } from 'crypto';
+import { ensure_parent_dir } from './utils';
 import {
     createGameObject,
     createScene,
     createPrefabVariant,
+    createPrefabInstance,
     createScriptableObject,
     createMetaFile,
     addComponent,
@@ -91,13 +93,52 @@ export function build_create_command(): Command {
             if (!result.success) process.exitCode = 1;
         });
 
+    cmd.command('prefab-instance <scene_file> <prefab_path>')
+        .description('Instantiate a prefab into a scene file')
+        .option('-n, --name <name>', 'Instance name (defaults to prefab filename)')
+        .option('-p, --parent <name|id>', 'Parent GameObject name or Transform fileID')
+        .option('--position <x,y,z>', 'Local position (default: 0,0,0)')
+        .option('-j, --json', 'Output as JSON')
+        .action((scene_file, prefab_path_arg, options) => {
+            let position: { x: number; y: number; z: number } | undefined;
+            if (options.position) {
+                const parts = (options.position as string).split(',').map(Number);
+                if (parts.length !== 3 || parts.some(isNaN)) {
+                    console.log(JSON.stringify({
+                        success: false,
+                        error: '--position must be three comma-separated numbers, e.g. 1,2,3'
+                    }, null, 2));
+                    process.exitCode = 1;
+                    return;
+                }
+                position = { x: parts[0], y: parts[1], z: parts[2] };
+            }
+
+            let parent: string | number | undefined;
+            if (options.parent) {
+                const asNumber = parseInt(options.parent, 10);
+                parent = isNaN(asNumber) ? options.parent : asNumber;
+            }
+
+            const result = createPrefabInstance({
+                scene_path: scene_file,
+                prefab_path: prefab_path_arg,
+                name: options.name,
+                parent,
+                position,
+            });
+
+            console.log(JSON.stringify(result, null, 2));
+            if (!result.success) process.exitCode = 1;
+        });
+
     cmd.command('scriptable-object <output_path> <script>')
         .description('Create a new ScriptableObject .asset file')
         .option('-p, --project <path>', 'Unity project path (for script GUID lookup)')
         .option('--set <json>', 'Initial field values as JSON object (e.g. \'{"damage": "10", "targetScope": "1"}\')')
         .option('-j, --json', 'Output as JSON')
         .action((output_path, script, options) => {
-            let initial_values: Record<string, string> | undefined;
+            let initial_values: Record<string, unknown> | undefined;
             if (options.set) {
                 try {
                     initial_values = JSON.parse(options.set);
@@ -275,6 +316,7 @@ Material:
   m_BuildTextureStacks: []
 `;
 
+            ensure_parent_dir(output_path);
             writeFileSync(output_path, mat_content, 'utf-8');
 
             // Generate .meta file
@@ -453,6 +495,7 @@ AnimationClip:
   m_Events: []
 `;
 
+            ensure_parent_dir(output_path);
             writeFileSync(output_path, anim_content, 'utf-8');
 
             // Generate .meta file
@@ -543,6 +586,7 @@ AnimatorStateMachine:
   m_DefaultState: {fileID: 0}
 `;
 
+            ensure_parent_dir(output_path);
             writeFileSync(output_path, ctrl_content, 'utf-8');
 
             const guid = randomBytes(16).toString('hex');
@@ -619,6 +663,7 @@ Transform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 `;
 
+            ensure_parent_dir(output_path);
             writeFileSync(output_path, prefab_content, 'utf-8');
 
             const guid = randomBytes(16).toString('hex');

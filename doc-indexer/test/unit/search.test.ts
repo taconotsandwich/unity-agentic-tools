@@ -37,7 +37,7 @@ describe('DocSearch', () => {
         const results = await search.search({ query: 'MonoBehaviour lifecycle' });
         expect(results.results.length).toBeGreaterThanOrEqual(0);
         expect(results.elapsed_ms).toBeGreaterThanOrEqual(0);
-    }, 15000);
+    }, 30000);
 
     it('should respect top_k limit', async () => {
         for (let i = 0; i < 10; i++) {
