@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { deleteGameObject, removeComponent, removeComponentBatch, deletePrefabInstance } from './editor';
 import { remove_scene } from './build-editor';
 import { remove_package } from './packages';
+import { resolve_project_path } from './utils';
 
 export function build_delete_command(): Command {
     const cmd = new Command('delete')
@@ -47,12 +48,14 @@ export function build_delete_command(): Command {
             }
         });
 
-    cmd.command('build <project_path> <scene_path>')
+    cmd.command('build <scene_path>')
         .description('Remove a scene from build settings')
+        .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('-j, --json', 'Output as JSON')
-        .action((project_path, scene_path, _options) => {
+        .action((scene_path, options) => {
+            const resolvedProjectPath = resolve_project_path(options.project);
             try {
-                const result = remove_scene(project_path, scene_path);
+                const result = remove_scene(resolvedProjectPath, scene_path);
                 console.log(JSON.stringify(result, null, 2));
                 if (!result.success) process.exitCode = 1;
             } catch (err) {
@@ -74,12 +77,14 @@ export function build_delete_command(): Command {
         });
 
     // ========== Package deletion ==========
-    cmd.command('package <project_path> <name>')
+    cmd.command('package <name>')
         .description('Remove a package from Packages/manifest.json')
+        .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('-j, --json', 'Output as JSON')
-        .action((project_path, name, _options) => {
+        .action((name, options) => {
             try {
-                const result = remove_package(project_path, name);
+                const resolvedProjectPath = resolve_project_path(options.project);
+                const result = remove_package(resolvedProjectPath, name);
                 if ('error' in result) {
                     console.log(JSON.stringify({ success: false, error: result.error }, null, 2));
                     process.exitCode = 1;

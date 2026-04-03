@@ -4,6 +4,6 @@
 |---------|-------------|
 | `delete gameobject <file> <name>` | Delete GameObject and its hierarchy |
 | `delete component <file> <file_id>` | Remove component by fileID |
-| `delete build <project> <scene>` | Remove scene from build settings |
+| `delete build <scene>` | Remove scene from build settings (`--project <path>` optional; defaults to cwd) |
 | `delete prefab <file> <instance>` | Delete PrefabInstance and stripped/added blocks |
-| `delete package <project> <name>` | Remove package from manifest.json |
+| `delete package <name>` | Remove package from manifest.json (`--project <path>` optional; defaults to cwd) |

@@ -1,6 +1,6 @@
 # editor -- 37 commands
 
-Live Unity Editor integration via WebSocket bridge. Requires `editor install <project>` first.
+Live Unity Editor integration via WebSocket bridge. Requires `editor install` first (defaults project to cwd, or pass `--project <path>`).
 
 All editor commands accept `--project <path>`, `--timeout <ms>`, `--port <n>`.
 
@@ -142,8 +142,8 @@ editor invoke MyCompany.Tools.LevelBuilder GenerateNavMesh
 
 | Command | What it does |
 |---------|-------------|
-| `editor install <project>` | Add editor bridge UPM package |
-| `editor uninstall <project>` | Remove editor bridge package |
+| `editor install` | Add editor bridge UPM package (`--project <path>` optional; defaults to cwd) |
+| `editor uninstall` | Remove editor bridge package (`--project <path>` optional; defaults to cwd) |
 
 ## Common mistakes
 

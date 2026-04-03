@@ -9,7 +9,7 @@ const BRIDGE_PACKAGE_VERSION = 'https://github.com/taconotsandwich/unity-agentic
 
 function get_common_options(cmd: Command): { project_path: string; timeout: number; port: number | undefined } {
     // Walk up the command chain to find editor-level options (handles nested subcommand groups like "get")
-    let current: Command | null = cmd.parent;
+    let current: Command | null = cmd;
     let project: string | undefined;
     let timeout_str: string | undefined;
     let port_str: string | undefined;
@@ -282,11 +282,12 @@ export function build_editor_command(): Command {
         });
 
     // 21. install
-    cmd.command('install <project_path>')
+    cmd.command('install')
         .description('Install the editor bridge package into a Unity project')
-        .action((_project_path: string) => {
-            const resolved_path = resolve(_project_path);
-            const result = add_package(resolved_path, BRIDGE_PACKAGE_NAME, BRIDGE_PACKAGE_VERSION);
+        .option('-p, --project <path>', 'Path to Unity project (defaults to cwd)')
+        .action(function(this: Command) {
+            const { project_path } = get_common_options(this);
+            const result = add_package(project_path, BRIDGE_PACKAGE_NAME, BRIDGE_PACKAGE_VERSION);
             if ('error' in result) {
                 console.log(JSON.stringify({ success: false, error: result.error }, null, 2));
                 process.exitCode = 1;
@@ -296,11 +297,12 @@ export function build_editor_command(): Command {
         });
 
     // 22. uninstall
-    cmd.command('uninstall <project_path>')
+    cmd.command('uninstall')
         .description('Remove the editor bridge package from a Unity project')
-        .action((_project_path: string) => {
-            const resolved_path = resolve(_project_path);
-            const result = remove_package(resolved_path, BRIDGE_PACKAGE_NAME);
+        .option('-p, --project <path>', 'Path to Unity project (defaults to cwd)')
+        .action(function(this: Command) {
+            const { project_path } = get_common_options(this);
+            const result = remove_package(project_path, BRIDGE_PACKAGE_NAME);
             if ('error' in result) {
                 console.log(JSON.stringify({ success: false, error: result.error }, null, 2));
                 process.exitCode = 1;

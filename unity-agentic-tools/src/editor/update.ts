@@ -385,7 +385,7 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
     return {
       success: false,
       file_path,
-      error: `Could not resolve "${new_value}" to asset reference. Ensure GUID cache exists (run "setup <project>" first).`,
+      error: `Could not resolve "${new_value}" to asset reference. Ensure GUID cache exists (run "setup" first, or "setup -p <path>").`,
     };
   }
   if (resolved !== undefined) {
