@@ -2648,7 +2648,7 @@ describe('CLI - New Features', () => {
                 '--json'
             ], tmp);
             const json = JSON.parse(result);
-            expect(json.project_path).toContain('/unused-cwd-');
+            expect(json.project_path).toContain('unused-cwd-');
             expect(json).toHaveProperty('potentially_unused', 1);
             rmSync(tmp, { recursive: true, force: true });
         });
