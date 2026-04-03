@@ -28,6 +28,12 @@ A CLI for reading and editing Unity scenes, prefabs, and assets with minimal tok
 npm install -g unity-agentic-tools
 ```
 
+### skills
+
+```bash
+npx skills install taconotsandwich/unity-agentic-tools # See more at https://github.com/vercel-labs/skills
+```
+
 ### From Source
 
 ```bash
@@ -43,7 +49,7 @@ bun run build            # build TypeScript
 ### Read Commands
 
 ```bash
-unity-agentic-tools read scene <file>                        # GameObject hierarchy (paginated)
+unity-agentic-tools read scene <file>                         # GameObject hierarchy (paginated)
 unity-agentic-tools read gameobject <file> <id>               # Single object by name or file ID
 unity-agentic-tools read asset <file>                         # Any Unity YAML asset file (--raw to skip mesh decode)
 unity-agentic-tools read material <file>                      # Structured material properties
@@ -68,21 +74,21 @@ unity-agentic-tools read input-actions <file>                 # Input Actions fi
 ### Create Commands
 
 ```bash
-unity-agentic-tools create gameobject <file> <name>           # New GameObject
-unity-agentic-tools create scene <path>                       # New .unity file
-unity-agentic-tools create component <file> <name> <type>     # Add component
-unity-agentic-tools create component-copy <file> <src> <tgt>  # Copy component
-unity-agentic-tools create prefab-variant <source> <output>   # Prefab Variant
-unity-agentic-tools create prefab-instance <scene> <prefab>  # Instantiate prefab in scene
-unity-agentic-tools create scriptable-object <output> <script># ScriptableObject .asset
-unity-agentic-tools create meta <script_path>                 # Generate .meta file
-unity-agentic-tools create material <output>                  # New Material .mat
-unity-agentic-tools create build <project> <scene>            # Add scene to build settings
-unity-agentic-tools create package <project> <name> <version> # Add package to manifest.json
-unity-agentic-tools create input-actions <path> <name>        # Blank .inputactions file
-unity-agentic-tools create animation <path> [name]            # Blank .anim file
-unity-agentic-tools create animator <path> [name]             # Blank .controller file
-unity-agentic-tools create prefab <file> <name>               # Create prefab from GameObject
+unity-agentic-tools create gameobject <file> <name>            # New GameObject
+unity-agentic-tools create scene <path>                        # New .unity file
+unity-agentic-tools create component <file> <name> <type>      # Add component
+unity-agentic-tools create component-copy <file> <src> <tgt>   # Copy component
+unity-agentic-tools create prefab-variant <source> <output>    # Prefab Variant
+unity-agentic-tools create prefab-instance <scene> <prefab>    # Instantiate prefab in scene
+unity-agentic-tools create scriptable-object <output> <script> # ScriptableObject .asset
+unity-agentic-tools create meta <script_path>                  # Generate .meta file
+unity-agentic-tools create material <output>                   # New Material .mat
+unity-agentic-tools create build <project> <scene>             # Add scene to build settings
+unity-agentic-tools create package <project> <name> <version>  # Add package to manifest.json
+unity-agentic-tools create input-actions <path> <name>         # Blank .inputactions file
+unity-agentic-tools create animation <path> [name]             # Blank .anim file
+unity-agentic-tools create animator <path> [name]              # Blank .controller file
+unity-agentic-tools create prefab <file> <name>                # Create prefab from GameObject
 ```
 
 ### Update Commands
