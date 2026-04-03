@@ -9,10 +9,10 @@
 | `read material <file>` | Material with structured property output (`--project`, `--summary`) |
 | `read reference <file> <file_id>` | Trace fileID references (`--direction in\|out\|both`, `--depth <n>`) |
 | `read dependencies <file>` | GUIDs referenced by this file |
-| `read dependents <project> <guid>` | Files referencing a GUID (reverse lookup, `--type <type>`) |
-| `read unused <project>` | Assets with zero inbound GUID refs (`--type`, `--ignore <glob>`, `--max <n>`) |
-| `read settings <project> -s <alias>` | Project settings by alias (see commands-utilities.md) |
-| `read build <project>` | Build settings (scene list, build profiles) |
+| `read dependents <guid>` | Files referencing a GUID (reverse lookup, `--type <type>`, `--project <path>` optional; defaults to cwd) |
+| `read unused` | Assets with zero inbound GUID refs (`--type`, `--ignore <glob>`, `--max <n>`, `--project <path>` optional; defaults to cwd) |
+| `read settings -s <alias>` | Project settings by alias (see commands-utilities.md; `--project <path>` optional; defaults to cwd) |
+| `read build` | Build settings (scene list, build profiles; `--project <path>` optional; defaults to cwd) |
 | `read overrides <file> <instance>` | PrefabInstance override modifications (`--flat`) |
 | `read script <file>` | C# type declarations from .cs or .NET DLL |
 | `read scripts` | List C# types from registry |
@@ -20,7 +20,7 @@
 | `read meta <file>` | .meta importer settings (`--summary`) |
 | `read animation <file>` | AnimationClip (.anim) (`--summary`, `--paths`, `--curves`) |
 | `read animator <file>` | AnimatorController (.controller) |
-| `read manifest <project>` | Packages from manifest.json (`--search <pattern>`) |
+| `read manifest` | Packages from manifest.json (`--search <pattern>`, `--project <path>` optional; defaults to cwd) |
 | `read target <file> <name> [component_type]` | Build `--target` reference string for prefab override commands (`-p <project>`) |
 | `read input-actions <file>` | Input Actions file (`--summary`, `--maps`, `--actions`, `--bindings`) |
 
@@ -85,4 +85,3 @@ View modes for AnimatorController files:
 | `--states` | List states per layer |
 | `--transitions` | List transitions with conditions |
 | `--project <path>` | Project root for motion clip GUID resolution |
-

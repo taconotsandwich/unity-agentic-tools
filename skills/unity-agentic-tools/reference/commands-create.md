@@ -10,9 +10,9 @@
 | `create meta <script_path>` | Generate .meta file (MonoImporter) |
 | `create component <file> <name> <component>` | Add component to GameObject |
 | `create component-copy <file> <src_id> <target>` | Copy component to another object |
-| `create build <project> <scene>` | Add scene to build settings (`--index <n>`) |
+| `create build <scene>` | Add scene to build settings (`--index <n>`, `--project <path>` optional; defaults to cwd) |
 | `create material <path> --shader <guid>` | New Material (.mat) |
-| `create package <project> <name> <version>` | Add package to manifest.json |
+| `create package <name> <version>` | Add package to manifest.json (`--project <path>` optional; defaults to cwd) |
 | `create input-actions <path> <name>` | Blank .inputactions file |
 | `create animation <path> [name]` | Blank .anim file (`--sample-rate`, `--loop`) |
 | `create animator <path> [name]` | Blank .controller file (`--layer <name>`) |

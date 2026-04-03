@@ -30,6 +30,7 @@ import { UnityDocument } from './editor';
 import { update_root_order_in_block, extractGuidFromMeta } from './editor/shared';
 import { split_yaml_blocks, parse_inline_ref, find_state_by_name, find_state_machine_for_layer, generate_file_id, collect_file_ids } from './animator-utils';
 import type { AnimatorBlock } from './animator-utils';
+import { resolve_project_path } from './utils';
 
 function parseVector(str: string): { x: number; y: number; z: number } {
     const parts = str.split(',').map(Number);
@@ -203,20 +204,22 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             if (!result.success) process.exitCode = 1;
         });
 
-    cmd.command('settings <project_path>')
+    cmd.command('settings')
         .description('Edit a property in any ProjectSettings/*.asset file')
+        .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('-s, --setting <name>', 'Setting name or alias')
         .option('--property <name>', 'Property name to edit')
         .option('--value <value>', 'New value')
         .option('-j, --json', 'Output as JSON')
-        .action((project_path, options) => {
+        .action((options) => {
             if (!options.setting || !options.property || !options.value) {
                 console.log(JSON.stringify({ success: false, error: 'Required: --setting, --property, --value' }, null, 2));
                 process.exit(1);
             }
 
+            const resolvedProjectPath = resolve_project_path(options.project);
             const result = edit_settings({
-                project_path,
+                project_path: resolvedProjectPath,
                 setting: options.setting,
                 property: options.property,
                 value: options.value,
@@ -226,17 +229,19 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             if (!result.success) process.exitCode = 1;
         });
 
-    cmd.command('tag <project_path> <action> <tag>')
+    cmd.command('tag <action> <tag>')
         .description('Add or remove a tag in the TagManager')
+        .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('-j, --json', 'Output as JSON')
-        .action((project_path, action, tag, _options) => {
+        .action((action, tag, options) => {
             if (action !== 'add' && action !== 'remove') {
                 console.log(JSON.stringify({ success: false, error: 'Action must be "add" or "remove"' }, null, 2));
                 process.exit(1);
             }
 
+            const resolvedProjectPath = resolve_project_path(options.project);
             const result = edit_tag({
-                project_path,
+                project_path: resolvedProjectPath,
                 action: action as 'add' | 'remove',
                 tag,
             });
@@ -245,12 +250,14 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             if (!result.success) process.exitCode = 1;
         });
 
-    cmd.command('layer <project_path> <index> <name>')
+    cmd.command('layer <index> <name>')
         .description('Set a named layer at a specific index (3-31)')
+        .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('-j, --json', 'Output as JSON')
-        .action((project_path, index, name, _options) => {
+        .action((index, name, options) => {
+            const resolvedProjectPath = resolve_project_path(options.project);
             const result = edit_layer({
-                project_path,
+                project_path: resolvedProjectPath,
                 index: parseInt(index, 10),
                 name,
             });
@@ -259,17 +266,19 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             if (!result.success) process.exitCode = 1;
         });
 
-    cmd.command('sorting-layer <project_path> <action> <name>')
+    cmd.command('sorting-layer <action> <name>')
         .description('Add or remove a sorting layer')
+        .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('-j, --json', 'Output as JSON')
-        .action((project_path, action, name, _options) => {
+        .action((action, name, options) => {
             if (action !== 'add' && action !== 'remove') {
                 console.log(JSON.stringify({ success: false, error: 'Action must be "add" or "remove"' }, null, 2));
                 process.exit(1);
             }
 
+            const resolvedProjectPath = resolve_project_path(options.project);
             const result = edit_sorting_layer({
-                project_path,
+                project_path: resolvedProjectPath,
                 action: action as 'add' | 'remove',
                 name,
             });
@@ -403,24 +412,26 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             if (!result.success) process.exitCode = 1;
         });
 
-    cmd.command('build <project_path> <scene_path>')
+    cmd.command('build <scene_path>')
         .description('Enable, disable, or move a scene in build settings')
+        .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('--enable', 'Enable the scene')
         .option('--disable', 'Disable the scene')
         .option('--move <index>', 'Move scene to position')
         .option('-j, --json', 'Output as JSON')
-        .action((project_path, scene_path, options) => {
+        .action((scene_path, options) => {
             try {
+                const resolvedProjectPath = resolve_project_path(options.project);
                 if (options.move !== undefined) {
-                    const result = move_scene(project_path, scene_path, parseInt(options.move, 10));
+                    const result = move_scene(resolvedProjectPath, scene_path, parseInt(options.move, 10));
                     console.log(JSON.stringify(result, null, 2));
                     if (!result.success) process.exitCode = 1;
                 } else if (options.enable) {
-                    const result = enable_scene(project_path, scene_path);
+                    const result = enable_scene(resolvedProjectPath, scene_path);
                     console.log(JSON.stringify(result, null, 2));
                     if (!result.success) process.exitCode = 1;
                 } else if (options.disable) {
-                    const result = disable_scene(project_path, scene_path);
+                    const result = disable_scene(resolvedProjectPath, scene_path);
                     console.log(JSON.stringify(result, null, 2));
                     if (!result.success) process.exitCode = 1;
                 } else {

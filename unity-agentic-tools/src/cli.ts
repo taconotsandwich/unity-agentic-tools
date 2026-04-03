@@ -12,7 +12,7 @@ import { duplicateGameObject } from './editor';
 import { search_project, grep_project } from './project-search';
 import type { ProjectGrepFileType, ProjectSearchOptions, GameObjectWithComponents, Component } from './types';
 import { read_project_version } from './build-version';
-import { find_unity_project_root, glob_match } from './utils';
+import { find_unity_project_root, glob_match, resolve_project_path } from './utils';
 import { load_guid_cache } from './guid-cache';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -202,17 +202,19 @@ program.command('search <path> [pattern]')
   });
 
 // Grep command (top-level — regex search across project)
-program.command('grep <project_path> <pattern>')
+program.command('grep <pattern>')
   .description('Search for a regex pattern across project files')
+  .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
   .option('--type <type>', 'File type filter: cs, yaml, unity, prefab, asset, all', 'all')
   .option('-m, --max <n>', 'Max results (default: 100)', '100')
   .option('-C, --context <n>', 'Context lines around matches', '0')
   .option('-j, --json', 'Output as JSON')
-  .action((project_path, pattern, options) => {
+  .action((pattern, options) => {
     if (!pattern || pattern.trim() === '') {
       console.log(JSON.stringify({ success: false, error: 'Pattern must not be empty' }, null, 2));
       process.exit(1);
     }
+    let project_path = resolve_project_path(options.project);
     const abs_path = path.resolve(project_path);
     const project_root = find_unity_project_root(abs_path);
     if (project_root) {
@@ -242,11 +244,13 @@ program.command('grep <project_path> <pattern>')
   });
 
 // Version command (top-level — reads Unity project version)
-program.command('version <project_path>')
+program.command('version')
   .description('Read Unity project version')
+  .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
   .option('-j, --json', 'Output as JSON')
-  .action((project_path, _options) => {
+  .action((options) => {
     try {
+      const project_path = resolve_project_path(options.project);
       const version = read_project_version(project_path);
       console.log(JSON.stringify(version, null, 2));
     } catch (err) {

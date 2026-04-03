@@ -6,7 +6,7 @@ Multi-step checklists for common Unity tasks.
 
 1. `unity-agentic-tools setup -p <project_path>` -- creates `.unity-agentic/` with GUID cache
 2. `unity-agentic-tools status` -- verify native module loaded, cache populated
-3. `unity-agentic-tools editor install <project_path>` -- install editor bridge package
+3. `unity-agentic-tools editor install --project <project_path>` -- install editor bridge package
 4. Open project in Unity, wait for import
 5. `unity-agentic-tools editor status` -- verify bridge connection
 

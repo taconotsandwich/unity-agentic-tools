@@ -22,6 +22,13 @@ export function find_unity_project_root(startDir?: string): string | null {
 }
 
 /**
+ * Resolve an explicit project path or default to the current working directory.
+ */
+export function resolve_project_path(project_path?: string): string {
+    return resolve(project_path || process.cwd());
+}
+
+/**
  * Ensure the parent directory of a file path exists, creating it recursively if needed.
  */
 export function ensure_parent_dir(file_path: string): void {

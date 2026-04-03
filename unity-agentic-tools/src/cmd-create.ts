@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { existsSync, writeFileSync } from 'fs';
 import { basename } from 'path';
 import { randomBytes } from 'crypto';
-import { ensure_parent_dir } from './utils';
+import { ensure_parent_dir, resolve_project_path } from './utils';
 import {
     createGameObject,
     createScene,
@@ -207,21 +207,23 @@ export function build_create_command(): Command {
             if (!result.success) process.exitCode = 1;
         });
 
-    cmd.command('build <project_path> <scene_path>')
-        .description('Add a scene to build settings')
-        .option('--index <n>', 'Insert at position (0-based)')
-        .option('-j, --json', 'Output as JSON')
-        .action((project_path, scene_path, options) => {
-            try {
-                const position = options.index !== undefined ? parseInt(options.index, 10) : undefined;
-                const result = add_scene(project_path, scene_path, { position });
-                console.log(JSON.stringify(result, null, 2));
-                if (!result.success) process.exitCode = 1;
-            } catch (err) {
-                console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
-                process.exitCode = 1;
-            }
-        });
+     cmd.command('build <scene_path>')
+         .description('Add a scene to build settings')
+         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
+         .option('--index <n>', 'Insert at position (0-based)')
+         .option('-j, --json', 'Output as JSON')
+         .action((scene_path, options) => {
+             try {
+                 const resolvedProjectPath = resolve_project_path(options.project);
+                 const position = options.index !== undefined ? parseInt(options.index, 10) : undefined;
+                 const result = add_scene(resolvedProjectPath, scene_path, { position });
+                 console.log(JSON.stringify(result, null, 2));
+                 if (!result.success) process.exitCode = 1;
+             } catch (err) {
+                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+                 process.exitCode = 1;
+             }
+         });
 
     // ========== P2.3: Create Material ==========
     cmd.command('material <output_path>')
@@ -342,24 +344,26 @@ NativeFormatImporter:
             }, null, 2));
         });
 
-    // ========== Package creation ==========
-    cmd.command('package <project_path> <name> <version>')
-        .description('Add a package to Packages/manifest.json')
-        .option('-j, --json', 'Output as JSON')
-        .action((project_path, name, version, _options) => {
-            try {
-                const result = add_package(project_path, name, version);
-                if ('error' in result) {
-                    console.log(JSON.stringify({ success: false, error: result.error }, null, 2));
-                    process.exitCode = 1;
-                    return;
-                }
-                console.log(JSON.stringify(result, null, 2));
-            } catch (err: unknown) {
-                console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
-                process.exitCode = 1;
-            }
-        });
+     // ========== Package creation ==========
+     cmd.command('package <name> <version>')
+         .description('Add a package to Packages/manifest.json')
+         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
+         .option('-j, --json', 'Output as JSON')
+         .action((name, version, options) => {
+             try {
+                 const resolvedProjectPath = resolve_project_path(options.project);
+                 const result = add_package(resolvedProjectPath, name, version);
+                 if ('error' in result) {
+                     console.log(JSON.stringify({ success: false, error: result.error }, null, 2));
+                     process.exitCode = 1;
+                     return;
+                 }
+                 console.log(JSON.stringify(result, null, 2));
+             } catch (err: unknown) {
+                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+                 process.exitCode = 1;
+             }
+         });
 
     // ========== Input Actions creation ==========
     cmd.command('input-actions <output_path> <name>')
