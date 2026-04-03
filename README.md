@@ -57,7 +57,6 @@ unity-agentic-tools read component <file> <file_id>           # Single component
 unity-agentic-tools read reference <file> <file_id>           # Trace fileID references
 unity-agentic-tools read script <file>                        # C# types from .cs or DLL
 unity-agentic-tools read scripts --project <path>             # List types from type registry
-unity-agentic-tools read log                                  # Unity Editor.log (filtered)
 unity-agentic-tools read meta <file>                          # .meta importer settings
 unity-agentic-tools read animation <file>                     # AnimationClip data
 unity-agentic-tools read animator <file>                      # AnimatorController data
