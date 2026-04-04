@@ -16,7 +16,7 @@ import { find_unity_project_root, glob_match, resolve_project_path } from './uti
 import { load_guid_cache } from './guid-cache';
 import * as path from 'path';
 import * as fs from 'fs';
-const { exec } = require('child_process');
+const { spawn } = require('child_process');
 
 // Version is inlined at build time by bun's bundler (no runtime path resolution)
 const VERSION: string = (require('../package.json') as { version: string }).version;
@@ -280,17 +280,20 @@ program.command('docs <query>')
       globalArgs.push('--storage-path', storagePath);
     }
 
-    const args = [docIndexerPath, ...globalArgs, 'search', JSON.stringify(query)];
+    const args = [docIndexerPath, ...globalArgs, 'search', query];
     if (options.json) args.push('-j');
 
-    exec(`bun ${args.join(' ')}`, (error: unknown, stdout: string, stderr: string) => {
-      if (stderr) process.stderr.write(stderr);
-      if (error) {
-        console.error('Error:', (error as Error).message);
-        process.exit(1);
-      }
+    const child = spawn('bun', args, { stdio: 'inherit' });
 
-      console.log(stdout);
+    child.on('error', (error: Error) => {
+      console.error('Error:', error.message);
+      process.exit(1);
+    });
+
+    child.on('close', (code: number | null) => {
+      if (code !== 0) {
+        process.exit(code ?? 1);
+      }
     });
   });
 
