@@ -16,7 +16,7 @@ import { find_unity_project_root, glob_match, resolve_project_path } from './uti
 import { load_guid_cache } from './guid-cache';
 import * as path from 'path';
 import * as fs from 'fs';
-const { spawn } = require('child_process');
+import { spawn } from 'child_process';
 
 // Version is inlined at build time by bun's bundler (no runtime path resolution)
 const VERSION: string = (require('../package.json') as { version: string }).version;
@@ -283,6 +283,8 @@ program.command('docs <query>')
     const args = [docIndexerPath, ...globalArgs, 'search', query];
     if (options.json) args.push('-j');
 
+    // ✅ SAFE: Use spawn with an array of arguments to avoid shell command injection.
+    // Unlike exec(), spawn() does not invoke a shell, treating user input as literal text.
     const child = spawn('bun', args, { stdio: 'inherit' });
 
     child.on('error', (error: Error) => {
