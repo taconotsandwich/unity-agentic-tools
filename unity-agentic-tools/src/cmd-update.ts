@@ -42,7 +42,19 @@ function parseVector(str: string): { x: number; y: number; z: number } {
 }
 
 /** Resolve a GameObject name or numeric fileID to a Transform fileID. */
-function resolve_transform_id(scanner: UnityScanner, file: string, identifier: string): { transform_id: string } | { error: string } {
+function resolve_transform_id(
+    scanner: UnityScanner,
+    file: string,
+    identifier: string,
+    by_id: boolean = false,
+): { transform_id: string } | { error: string } {
+    if (by_id) {
+        if (!/^-?\d+$/.test(identifier)) {
+            return { error: `Invalid fileID: "${identifier}" — expected a numeric value when using --by-id` };
+        }
+        return { transform_id: identifier };
+    }
+
     // Check for duplicate names before inspect
     let resolved_id = identifier;
     if (!/^-?\d+$/.test(identifier)) {
@@ -124,10 +136,11 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         });
 
     cmd.command('transform <file> <identifier>')
-        .description('Edit Transform by GameObject name or transform fileID')
+        .description('Edit Transform by GameObject name or transform fileID. Use --by-id to force numeric fileID mode')
         .option('-p, --position <x,y,z>', 'Set local position')
         .option('-r, --rotation <x,y,z>', 'Set local rotation (Euler angles in degrees)')
         .option('-s, --scale <x,y,z>', 'Set local scale')
+        .option('--by-id', 'Treat identifier as a numeric fileID instead of name lookup')
         .option('-j, --json', 'Output as JSON')
         .action((file, identifier, options) => {
             if (!options.position && !options.rotation && !options.scale) {
@@ -140,7 +153,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 return;
             }
 
-            const resolved = resolve_transform_id(getScanner(), file, identifier);
+            const resolved = resolve_transform_id(getScanner(), file, identifier, options.byId);
 
             if ('error' in resolved) {
                 console.log(JSON.stringify({

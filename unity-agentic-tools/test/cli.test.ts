@@ -633,6 +633,36 @@ describeIfNative('CLI', () => {
                 temp_fixture.cleanup_fn();
             }
         });
+
+        it('should not write PrefabInstance IDs into m_Children for no-stripped prefab reparent', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'Track1.unity')
+            );
+
+            try {
+                const result = run_cli([
+                    'update', 'parent',
+                    temp_fixture.temp_path,
+                    '206181830',
+                    '208971438',
+                    '--by-id',
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+
+                const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+                const parentTransformBlock = content.match(/--- !u!4 &208971439[\s\S]*?(?=--- !u!|$)/);
+                expect(parentTransformBlock).not.toBeNull();
+                expect(parentTransformBlock![0]).not.toContain('- {fileID: 206181830}');
+
+                const childPiBlock = content.match(/--- !u!1001 &206181830[\s\S]*?(?=--- !u!|$)/);
+                expect(childPiBlock).not.toBeNull();
+                expect(childPiBlock![0]).toContain('m_TransformParent: {fileID: 208971439}');
+            } finally {
+                temp_fixture.cleanup_fn();
+            }
+        });
     });
 
     describe('create meta command', () => {
@@ -883,6 +913,59 @@ describeIfNative('CLI', () => {
                     const json = JSON.parse(execErr.stdout);
                     expect(json.success).toBe(false);
                     expect(json.error).toContain('Could not resolve');
+                }
+            } finally {
+                temp_fixture.cleanup_fn();
+            }
+        });
+
+        it('should support --by-id for transform updates', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+
+            try {
+                // Player Transform fileID in SampleScene fixture
+                const result = run_cli([
+                    'update', 'transform',
+                    temp_fixture.temp_path,
+                    '1847675924',
+                    '--by-id',
+                    '--position', '11,22,33',
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+
+                const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+                expect(content).toContain('m_LocalPosition: {x: 11, y: 22, z: 33}');
+            } finally {
+                temp_fixture.cleanup_fn();
+            }
+        });
+
+        it('should reject non-numeric identifier with update transform --by-id', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+
+            try {
+                try {
+                    run_cli([
+                        'update', 'transform',
+                        temp_fixture.temp_path,
+                        'Player',
+                        '--by-id',
+                        '--position', '1,2,3',
+                        '--json'
+                    ]);
+                    expect.unreachable('Should have thrown');
+                } catch (err: unknown) {
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('Invalid fileID');
                 }
             } finally {
                 temp_fixture.cleanup_fn();
