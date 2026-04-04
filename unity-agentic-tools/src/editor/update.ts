@@ -137,7 +137,7 @@ function validate_value_type(current_value: string, new_value: string): string |
  * by walking up the m_Father chain. Prevents circular parenting.
  */
 function isAncestor(doc: UnityDocument, childTransformId: string, candidateAncestorTransformId: string): boolean {
-  // Walk up from candidateAncestorTransformId's m_Father chain.
+  // Walk up from candidateAncestorTransformId's parent chain.
   // If we ever reach childTransformId, it means childTransformId is an
   // ancestor of candidateAncestorTransformId -- making the reparent circular.
 
@@ -149,12 +149,21 @@ function isAncestor(doc: UnityDocument, childTransformId: string, candidateAnces
     if (visited.has(currentId)) return false; // already a cycle, bail
     visited.add(currentId);
 
-    // Find this Transform block and read its m_Father
+    // Find this block and read its parent
     const block = doc.find_by_file_id(currentId);
-    if (!block || block.class_id !== 4) break;
+    if (!block) break;
 
-    const fatherMatch = block.raw.match(/m_Father:\s*\{fileID:\s*(-?\d+)\}/);
-    currentId = fatherMatch ? fatherMatch[1] : '0';
+    if (block.class_id === 1001 || block.class_id === 310) {
+      // PrefabInstance parent is m_TransformParent
+      const parentMatch = block.raw.match(/m_TransformParent:\s*\{fileID:\s*(-?\d+)\}/);
+      currentId = parentMatch ? parentMatch[1] : '0';
+    } else if (block.class_id === 4 || block.class_id === 224) {
+      // Transform parent is m_Father
+      const fatherMatch = block.raw.match(/m_Father:\s*\{fileID:\s*(-?\d+)\}/);
+      currentId = fatherMatch ? fatherMatch[1] : '0';
+    } else {
+      break;
+    }
   }
 
   return false;
@@ -163,11 +172,20 @@ function isAncestor(doc: UnityDocument, childTransformId: string, candidateAnces
 /**
  * Resolve a GameObject fileID to its Transform fileID.
  * Finds the GameObject block (!u!1), extracts the first component reference (the Transform).
+ * If the input ID is already a Transform (4/224) or PrefabInstance (1001), returns it as-is.
  */
 function resolveTransformByGameObjectId(doc: UnityDocument, gameObjectFileId: string): { id: string } | { error: string } {
   const found = doc.find_by_file_id(gameObjectFileId);
-  if (!found || found.class_id !== 1) {
-    return { error: `GameObject with fileID ${gameObjectFileId} not found` };
+  if (!found) {
+    return { error: `Block with fileID ${gameObjectFileId} not found` };
+  }
+
+  if (found.class_id === 4 || found.class_id === 224 || found.class_id === 1001) {
+    return { id: gameObjectFileId };
+  }
+
+  if (found.class_id !== 1) {
+    return { error: `fileID ${gameObjectFileId} is not a GameObject, Transform, or PrefabInstance (class ${found.class_id})` };
   }
 
   // Extract first component ref from m_Component -- in Unity, the Transform is always first
@@ -1145,11 +1163,17 @@ export function reparentGameObject(options: ReparentGameObjectOptions): Reparent
   // Read the child's current m_Father
   const childBlock = doc.find_by_file_id(childTransformId);
   if (!childBlock) {
-    return { success: false, file_path, error: `Transform ${childTransformId} not found` };
+    return { success: false, file_path, error: `Transform or PrefabInstance ${childTransformId} not found` };
   }
 
-  const fatherMatch = childBlock.raw.match(/m_Father:\s*\{fileID:\s*(-?\d+)\}/);
-  const oldParentTransformId = fatherMatch ? fatherMatch[1] : '0';
+  let oldParentTransformId = '0';
+  if (childBlock.class_id === 1001 || childBlock.class_id === 310) {
+    const parentMatch = childBlock.raw.match(/m_TransformParent:\s*\{fileID:\s*(-?\d+)\}/);
+    oldParentTransformId = parentMatch ? parentMatch[1] : '0';
+  } else {
+    const fatherMatch = childBlock.raw.match(/m_Father:\s*\{fileID:\s*(-?\d+)\}/);
+    oldParentTransformId = fatherMatch ? fatherMatch[1] : '0';
+  }
 
   // Resolve new parent
   // Auto-detect numeric strings as fileIDs (consistent with update gameobject behavior)
@@ -1186,31 +1210,99 @@ export function reparentGameObject(options: ReparentGameObjectOptions): Reparent
   // Remove from old parent's m_Children (if it had a parent)
   if (oldParentTransformId !== '0') {
     doc.remove_child_from_parent(oldParentTransformId, childTransformId);
+  } else {
+    // If it was at root, remove it from SceneRoots
+    doc.remove_root_from_scene_roots(childTransformId);
   }
 
-  // Update child's m_Father to new parent
-  const fatherPattern = new RegExp(
-    `(m_Father:\\s*)\\{fileID:\\s*\\d+\\}`
-  );
-  let updatedChildRaw = childBlock.raw.replace(fatherPattern, `$1{fileID: ${newParentTransformId}}`);
-  childBlock.replace_raw(updatedChildRaw);
+  // Update child's parent reference to new parent
+  if (childBlock.class_id === 1001 || childBlock.class_id === 310) {
+    // PrefabInstance: update m_TransformParent
+    const tpPattern = new RegExp(`(m_TransformParent:\\s*)\\{fileID:\\s*(-?\\d+)\\}`);
+    if (tpPattern.test(childBlock.raw)) {
+      let updatedChildRaw = childBlock.raw.replace(tpPattern, `$1{fileID: ${newParentTransformId}}`);
+      childBlock.replace_raw(updatedChildRaw);
+    } else {
+      // m_TransformParent might be missing if it's default 0, but reparenting to non-zero
+      // needs it to be added.
+      const modPattern = /(m_Modification:\s*\n)/;
+      const modIndentMatch = childBlock.raw.match(/^([ \t]*)m_Modification:/m);
+      const indent = modIndentMatch ? modIndentMatch[1] : '';
+      let updatedChildRaw = childBlock.raw.replace(modPattern, `$1${indent}  m_TransformParent: {fileID: ${newParentTransformId}}\n`);
+      childBlock.replace_raw(updatedChildRaw);
+    }
+  } else {
+    // Transform: update m_Father
+    const fatherPattern = new RegExp(`(m_Father:\\s*)\\{fileID:\\s*\\d+\\}`);
+    if (fatherPattern.test(childBlock.raw)) {
+      let updatedChildRaw = childBlock.raw.replace(fatherPattern, `$1{fileID: ${newParentTransformId}}`);
+      childBlock.replace_raw(updatedChildRaw);
+    } else {
+      // Transform doesn't have m_Father? Add it after header or m_GameObject or m_CorrespondingSourceObject
+      const anchorPattern = /^([ \t]*(?:m_GameObject|m_CorrespondingSourceObject|m_PrefabInstance):[ \t]*\{fileID:[ \t]*(-?\d+)[^}]*\}.*)/m;
+      const headerPattern = /(^--- !u!(?:4|224) &-?\d+ stripped\n(?:Rect)?Transform:)/m;
+      if (anchorPattern.test(childBlock.raw)) {
+        let updatedChildRaw = childBlock.raw.replace(anchorPattern, `$1\n  m_Father: {fileID: ${newParentTransformId}}`);
+        childBlock.replace_raw(updatedChildRaw);
+      } else if (headerPattern.test(childBlock.raw)) {
+        let updatedChildRaw = childBlock.raw.replace(headerPattern, `$1\n  m_Father: {fileID: ${newParentTransformId}}`);
+        childBlock.replace_raw(updatedChildRaw);
+      } else {
+        // Fallback: append to the end of the block
+        let updatedChildRaw = childBlock.raw.trimEnd() + `\n  m_Father: {fileID: ${newParentTransformId}}\n`;
+        childBlock.replace_raw(updatedChildRaw);
+      }
+    }
+  }
 
   // Calculate and update m_RootOrder for the reparented Transform
   {
     let newRootOrder: number;
     if (newParentTransformId === '0') {
-      // Moving to root: count root transforms, subtract 1 because our m_Father is already set to 0
+      // Moving to root: count root transforms, subtract 1 because our parent reference is already updated
       newRootOrder = doc.calculate_root_order('0') - 1;
     } else {
       // Moving under a parent: count existing children (before we add ourselves)
       newRootOrder = doc.calculate_root_order(newParentTransformId);
     }
-    childBlock.set_property('m_RootOrder', String(newRootOrder));
+
+    if (childBlock.class_id === 1001 || childBlock.class_id === 310) {
+      // PrefabInstance: update m_RootOrder in modifications
+      // We look for a stripped transform to apply the override to
+      const stripped = doc.blocks.find(b =>
+        (b.class_id === 4 || b.class_id === 224) &&
+        b.is_stripped &&
+        new RegExp(`m_PrefabInstance:[ \\t]*\\{fileID:[ \\t]*${childTransformId}\\}`).test(b.raw)
+      );
+
+      if (stripped) {
+        stripped.set_property('m_RootOrder', String(newRootOrder));
+      } else {
+        // No stripped transform, add a modification entry to the PI directly
+        // (Avoiding editPrefabOverride to prevent redundant I/O and overwrite bugs)
+        const rootOrderOverride = `    - target: {fileID: 400000}\n      propertyPath: m_RootOrder\n      value: ${newRootOrder}\n      objectReference: {fileID: 0}`;
+        const removedPattern = /(\n\s*m_RemovedComponents:)/m;
+        if (removedPattern.test(childBlock.raw)) {
+          childBlock.replace_raw(childBlock.raw.replace(removedPattern, `\n${rootOrderOverride}$1`));
+        } else {
+          // Fallback: insert before final field if modifications exist
+          const modsPattern = /(m_Modifications:\s*\n)/;
+          if (modsPattern.test(childBlock.raw)) {
+             childBlock.replace_raw(childBlock.raw.replace(modsPattern, `$1${rootOrderOverride}\n`));
+          }
+        }
+      }
+    } else {
+      childBlock.set_property('m_RootOrder', String(newRootOrder));
+    }
   }
 
   // Add to new parent's m_Children (if not reparenting to root)
   if (newParentTransformId !== '0') {
     doc.add_child_to_parent(newParentTransformId, childTransformId);
+  } else {
+    // Adding to root: add to SceneRoots
+    doc.add_root_to_scene_roots(childTransformId);
   }
 
   if (!doc.validate()) {

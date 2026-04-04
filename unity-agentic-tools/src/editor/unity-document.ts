@@ -152,6 +152,7 @@ export class UnityDocument {
     /**
      * Find Transform fileIDs for GameObjects with a given name.
      * Returns the fileID of the first component (the Transform) for each matching GO.
+     * Also matches PrefabInstances (1001) with m_Name overrides.
      */
     find_transforms_by_name(name: string): string[] {
         const game_objects = this.find_game_objects_by_name(name);
@@ -168,7 +169,30 @@ export class UnityDocument {
             }
         }
 
-        return transform_ids;
+        // Search PrefabInstances for m_Name overrides
+        const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const name_pattern = new RegExp(`propertyPath: m_Name\\s*\\n\\s*value:\\s*${escaped}\\s*$`, 'm');
+        for (const block of this._blocks) {
+            if ((block.class_id === 1001 || block.class_id === 310) && name_pattern.test(block.raw)) {
+                // If there's a stripped transform for this PI, use it instead!
+                const pi_id = block.file_id;
+                const pi_ref_pattern = new RegExp(`m_PrefabInstance:[ \\t]*\\{fileID:[ \\t]*${pi_id}\\}`);
+                const stripped_transform = this._blocks.find(b =>
+                    (b.class_id === 4 || b.class_id === 224) &&
+                    b.is_stripped &&
+                    pi_ref_pattern.test(b.raw)
+                );
+
+                if (stripped_transform) {
+                    transform_ids.push(stripped_transform.file_id);
+                } else {
+                    transform_ids.push(pi_id);
+                }
+            }
+        }
+
+        // Deduplicate
+        return Array.from(new Set(transform_ids));
     }
 
     // ─── Validation Helpers ────────────────────────────────────────────
@@ -204,18 +228,16 @@ export class UnityDocument {
     /**
      * Require a unique Transform match by GameObject name or fileID.
      * Returns the Transform block (not the GO).
+     * Also supports PrefabInstance (1001) blocks.
      */
     require_unique_transform(name_or_id: string): UnityBlock | { error: string } {
         if (/^-?\d+$/.test(name_or_id)) {
-            // Could be a Transform fileID directly or a GO fileID
+            // Could be a Transform fileID directly, a GO fileID, or a PrefabInstance fileID
             const block = this.find_by_file_id(name_or_id);
             if (!block) {
                 return { error: `Block with fileID ${name_or_id} not found` };
             }
-            if (block.class_id === 4) {
-                return block;
-            }
-            if (block.class_id === 224) {
+            if (block.class_id === 4 || block.class_id === 224 || block.class_id === 1001) {
                 return block;
             }
             if (block.class_id === 1) {
@@ -229,16 +251,42 @@ export class UnityDocument {
                 }
                 return { error: `Transform for GameObject fileID ${name_or_id} not found` };
             }
-            return { error: `fileID ${name_or_id} is not a GameObject or Transform (class ${block.class_id})` };
+            return { error: `fileID ${name_or_id} is not a GameObject, Transform, or PrefabInstance (class ${block.class_id})` };
         }
 
         const transform_ids = this.find_transforms_by_name(name_or_id);
         if (transform_ids.length === 0) {
-            return { error: `GameObject "${name_or_id}" not found` };
+            return { error: `Object "${name_or_id}" not found` };
         }
         if (transform_ids.length > 1) {
-            const go_ids = this.find_game_objects_by_name(name_or_id).map(b => b.file_id).join(', ');
-            return { error: `Multiple GameObjects named "${name_or_id}" found (fileIDs: ${go_ids}). Use numeric fileID to specify which one.` };
+            const entity_ids: string[] = [];
+            for (const tid of transform_ids) {
+                const block = this.find_by_file_id(tid);
+                if (block) {
+                    if (block.class_id === 4 || block.class_id === 224) {
+                        const go_match = block.raw.match(/m_GameObject:\s*\{fileID:\s*(-?\d+)\}/);
+                        if (go_match) {
+                            entity_ids.push(go_match[1]);
+                        } else {
+                            entity_ids.push(tid);
+                        }
+                    } else if (block.class_id === 1001 || block.class_id === 310) {
+                        entity_ids.push(tid);
+                    } else if (block.is_stripped) {
+                        // For stripped transforms, find the PI
+                        const pi_match = block.raw.match(/m_PrefabInstance:\s*\{fileID:\s*(-?\d+)\}/);
+                        if (pi_match) {
+                            entity_ids.push(pi_match[1]);
+                        } else {
+                            entity_ids.push(tid);
+                        }
+                    } else {
+                        entity_ids.push(tid);
+                    }
+                }
+            }
+            const ids_str = Array.from(new Set(entity_ids)).join(', ');
+            return { error: `Multiple GameObjects/PrefabInstances named "${name_or_id}" found (fileIDs: ${ids_str}). Use numeric fileID to specify which one.` };
         }
         const transform = this.find_by_file_id(transform_ids[0]);
         if (!transform) {
@@ -487,7 +535,7 @@ export class UnityDocument {
      */
     add_child_to_parent(parent_id: string, child_id: string): boolean {
         const parent = this.find_by_file_id(parent_id);
-        if (!parent || parent.class_id !== 4) return false;
+        if (!parent || (parent.class_id !== 4 && parent.class_id !== 224)) return false;
 
         let raw = parent.raw;
 
@@ -533,7 +581,7 @@ export class UnityDocument {
      */
     remove_child_from_parent(parent_id: string, child_id: string): boolean {
         const parent = this.find_by_file_id(parent_id);
-        if (!parent || parent.class_id !== 4) return false;
+        if (!parent || (parent.class_id !== 4 && parent.class_id !== 224)) return false;
 
         let raw = parent.raw;
 
@@ -565,7 +613,52 @@ export class UnityDocument {
 
     private _collect_hierarchy_recursive(transform_id: string, result: Set<string>): void {
         const transform = this.find_by_file_id(transform_id);
-        if (!transform || transform.class_id !== 4) return;
+        if (!transform) return;
+
+        if (transform.class_id === 1001 || transform.class_id === 310) {
+            // PrefabInstance: collect its stripped blocks and added objects
+            const pi_id = transform.file_id;
+            const pi_ref_pattern = new RegExp(`m_PrefabInstance:[ \\t]*\\{fileID:[ \\t]*${pi_id}\\}`);
+            for (const block of this._blocks) {
+                if (block.is_stripped && pi_ref_pattern.test(block.raw)) {
+                    result.add(block.file_id);
+                    if (block.class_id === 4 || block.class_id === 224) {
+                        this._collect_hierarchy_recursive(block.file_id, result);
+                    }
+                }
+            }
+            // Also collect added objects from m_AddedGameObjects / m_AddedComponents
+            const added_go_matches = transform.raw.matchAll(/addedObject:[ \t]*\{[^}]*fileID:[ \t]*(-?\d+)\}/g);
+            for (const match of added_go_matches) {
+                const added_id = match[1];
+                if (added_id !== '0' && !result.has(added_id)) {
+                    result.add(added_id);
+                    const added_block = this.find_by_file_id(added_id);
+                    if (added_block && added_block.class_id === 1) {
+                        // Find transform for added GO
+                        const comp_matches = added_block.raw.matchAll(/component:[ \t]*\{fileID:[ \t]*(-?\d+)\}/g);
+                        for (const cm of comp_matches) {
+                            const comp_block = this.find_by_file_id(cm[1]);
+                            if (comp_block && (comp_block.class_id === 4 || comp_block.class_id === 224)) {
+                                if (!result.has(cm[1])) {
+                                    result.add(cm[1]);
+                                    this._collect_hierarchy_recursive(cm[1], result);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            const added_comp_matches = transform.raw.matchAll(/addedObject:[ \t]*\{[^}]*fileID:[ \t]*(-?\d+)\}/g);
+            for (const match of added_comp_matches) {
+                const added_id = match[1];
+                if (added_id !== '0') result.add(added_id);
+            }
+            return;
+        }
+
+        if (transform.class_id !== 4 && transform.class_id !== 224) return;
 
         // Extract child transform IDs from m_Children
         const children_section = transform.raw.match(/m_Children:[\s\S]*?(?=\s*m_Father:)/);
@@ -606,22 +699,35 @@ export class UnityDocument {
 
     /**
      * Calculate the next m_RootOrder for a new child under a given parent.
-     * For root-level (parent_id === "0"): count transforms with m_Father: {fileID: 0}.
+     * For root-level (parent_id === "0"): count transforms with m_Father: {fileID: 0}
+     * or PrefabInstances with m_TransformParent: {fileID: 0}.
      * For children: count entries in the parent's m_Children array.
      */
     calculate_root_order(parent_id: string): number {
         if (parent_id === '0') {
             let count = 0;
             for (const block of this._blocks) {
-                if (block.class_id === 4 && /m_Father:\s*\{fileID:\s*0\}/.test(block.raw)) {
+                if ((block.class_id === 4 || block.class_id === 224) && /m_Father:\s*\{fileID:\s*0\}/.test(block.raw)) {
                     count++;
+                } else if ((block.class_id === 1001 || block.class_id === 310) && /m_TransformParent:\s*\{fileID:\s*0\}/.test(block.raw)) {
+                    // Only count PI if it doesn't have a stripped transform (which would be counted above)
+                    const pi_id = block.file_id;
+                    const pi_ref_pattern = new RegExp(`m_PrefabInstance:[ \\t]*\\{fileID:[ \\t]*${pi_id}\\}`);
+                    const has_stripped = this._blocks.some(b =>
+                        (b.class_id === 4 || b.class_id === 224) &&
+                        b.is_stripped &&
+                        pi_ref_pattern.test(b.raw)
+                    );
+                    if (!has_stripped) {
+                        count++;
+                    }
                 }
             }
             return count;
         }
 
         const parent = this.find_by_file_id(parent_id);
-        if (!parent || parent.class_id !== 4) return 0;
+        if (!parent || (parent.class_id !== 4 && parent.class_id !== 224)) return 0;
 
         const children_match = parent.raw.match(/m_Children:[\s\S]*?(?=\s*m_Father:)/);
         if (children_match) {
@@ -662,6 +768,88 @@ export class UnityDocument {
     }
 
     /**
+     * Add a root fileID to the SceneRoots block.
+     * Supports both legacy Type 166 and modern Type 1660057539.
+     */
+    add_root_to_scene_roots(root_id: string): boolean {
+        // If root_id is a PI, check if it has a stripped transform that is already a root
+        const pi_block = this.find_by_file_id(root_id);
+        if (pi_block && (pi_block.class_id === 1001 || pi_block.class_id === 310)) {
+            const pi_ref_pattern = new RegExp(`m_PrefabInstance:[ \\t]*\\{fileID:[ \\t]*${root_id}\\}`);
+            const stripped_root = this._blocks.find(b =>
+                (b.class_id === 4 || b.class_id === 224) &&
+                b.is_stripped &&
+                pi_ref_pattern.test(b.raw) &&
+                /m_Father:\s*\{fileID:\s*0\}/.test(b.raw)
+            );
+            if (stripped_root) {
+                // The stripped transform is the actual root entry
+                root_id = stripped_root.file_id;
+            }
+        }
+
+        const sr_blocks = [...this.find_by_class_id(166), ...this.find_by_class_id(1660057539)];
+        if (sr_blocks.length === 0) return false;
+
+        const sr_block = sr_blocks[0];
+        let raw = sr_block.raw;
+
+        const roots_pattern = /(m_Roots:\s*\n(?:\s*-\s*\{fileID:\s*-?\d+\}\s*\n)*)/;
+        if (roots_pattern.test(raw)) {
+            raw = raw.replace(roots_pattern, `$1  - {fileID: ${root_id}}\n`);
+            sr_block.replace_raw(raw);
+            return true;
+        }
+
+        const empty_roots = /m_Roots:\s*\[\]/;
+        if (empty_roots.test(raw)) {
+            raw = raw.replace(empty_roots, `m_Roots:\n  - {fileID: ${root_id}}`);
+            sr_block.replace_raw(raw);
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Remove a root fileID from the SceneRoots block.
+     * Supports both legacy Type 166 and modern Type 1660057539.
+     */
+    remove_root_from_scene_roots(root_id: string): boolean {
+        // Find if this PI has a stripped transform in SceneRoots instead
+        const pi_block = this.find_by_file_id(root_id);
+        if (pi_block && (pi_block.class_id === 1001 || pi_block.class_id === 310)) {
+            const pi_ref_pattern = new RegExp(`m_PrefabInstance:[ \\t]*\\{fileID:[ \\t]*${root_id}\\}`);
+            const stripped_root = this._blocks.find(b =>
+                (b.class_id === 4 || b.class_id === 224) &&
+                b.is_stripped &&
+                pi_ref_pattern.test(b.raw)
+            );
+            if (stripped_root) {
+                // Try removing both PI and stripped Transform just in case
+                this._remove_id_from_scene_roots(stripped_root.file_id);
+            }
+        }
+
+        return this._remove_id_from_scene_roots(root_id);
+    }
+
+    private _remove_id_from_scene_roots(id: string): boolean {
+        const sr_blocks = [...this.find_by_class_id(166), ...this.find_by_class_id(1660057539)];
+        if (sr_blocks.length === 0) return false;
+
+        const sr_block = sr_blocks[0];
+        let raw = sr_block.raw;
+
+        const root_line = new RegExp(`\\n[ \\t]*- \\{fileID: ${id}\\}`);
+        if (!root_line.test(raw)) return false;
+
+        raw = raw.replace(root_line, '');
+        sr_block.replace_raw(raw);
+        return true;
+    }
+
+    /**
      * Physically reorder entity block groups in the document.
      * Each transform maps to an entity (GameObject + its components).
      * Blocks for each entity are moved to appear in the given order,
@@ -671,14 +859,44 @@ export class UnityDocument {
         // Collect entity block IDs for each transform
         const entity_groups: string[][] = [];
         for (const transform_id of ordered_transform_ids) {
-            const transform = this.find_by_file_id(transform_id);
-            if (!transform) continue;
+            const block = this.find_by_file_id(transform_id);
+            if (!block) continue;
 
-            const go_match = transform.raw.match(/m_GameObject:\s*\{fileID:\s*(-?\d+)\}/);
-            if (!go_match) continue;
+            // If it's a PrefabInstance or a stripped transform belonging to one
+            let pi_block: UnityBlock | null = null;
+            if (block.class_id === 1001 || block.class_id === 310) {
+                pi_block = block;
+            } else if (block.is_stripped) {
+                const pi_match = block.raw.match(/m_PrefabInstance:\s*\{fileID:\s*(-?\d+)\}/);
+                if (pi_match) {
+                    const found = this.find_by_file_id(pi_match[1]);
+                    if (found && (found.class_id === 1001 || found.class_id === 310)) {
+                        pi_block = found;
+                    }
+                }
+            }
+
+            if (pi_block) {
+                // PrefabInstance entity group: PI block + all stripped blocks + added objects
+                const group = [pi_block.file_id];
+                const hierarchy = this.collect_hierarchy(pi_block.file_id);
+                for (const id of hierarchy) group.push(id);
+                entity_groups.push(group);
+                continue;
+            }
+
+            const go_match = block.raw.match(/m_GameObject:\s*\{fileID:\s*(-?\d+)\}/);
+            if (!go_match) {
+                // Not a GameObject-linked transform, just move the block itself
+                entity_groups.push([transform_id]);
+                continue;
+            }
             const go_id = go_match[1];
             const go = this.find_by_file_id(go_id);
-            if (!go) continue;
+            if (!go) {
+                entity_groups.push([transform_id]);
+                continue;
+            }
 
             // Collect all component IDs from the GO
             const comp_ids: string[] = [];
