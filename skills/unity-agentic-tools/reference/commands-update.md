@@ -12,12 +12,12 @@
 | `update component <file> <file_id> <prop> <value>` | Edit component by fileID |
 | `update transform <file> <identifier> -p x,y,z -r x,y,z -s x,y,z` | Position/rotation/scale |
 | `update scriptable-object <file> <prop> <value>` | Edit first MonoBehaviour in .asset (`--file-id <id>`) |
-| `update settings <project> -s <alias> --property <p> --value <v>` | Edit setting |
-| `update tag <project> add\|remove <tag>` | Add/remove tag |
-| `update layer <project> <index> <name>` | Set named layer (3-31) |
-| `update sorting-layer <project> add\|remove <name>` | Add/remove sorting layer |
+| `update settings -s <alias> --property <p> --value <v>` | Edit setting (`--project <path>` optional; defaults to cwd) |
+| `update tag add\|remove <tag>` | Add/remove tag (`--project <path>` optional; defaults to cwd) |
+| `update layer <index> <name>` | Set named layer (3-31; `--project <path>` optional; defaults to cwd) |
+| `update sorting-layer add\|remove <name>` | Add/remove sorting layer (`--project <path>` optional; defaults to cwd) |
 | `update parent <file> <name> <new_parent>` | Reparent ("root" for scene root, `--by-id`) |
-| `update build <project> <scene>` | Enable/disable/move scene (`--enable`, `--disable`, `--move <idx>`) |
+| `update build <scene>` | Enable/disable/move scene (`--enable`, `--disable`, `--move <idx>`, `--project <path>` optional; defaults to cwd) |
 | `update array <file> <file_id> <array_prop> <action> [args]` | Array element operations |
 | `update batch <file> <json>` | Batch edit GameObject properties |
 | `update batch-components <file> <json>` | Batch edit components by fileID |

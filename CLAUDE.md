@@ -118,7 +118,7 @@ unity-package/      Unity Editor bridge (C# UPM package)
 - **Main thread dispatch**: `RunOnMainThread<T>()` queues actions via `ConcurrentQueue`, pumped by `EditorApplication.update`
 - **Handler routing**: `IRequestHandler` interface with `MethodPrefix` property; `MessageDispatcher` does reflection-based discovery
 - **Event streaming**: `EventBroadcaster` + `UnityEventBridge` broadcast play mode changes and log messages to all connected clients
-- **Install**: `editor install <project>` adds git URL to manifest.json; for dev, copy `unity-package/` into project's `Packages/`
+- **Install**: `editor install` adds git URL to manifest.json (defaults project to cwd; use `--project <path>` when needed); for dev, copy `unity-package/` into project's `Packages/`
 - **Transport**: `editor-client.ts` exports `call_editor()` (single request/response) and `stream_editor()` (persistent connection for events)
 - **Ref system**: `RefManager.cs` maintains `@hN` (hierarchy) and `@uN` (UI) ref registries. Refs created by `hierarchy-snapshot`/`ui-snapshot`, cleared on scene change, play mode transition, or domain reload
 - **UI walking**: `UIWalker.cs` walks both uGUI (Canvas/Selectable) and UI Toolkit (UIDocument/VisualElement) trees. TMP variants accessed via reflection to avoid hard dependency

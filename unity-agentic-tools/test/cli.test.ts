@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import { execFileSync } from 'child_process';
 import { resolve, join } from 'path';
-import { mkdtempSync, writeFileSync, existsSync, rmSync, cpSync, readFileSync } from 'fs';
+import { mkdtempSync, writeFileSync, existsSync, rmSync, cpSync, readFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { create_temp_fixture } from './test-utils';
 import { isNativeModuleAvailable } from '../src/scanner';
@@ -24,9 +24,9 @@ interface ComponentEntry {
     properties?: Record<string, unknown>;
 }
 
-function run_cli(args: string[]): string {
-    return execFileSync('bun', ['dist/cli.js', ...args], {
-        cwd: repo_root,
+function run_cli(args: string[], cwd: string = repo_root): string {
+    return execFileSync('bun', [resolve(repo_root, 'dist/cli.js'), ...args], {
+        cwd,
         encoding: 'utf-8'
     });
 }
@@ -398,6 +398,52 @@ describeIfNative('CLI', () => {
                 temp_fixture.cleanup_fn();
             }
         });
+
+        it('should add variant component and expose structured added_components in read overrides', () => {
+            const fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SamplePrefabVariant.prefab')
+            );
+
+            try {
+                const create_result = run_cli([
+                    'create', 'component',
+                    fixture.temp_path,
+                    'EnemyVariant',
+                    'AudioSource',
+                    '--json'
+                ]);
+                const create_json = JSON.parse(create_result);
+                expect(create_json).toHaveProperty('success', true);
+                expect(create_json).toHaveProperty('component_id');
+
+                const overrides_result = run_cli([
+                    'read', 'overrides',
+                    fixture.temp_path,
+                    '5765656985498706500',
+                    '--json'
+                ]);
+                const overrides_json = JSON.parse(overrides_result);
+
+                expect(Array.isArray(overrides_json.added_components)).toBe(true);
+                expect(overrides_json.added_components.length).toBe(1);
+                expect(overrides_json.added_components[0]).toMatchObject({
+                    target_corresponding_source_object: {
+                        file_id: '100000',
+                        guid: 'a1b2c3d4e5f6789012345678abcdef12',
+                        type: 3,
+                    },
+                    insert_index: -1,
+                    added_object: {
+                        file_id: create_json.component_id,
+                    },
+                });
+
+                const content = readFileSync(fixture.temp_path, 'utf-8');
+                expect(content).toContain('m_AddedComponents:\n    - targetCorrespondingSourceObject: {fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}\n      insertIndex: -1');
+            } finally {
+                fixture.cleanup_fn();
+            }
+        });
     });
 
     describe('update component command', () => {
@@ -659,7 +705,7 @@ describeIfNative('CLI', () => {
         it('should read settings from a project', () => {
             const result = run_cli([
                 'read', 'settings',
-                external_fixtures,
+                '--project', external_fixtures,
                 '--setting', 'tags',
                 '--json'
             ]);
@@ -677,7 +723,7 @@ describeIfNative('CLI', () => {
             try {
                 const result = run_cli([
                     'update', 'tag',
-                    temp_dir,
+                    '--project', temp_dir,
                     'add',
                     'CLITestTag',
                     '--json'
@@ -687,7 +733,7 @@ describeIfNative('CLI', () => {
 
                 // Verify the tag was added
                 const readResult = JSON.parse(run_cli([
-                    'read', 'settings', temp_dir, '--setting', 'tags', '--json'
+                    'read', 'settings', '--project', temp_dir, '--setting', 'tags', '--json'
                 ]));
                 expect(readResult.data.tags).toContain('CLITestTag');
             } finally {
@@ -703,7 +749,7 @@ describeIfNative('CLI', () => {
             try {
                 const result = run_cli([
                     'update', 'layer',
-                    temp_dir,
+                    '--project', temp_dir,
                     '8',
                     'CLITestLayer',
                     '--json'
@@ -713,6 +759,80 @@ describeIfNative('CLI', () => {
             } finally {
                 rmSync(temp_dir, { recursive: true, force: true });
             }
+        });
+
+        it('should default read settings to cwd project', () => {
+            const result = run_cli([
+                'read', 'settings',
+                '--setting', 'tags',
+                '--json'
+            ], external_fixtures);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('success', true);
+            expect(json).toHaveProperty('project_path', external_fixtures);
+        });
+
+        it('should default update tag to cwd project', () => {
+            const temp_dir = mkdtempSync(join(tmpdir(), 'cli-settings-cwd-'));
+            const settingsDir = join(temp_dir, 'ProjectSettings');
+            cpSync(join(external_fixtures, 'ProjectSettings'), settingsDir, { recursive: true });
+
+            try {
+                const result = run_cli([
+                    'update', 'tag',
+                    'add',
+                    'CLITestTagCwd',
+                    '--json'
+                ], temp_dir);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+
+                const readResult = JSON.parse(run_cli([
+                    'read', 'settings', '--setting', 'tags', '--json'
+                ], temp_dir));
+                expect(readResult.data.tags).toContain('CLITestTagCwd');
+            } finally {
+                rmSync(temp_dir, { recursive: true, force: true });
+            }
+        });
+
+        it('should default update layer to cwd project', () => {
+            const temp_dir = mkdtempSync(join(tmpdir(), 'cli-layer-cwd-'));
+            const settingsDir = join(temp_dir, 'ProjectSettings');
+            cpSync(join(external_fixtures, 'ProjectSettings'), settingsDir, { recursive: true });
+
+            try {
+                const result = run_cli([
+                    'update', 'layer',
+                    '8',
+                    'CLITestLayerCwd',
+                    '--json'
+                ], temp_dir);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+            } finally {
+                rmSync(temp_dir, { recursive: true, force: true });
+            }
+        });
+
+        it('should default read build to cwd project', () => {
+            const result = run_cli([
+                'read', 'build',
+                '--json'
+            ], external_fixtures);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('projectInfo');
+            expect(json.projectInfo).toHaveProperty('projectPath', external_fixtures);
+        });
+
+        it('should default read scenes alias to cwd project', () => {
+            const result = run_cli([
+                'read', 'scenes',
+                '--json'
+            ], external_fixtures);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('projectInfo');
+            expect(json.projectInfo).toHaveProperty('projectPath', external_fixtures);
         });
     });
 
@@ -807,8 +927,8 @@ describeIfNative('CLI', () => {
             try {
                 run_cli([
                     'grep',
-                    external_fixtures,
                     '',
+                    '--project', external_fixtures,
                     '--json'
                 ]);
                 expect.unreachable('Should have exited with error');
@@ -835,13 +955,24 @@ describeIfNative('CLI', () => {
         it('should grep for a pattern in project files', () => {
             const result = run_cli([
                 'grep',
-                external_fixtures,
                 'm_Name',
+                '--project', external_fixtures,
                 '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('success', true);
             expect(json.total_matches).toBeGreaterThan(0);
+        });
+
+        it('should default grep to cwd project', () => {
+            const result = run_cli([
+                'grep',
+                'm_Name',
+                '--json'
+            ], external_fixtures);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('success', true);
+            expect(json).toHaveProperty('project_path', external_fixtures);
         });
     });
 
@@ -857,14 +988,19 @@ describeIfNative('CLI', () => {
                 '--json'
             ]);
             const json = JSON.parse(result);
-            expect(Array.isArray(json)).toBe(true);
-            expect(json.length).toBe(4);
-            const paths = json.map((m: Record<string, string>) => m.property_path);
+            expect(json).toHaveProperty('prefab_instance_id', '700000');
+            expect(Array.isArray(json.modifications)).toBe(true);
+            expect(json.modifications.length).toBe(4);
+            expect(Array.isArray(json.removed_components)).toBe(true);
+            expect(Array.isArray(json.removed_gameobjects)).toBe(true);
+            expect(Array.isArray(json.added_gameobjects)).toBe(true);
+            expect(Array.isArray(json.added_components)).toBe(true);
+            const paths = json.modifications.map((m: Record<string, string>) => m.property_path);
             expect(paths).toContain('m_Name');
             expect(paths).toContain('m_LocalPosition.x');
             expect(paths).toContain('m_LocalPosition.y');
             expect(paths).toContain('m_LocalPosition.z');
-            const name_mod = json.find((m: Record<string, string>) => m.property_path === 'm_Name');
+            const name_mod = json.modifications.find((m: Record<string, string>) => m.property_path === 'm_Name');
             expect(name_mod).toBeTruthy();
             expect(name_mod.value).toBe('MyEnemy');
         });
@@ -886,6 +1022,74 @@ describeIfNative('CLI', () => {
                 expect(entry).toHaveProperty('value');
                 expect(entry).toHaveProperty('target_file_id');
                 expect(entry).not.toHaveProperty('object_reference');
+            }
+        });
+
+        it('should include removed component state from PrefabInstance block', () => {
+            const fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SceneWithPrefab.unity')
+            );
+
+            try {
+                run_cli([
+                    'update', 'prefab', 'remove-component',
+                    fixture.temp_path,
+                    '700000',
+                    '{fileID: 11400000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
+                    '--json'
+                ]);
+
+                const result = run_cli([
+                    'read', 'overrides',
+                    fixture.temp_path,
+                    '700000',
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+
+                expect(Array.isArray(json.removed_components)).toBe(true);
+                expect(json.removed_components.length).toBe(1);
+                expect(json.removed_components[0]).toMatchObject({
+                    file_id: '11400000',
+                    guid: 'a1b2c3d4e5f6789012345678abcdef12',
+                    type: 3,
+                });
+            } finally {
+                fixture.cleanup_fn();
+            }
+        });
+
+        it('should include removed GameObject state from PrefabInstance block', () => {
+            const fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SceneWithPrefab.unity')
+            );
+
+            try {
+                run_cli([
+                    'update', 'prefab', 'remove-gameobject',
+                    fixture.temp_path,
+                    '700000',
+                    '{fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
+                    '--json'
+                ]);
+
+                const result = run_cli([
+                    'read', 'overrides',
+                    fixture.temp_path,
+                    '700000',
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+
+                expect(Array.isArray(json.removed_gameobjects)).toBe(true);
+                expect(json.removed_gameobjects.length).toBe(1);
+                expect(json.removed_gameobjects[0]).toMatchObject({
+                    file_id: '100000',
+                    guid: 'a1b2c3d4e5f6789012345678abcdef12',
+                    type: 3,
+                });
+            } finally {
+                fixture.cleanup_fn();
             }
         });
 
@@ -1175,7 +1379,7 @@ describeIfNative('CLI', () => {
     });
 
     describe('update prefab remove-component command', () => {
-        it('should add component to m_RemovedComponents', () => {
+        it('should add component to m_RemovedComponents with valid YAML shape', () => {
             const fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SceneWithPrefab.unity')
             );
@@ -1185,7 +1389,7 @@ describeIfNative('CLI', () => {
                     'update', 'prefab', 'remove-component',
                     fixture.temp_path,
                     '700000',
-                    '{fileID: 12345}',
+                    '{fileID: 12345, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
                     '--json'
                 ]);
                 const json = JSON.parse(result);
@@ -1194,6 +1398,76 @@ describeIfNative('CLI', () => {
                 // Verify the component ref was added to m_RemovedComponents
                 const content = readFileSync(fixture.temp_path, 'utf-8');
                 expect(content).toContain('fileID: 12345');
+                expect(content).toContain('m_RemovedComponents:\n    - {fileID: 12345, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}');
+            } finally {
+                fixture.cleanup_fn();
+            }
+        });
+
+        it('should restore component and collapse list back to []', () => {
+            const fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SceneWithPrefab.unity')
+            );
+
+            try {
+                run_cli([
+                    'update', 'prefab', 'remove-component',
+                    fixture.temp_path,
+                    '700000',
+                    '{fileID: 12345, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
+                    '--json'
+                ]);
+
+                const restoreResult = run_cli([
+                    'update', 'prefab', 'restore-component',
+                    fixture.temp_path,
+                    '700000',
+                    '{fileID: 12345, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
+                    '--json'
+                ]);
+                const json = JSON.parse(restoreResult);
+                expect(json).toHaveProperty('success', true);
+
+                const content = readFileSync(fixture.temp_path, 'utf-8');
+                expect(content).toContain('m_RemovedComponents: []');
+                expect(content).not.toContain('m_RemovedComponents:\n');
+            } finally {
+                fixture.cleanup_fn();
+            }
+        });
+    });
+
+    describe('update prefab remove-gameobject command', () => {
+        it('should add and restore removed GameObject with valid YAML shape', () => {
+            const fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SceneWithPrefab.unity')
+            );
+
+            try {
+                const removeResult = run_cli([
+                    'update', 'prefab', 'remove-gameobject',
+                    fixture.temp_path,
+                    '700000',
+                    '{fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
+                    '--json'
+                ]);
+                expect(JSON.parse(removeResult)).toHaveProperty('success', true);
+
+                let content = readFileSync(fixture.temp_path, 'utf-8');
+                expect(content).toContain('m_RemovedGameObjects:\n    - {fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}');
+
+                const restoreResult = run_cli([
+                    'update', 'prefab', 'restore-gameobject',
+                    fixture.temp_path,
+                    '700000',
+                    '{fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
+                    '--json'
+                ]);
+                expect(JSON.parse(restoreResult)).toHaveProperty('success', true);
+
+                content = readFileSync(fixture.temp_path, 'utf-8');
+                expect(content).toContain('m_RemovedGameObjects: []');
+                expect(content).not.toContain('m_RemovedGameObjects:\n');
             } finally {
                 fixture.cleanup_fn();
             }
@@ -1701,6 +1975,47 @@ describeIfNative('CLI', () => {
                 fixture.cleanup_fn();
             }
         });
+
+        it('should remove added override objects/components when deleting PrefabInstance', () => {
+            const fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SceneWithPrefab.unity')
+            );
+
+            try {
+                const added_go = JSON.parse(run_cli([
+                    'create', 'gameobject',
+                    fixture.temp_path,
+                    'VariantExtra',
+                    '--json'
+                ]));
+                expect(added_go.success).toBe(true);
+
+                const added_component = JSON.parse(run_cli([
+                    'create', 'component',
+                    fixture.temp_path,
+                    'MyEnemy',
+                    'AudioSource',
+                    '--json'
+                ]));
+                expect(added_component.success).toBe(true);
+
+                const delete_result = JSON.parse(run_cli([
+                    'delete', 'prefab',
+                    fixture.temp_path,
+                    '700000',
+                    '--json'
+                ]));
+                expect(delete_result.success).toBe(true);
+
+                const content = readFileSync(fixture.temp_path, 'utf-8');
+                expect(content).not.toContain('&700000');
+                expect(content).not.toContain(`&${added_go.game_object_id}`);
+                expect(content).not.toContain(`&${added_go.transform_id}`);
+                expect(content).not.toContain(`&${added_component.component_id}`);
+            } finally {
+                fixture.cleanup_fn();
+            }
+        });
     });
 });
 
@@ -1711,7 +2026,7 @@ describe('CLI - New Features', () => {
         it('should list packages from manifest.json', () => {
             const result = run_cli([
                 'read', 'manifest',
-                resolve(fixtures_dir, 'test-manifest'),
+                '--project', resolve(fixtures_dir, 'test-manifest'),
                 '--json'
             ]);
             const json = JSON.parse(result);
@@ -1723,13 +2038,23 @@ describe('CLI - New Features', () => {
         it('should filter packages by search', () => {
             const result = run_cli([
                 'read', 'manifest',
-                resolve(fixtures_dir, 'test-manifest'),
+                '--project', resolve(fixtures_dir, 'test-manifest'),
                 '--search', 'render',
                 '--json'
             ]);
             const json = JSON.parse(result);
             expect(json.count).toBe(1);
             expect(json.packages[0].name).toContain('render');
+        });
+
+        it('should default manifest lookup to cwd project', () => {
+            const result = run_cli([
+                'read', 'manifest',
+                '--json'
+            ], resolve(fixtures_dir, 'test-manifest'));
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('success', true);
+            expect(json.count).toBeGreaterThan(0);
         });
     });
 
@@ -1742,7 +2067,8 @@ describe('CLI - New Features', () => {
                 // Create
                 const create_result = run_cli([
                     'create', 'package',
-                    tmp, 'com.unity.cinemachine', '2.9.7',
+                    'com.unity.cinemachine', '2.9.7',
+                    '--project', tmp,
                     '--json'
                 ]);
                 const cj = JSON.parse(create_result);
@@ -1750,20 +2076,52 @@ describe('CLI - New Features', () => {
                 expect(cj.action).toBe('added');
 
                 // Verify it's in the manifest
-                const list_result = run_cli(['read', 'manifest', tmp, '--search', 'cinemachine', '--json']);
+                const list_result = run_cli(['read', 'manifest', '--project', tmp, '--search', 'cinemachine', '--json']);
                 expect(JSON.parse(list_result).count).toBe(1);
 
                 // Delete
                 const delete_result = run_cli([
                     'delete', 'package',
-                    tmp, 'com.unity.cinemachine',
+                    'com.unity.cinemachine',
+                    '--project', tmp,
                     '--json'
                 ]);
                 const dj = JSON.parse(delete_result);
                 expect(dj).toHaveProperty('success', true);
 
                 // Verify it's gone
-                const list_result2 = run_cli(['read', 'manifest', tmp, '--search', 'cinemachine', '--json']);
+                const list_result2 = run_cli(['read', 'manifest', '--project', tmp, '--search', 'cinemachine', '--json']);
+                expect(JSON.parse(list_result2).count).toBe(0);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('should add and remove a package using cwd project default', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'pkg-cli-cwd-'));
+            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
+
+            try {
+                const create_result = run_cli([
+                    'create', 'package',
+                    'com.unity.timeline', '1.8.0',
+                    '--json'
+                ], tmp);
+                const cj = JSON.parse(create_result);
+                expect(cj).toHaveProperty('success', true);
+
+                const list_result = run_cli(['read', 'manifest', '--search', 'timeline', '--json'], tmp);
+                expect(JSON.parse(list_result).count).toBe(1);
+
+                const delete_result = run_cli([
+                    'delete', 'package',
+                    'com.unity.timeline',
+                    '--json'
+                ], tmp);
+                const dj = JSON.parse(delete_result);
+                expect(dj).toHaveProperty('success', true);
+
+                const list_result2 = run_cli(['read', 'manifest', '--search', 'timeline', '--json'], tmp);
                 expect(JSON.parse(list_result2).count).toBe(0);
             } finally {
                 rmSync(tmp, { recursive: true, force: true });
@@ -2057,7 +2415,7 @@ describe('CLI - New Features', () => {
             const tmp = mkdtempSync(join(tmpdir(), 'pkg-bug1-'));
             cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
             try {
-                run_cli(['create', 'package', tmp, 'com.test.bad', 'not-a-version', '--json']);
+                run_cli(['create', 'package', 'com.test.bad', 'not-a-version', '--project', tmp, '--json']);
                 expect.unreachable('Should have thrown');
             } catch (err: unknown) {
                 if (err instanceof Error && err.message === 'Should have thrown') throw err;
@@ -2229,7 +2587,7 @@ describe('CLI - New Features', () => {
             const tmp = mkdtempSync(join(tmpdir(), 'pkg-edge2-'));
             cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
             try {
-                run_cli(['create', 'package', tmp, '', '1.0.0', '--json']);
+                run_cli(['create', 'package', '', '1.0.0', '--project', tmp, '--json']);
                 expect.unreachable('Should have thrown');
             } catch (err: unknown) {
                 if (err instanceof Error && err.message === 'Should have thrown') throw err;
@@ -2247,7 +2605,7 @@ describe('CLI - New Features', () => {
             const tmp = mkdtempSync(join(tmpdir(), 'pkg-edge3-'));
             cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
             try {
-                run_cli(['create', 'package', tmp, 'com.test package', '1.0.0', '--json']);
+                run_cli(['create', 'package', 'com.test package', '1.0.0', '--project', tmp, '--json']);
                 expect.unreachable('Should have thrown');
             } catch (err: unknown) {
                 if (err instanceof Error && err.message === 'Should have thrown') throw err;
@@ -2380,7 +2738,7 @@ describe('CLI - New Features', () => {
 
         it('Edge 10: should return exit code 1 for invalid grep regex', () => {
             try {
-                run_cli(['grep', resolve(fixtures_dir), '[invalid(regex']);
+                run_cli(['grep', '[invalid(regex', '--project', resolve(fixtures_dir)]);
                 expect.unreachable('Should have thrown');
             } catch (err: unknown) {
                 if (err instanceof Error && err.message === 'Should have thrown') throw err;
@@ -2420,5 +2778,109 @@ describe('CLI - New Features', () => {
             }
         });
 
+    });
+
+    describe('project path default behavior', () => {
+        it('should default create build to cwd project', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'build-create-cwd-'));
+            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
+            cpSync(join(external_fixtures, 'ProjectSettings', 'ProjectVersion.txt'), join(tmp, 'ProjectSettings', 'ProjectVersion.txt'));
+            cpSync(join(external_fixtures, 'ProjectSettings', 'EditorBuildSettings.asset'), join(tmp, 'ProjectSettings', 'EditorBuildSettings.asset'));
+            cpSync(join(external_fixtures, 'Assets', 'Scenes'), join(tmp, 'Assets', 'Scenes'), { recursive: true });
+            cpSync(join(tmp, 'Assets', 'Scenes', 'Menu.unity'), join(tmp, 'Assets', 'Scenes', 'NewScene.unity'));
+            cpSync(join(tmp, 'Assets', 'Scenes', 'Menu.unity.meta'), join(tmp, 'Assets', 'Scenes', 'NewScene.unity.meta'));
+
+            try {
+                const result = run_cli([
+                    'create', 'build',
+                    'Assets/Scenes/NewScene.unity',
+                    '--json'
+                ], tmp);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('should default update build to cwd project', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'build-update-cwd-'));
+            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
+            cpSync(join(external_fixtures, 'ProjectSettings', 'ProjectVersion.txt'), join(tmp, 'ProjectSettings', 'ProjectVersion.txt'));
+            cpSync(join(external_fixtures, 'ProjectSettings', 'EditorBuildSettings.asset'), join(tmp, 'ProjectSettings', 'EditorBuildSettings.asset'));
+
+            try {
+                const result = run_cli([
+                    'update', 'build',
+                    'Assets/Scenes/Menu.unity',
+                    '--disable',
+                    '--json'
+                ], tmp);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('should default delete build to cwd project', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'build-delete-cwd-'));
+            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
+            cpSync(join(external_fixtures, 'ProjectSettings', 'ProjectVersion.txt'), join(tmp, 'ProjectSettings', 'ProjectVersion.txt'));
+            cpSync(join(external_fixtures, 'ProjectSettings', 'EditorBuildSettings.asset'), join(tmp, 'ProjectSettings', 'EditorBuildSettings.asset'));
+
+            try {
+                const result = run_cli([
+                    'delete', 'build',
+                    'Assets/Scenes/Level.unity',
+                    '--json'
+                ], tmp);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('should default version to cwd project', () => {
+            const result = run_cli([
+                'version',
+                '--json'
+            ], external_fixtures);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('raw');
+            expect(json).toHaveProperty('major');
+        });
+
+        it('should default read dependents to cwd project', () => {
+            const result = run_cli([
+                'read', 'dependents',
+                '07d404ae2f2e9404ab61c78efb374629',
+                '--json'
+            ], external_fixtures);
+            const json = JSON.parse(result);
+            expect(json).toHaveProperty('project_path', external_fixtures);
+            expect(json).toHaveProperty('guid', '07d404ae2f2e9404ab61c78efb374629');
+        });
+
+        it('should default read unused to cwd project', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'unused-cwd-'));
+            mkdirSync(join(tmp, 'Assets'), { recursive: true });
+            mkdirSync(join(tmp, '.unity-agentic'), { recursive: true });
+            writeFileSync(
+                join(tmp, '.unity-agentic', 'guid-cache.json'),
+                JSON.stringify({ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: 'Assets/Test.asset' })
+            );
+
+            const result = run_cli([
+                'read', 'unused',
+                '--max', '5',
+                '--json'
+            ], tmp);
+            const json = JSON.parse(result);
+            expect(json.project_path).toContain('unused-cwd-');
+            expect(json).toHaveProperty('potentially_unused', 1);
+            rmSync(tmp, { recursive: true, force: true });
+        });
     });
 });

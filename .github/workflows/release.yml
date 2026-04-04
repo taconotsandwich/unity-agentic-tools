@@ -117,11 +117,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Update npm for trusted publishing
-        run: npm install -g npm@latest
+      - name: Check npm version for trusted publishing
+        run: npm --version
 
       - name: Install dependencies
         run: bun install
@@ -191,7 +191,7 @@ jobs:
             cd unity-agentic-tools && bun install
             ```
           draft: false
-          prerelease: false
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -207,7 +207,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Setup Bun

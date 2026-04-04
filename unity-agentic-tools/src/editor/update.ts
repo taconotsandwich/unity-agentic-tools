@@ -385,7 +385,7 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
     return {
       success: false,
       file_path,
-      error: `Could not resolve "${new_value}" to asset reference. Ensure GUID cache exists (run "setup <project>" first).`,
+      error: `Could not resolve "${new_value}" to asset reference. Ensure GUID cache exists (run "setup" first, or "setup -p <path>").`,
     };
   }
   if (resolved !== undefined) {
@@ -1251,6 +1251,256 @@ function findPrefabInstanceBlock(doc: UnityDocument, identifier: string): UnityB
   return null;
 }
 
+interface ParsedPrefabRef {
+  file_id: string;
+  guid?: string;
+  type?: string;
+}
+
+interface NormalizedPrefabRef {
+  file_id: string;
+  guid: string;
+  type: string;
+}
+
+function parsePrefabRef(refText: string): ParsedPrefabRef | null {
+  const fileIdMatch = refText.match(/fileID:[ \t]*(-?\d+)/i);
+  if (!fileIdMatch) return null;
+
+  const guidMatch = refText.match(/guid:[ \t]*([a-f0-9]{32})/i);
+  const typeMatch = refText.match(/type:[ \t]*(-?\d+)/i);
+
+  return {
+    file_id: fileIdMatch[1],
+    guid: guidMatch ? guidMatch[1].toLowerCase() : undefined,
+    type: typeMatch ? typeMatch[1] : undefined,
+  };
+}
+
+function extractPrefabSourceGuid(prefabInstanceRaw: string): string | null {
+  const sourceMatch = prefabInstanceRaw.match(/m_SourcePrefab:[ \t]*\{[^}]*guid:[ \t]*([a-f0-9]{32})/i);
+  return sourceMatch ? sourceMatch[1].toLowerCase() : null;
+}
+
+function normalizePrefabRef(refText: string, sourceGuid: string | null): { ref?: NormalizedPrefabRef; error?: string } {
+  const parsed = parsePrefabRef(refText);
+  if (!parsed) {
+    return { error: `Invalid reference "${refText}". Expected format: {fileID: N, guid: ..., type: T}` };
+  }
+
+  const guid = parsed.guid ?? sourceGuid;
+  if (!guid) {
+    return { error: `Reference "${refText}" is missing guid and source prefab guid could not be inferred.` };
+  }
+  if (!/^[a-f0-9]{32}$/i.test(guid)) {
+    return { error: `Invalid guid in reference "${refText}". Expected 32-character hex GUID.` };
+  }
+
+  const type = parsed.type ?? '3';
+  if (!/^-?\d+$/.test(type)) {
+    return { error: `Invalid type in reference "${refText}". Expected an integer type value.` };
+  }
+
+  return {
+    ref: {
+      file_id: parsed.file_id,
+      guid,
+      type,
+    }
+  };
+}
+
+function parsePrefabRefMatcher(refText: string): { matcher?: ParsedPrefabRef; error?: string } {
+  const parsed = parsePrefabRef(refText);
+  if (!parsed) {
+    return { error: `Invalid reference "${refText}". Expected format: {fileID: N, guid: ..., type: T}` };
+  }
+
+  if (parsed.guid && !/^[a-f0-9]{32}$/i.test(parsed.guid)) {
+    return { error: `Invalid guid in reference "${refText}". Expected 32-character hex GUID.` };
+  }
+  if (parsed.type && !/^-?\d+$/.test(parsed.type)) {
+    return { error: `Invalid type in reference "${refText}". Expected an integer type value.` };
+  }
+
+  return { matcher: parsed };
+}
+
+function prefabRefKey(ref: NormalizedPrefabRef): string {
+  return `${ref.file_id}|${ref.guid}|${ref.type}`;
+}
+
+function serializePrefabRef(ref: NormalizedPrefabRef): string {
+  return `{fileID: ${ref.file_id}, guid: ${ref.guid}, type: ${ref.type}}`;
+}
+
+function splitPrefabArraySection(rawText: string, key: string): {
+  lines: string[];
+  key_index: number;
+  section_end: number;
+  indent: string;
+} | null {
+  const lines = rawText.split('\n');
+  const keyPattern = new RegExp(`^([ \t]*)${key}:[ \t]*(.*)$`);
+
+  let keyIndex = -1;
+  let indent = '';
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(keyPattern);
+    if (match) {
+      keyIndex = i;
+      indent = match[1];
+      break;
+    }
+  }
+
+  if (keyIndex === -1) {
+    return null;
+  }
+
+  const keyIndentLen = indent.length;
+  let sectionEnd = keyIndex + 1;
+  for (let i = keyIndex + 1; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      sectionEnd = i + 1;
+      continue;
+    }
+
+    const indentLen = (line.match(/^[ \t]*/) || [''])[0].length;
+    if (indentLen < keyIndentLen) {
+      break;
+    }
+    if (
+      indentLen === keyIndentLen &&
+      !trimmed.startsWith('-') &&
+      /^[A-Za-z_][A-Za-z0-9_]*:/.test(trimmed)
+    ) {
+      break;
+    }
+
+    sectionEnd = i + 1;
+  }
+
+  return {
+    lines,
+    key_index: keyIndex,
+    section_end: sectionEnd,
+    indent,
+  };
+}
+
+function collectNormalizedRefsFromSection(
+  lines: string[],
+  key_index: number,
+  section_end: number,
+  sourceGuid: string | null,
+): NormalizedPrefabRef[] {
+  const sectionText = lines.slice(key_index, section_end).join('\n');
+  const refMatches = sectionText.match(/\{[^}]*\}/g) || [];
+  const dedup = new Map<string, NormalizedPrefabRef>();
+
+  for (const token of refMatches) {
+    const parsed = parsePrefabRef(token);
+    if (!parsed) continue;
+    const guid = parsed.guid ?? sourceGuid;
+    if (!guid || !/^[a-f0-9]{32}$/i.test(guid)) continue;
+    const type = parsed.type ?? '3';
+    if (!/^-?\d+$/.test(type)) continue;
+
+    const normalized: NormalizedPrefabRef = {
+      file_id: parsed.file_id,
+      guid: guid.toLowerCase(),
+      type,
+    };
+    const key = prefabRefKey(normalized);
+    if (!dedup.has(key)) {
+      dedup.set(key, normalized);
+    }
+  }
+
+  return [...dedup.values()];
+}
+
+function mutatePrefabReferenceList(options: {
+  target_block: UnityBlock;
+  key: 'm_RemovedComponents' | 'm_RemovedGameObjects';
+  ref_text: string;
+  action: 'add' | 'remove';
+  item_label: 'Component' | 'GameObject';
+}): { success: boolean; changed?: boolean; error?: string } {
+  const { target_block, key, ref_text, action, item_label } = options;
+
+  const split = splitPrefabArraySection(target_block.raw, key);
+  if (!split) {
+    return { success: false, error: `${key} property not found in PrefabInstance` };
+  }
+
+  const sourceGuid = extractPrefabSourceGuid(target_block.raw);
+  const existing = collectNormalizedRefsFromSection(
+    split.lines,
+    split.key_index,
+    split.section_end,
+    sourceGuid,
+  );
+
+  let next = existing;
+
+  if (action === 'add') {
+    const normalized = normalizePrefabRef(ref_text, sourceGuid);
+    if (!normalized.ref) {
+      return { success: false, error: normalized.error };
+    }
+
+    const keyText = prefabRefKey(normalized.ref);
+    if (existing.some(entry => prefabRefKey(entry) === keyText)) {
+      return { success: true, changed: false };
+    }
+
+    next = [...existing, normalized.ref];
+  } else {
+    const matcherResult = parsePrefabRefMatcher(ref_text);
+    const matcher = matcherResult.matcher;
+    if (!matcher) {
+      return { success: false, error: matcherResult.error };
+    }
+
+    next = existing.filter((entry) => {
+      if (entry.file_id !== matcher.file_id) return true;
+      if (matcher.guid && entry.guid !== matcher.guid.toLowerCase()) return true;
+      if (matcher.type && entry.type !== matcher.type) return true;
+      return false;
+    });
+
+    if (next.length === existing.length) {
+      return {
+        success: false,
+        error: `${item_label} reference "${ref_text}" not found in ${key}`,
+      };
+    }
+  }
+
+  const replacement: string[] = [];
+  if (next.length === 0) {
+    replacement.push(`${split.indent}${key}: []`);
+  } else {
+    replacement.push(`${split.indent}${key}:`);
+    for (const entry of next) {
+      replacement.push(`${split.indent}- ${serializePrefabRef(entry)}`);
+    }
+  }
+
+  const updatedLines = [
+    ...split.lines.slice(0, split.key_index),
+    ...replacement,
+    ...split.lines.slice(split.section_end),
+  ];
+
+  target_block.replace_raw(updatedLines.join('\n'));
+  return { success: true, changed: true };
+}
+
 /**
  * Edit an array in a Unity component (insert, append, or remove elements).
  */
@@ -1540,11 +1790,6 @@ export function addRemovedComponent(options: PrefabSubArrayOptions): PrefabSubAr
     return { success: false, file_path, error: `File not found: ${file_path}` };
   }
 
-  // Validate component_ref format: must be a Unity object reference like {fileID: N, guid: G, type: T}
-  if (!/^\{fileID:\s*-?\d+/.test(component_ref)) {
-    return { success: false, file_path, error: `Invalid component reference "${component_ref}". Expected format: {fileID: N, guid: ..., type: T}` };
-  }
-
   let doc: UnityDocument;
   try {
     doc = UnityDocument.from_file(file_path);
@@ -1558,22 +1803,16 @@ export function addRemovedComponent(options: PrefabSubArrayOptions): PrefabSubAr
     return { success: false, file_path, error: `PrefabInstance "${prefab_instance}" not found` };
   }
 
-  // If m_RemovedComponents: [], replace with multi-line format first
-  let rawText = targetBlock.raw;
-  if (/m_RemovedComponents:\s*\[\]/.test(rawText)) {
-    rawText = rawText.replace(/m_RemovedComponents:\s*\[\]/, 'm_RemovedComponents:');
+  const mutation = mutatePrefabReferenceList({
+    target_block: targetBlock,
+    key: 'm_RemovedComponents',
+    ref_text: component_ref,
+    action: 'add',
+    item_label: 'Component',
+  });
+  if (!mutation.success) {
+    return { success: false, file_path, error: mutation.error };
   }
-
-  // Add component_ref to m_RemovedComponents array
-  // Find the m_RemovedComponents section and append
-  const removedPattern = /m_RemovedComponents:\s*\n/;
-  if (removedPattern.test(rawText)) {
-    rawText = rawText.replace(removedPattern, `m_RemovedComponents:\n  - ${component_ref}\n`);
-  } else {
-    return { success: false, file_path, error: 'm_RemovedComponents property not found in PrefabInstance' };
-  }
-
-  targetBlock.replace_raw(rawText);
 
   if (!doc.validate()) {
     return { success: false, file_path, error: 'Validation failed after adding removed component' };
@@ -1614,16 +1853,16 @@ export function removeRemovedComponent(options: PrefabSubArrayOptions): PrefabSu
     return { success: false, file_path, error: `PrefabInstance "${prefab_instance}" not found` };
   }
 
-  // Remove component_ref from m_RemovedComponents array
-  const escapedRef = component_ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const refPattern = new RegExp(`\\s*- ${escapedRef}\\n?`, 'm');
-
-  if (!refPattern.test(targetBlock.raw)) {
-    return { success: false, file_path, error: `Component reference "${component_ref}" not found in m_RemovedComponents` };
+  const mutation = mutatePrefabReferenceList({
+    target_block: targetBlock,
+    key: 'm_RemovedComponents',
+    ref_text: component_ref,
+    action: 'remove',
+    item_label: 'Component',
+  });
+  if (!mutation.success) {
+    return { success: false, file_path, error: mutation.error };
   }
-
-  const updatedRaw = targetBlock.raw.replace(refPattern, '');
-  targetBlock.replace_raw(updatedRaw);
 
   if (!doc.validate()) {
     return { success: false, file_path, error: 'Validation failed after removing component' };
@@ -1651,11 +1890,6 @@ export function addRemovedGameObject(options: PrefabSubArrayOptions): PrefabSubA
     return { success: false, file_path, error: `File not found: ${file_path}` };
   }
 
-  // Validate gameobject ref format: must be a Unity object reference like {fileID: N, guid: G, type: T}
-  if (!/^\{fileID:\s*-?\d+/.test(component_ref)) {
-    return { success: false, file_path, error: `Invalid GameObject reference "${component_ref}". Expected format: {fileID: N, guid: ..., type: T}` };
-  }
-
   let doc: UnityDocument;
   try {
     doc = UnityDocument.from_file(file_path);
@@ -1669,21 +1903,16 @@ export function addRemovedGameObject(options: PrefabSubArrayOptions): PrefabSubA
     return { success: false, file_path, error: `PrefabInstance "${prefab_instance}" not found` };
   }
 
-  // If m_RemovedGameObjects: [], replace with multi-line format first
-  let rawText = targetBlock.raw;
-  if (/m_RemovedGameObjects:\s*\[\]/.test(rawText)) {
-    rawText = rawText.replace(/m_RemovedGameObjects:\s*\[\]/, 'm_RemovedGameObjects:');
+  const mutation = mutatePrefabReferenceList({
+    target_block: targetBlock,
+    key: 'm_RemovedGameObjects',
+    ref_text: component_ref,
+    action: 'add',
+    item_label: 'GameObject',
+  });
+  if (!mutation.success) {
+    return { success: false, file_path, error: mutation.error };
   }
-
-  // Add component_ref to m_RemovedGameObjects array
-  const removedPattern = /m_RemovedGameObjects:\s*\n/;
-  if (removedPattern.test(rawText)) {
-    rawText = rawText.replace(removedPattern, `m_RemovedGameObjects:\n  - ${component_ref}\n`);
-  } else {
-    return { success: false, file_path, error: 'm_RemovedGameObjects property not found in PrefabInstance' };
-  }
-
-  targetBlock.replace_raw(rawText);
 
   if (!doc.validate()) {
     return { success: false, file_path, error: 'Validation failed after adding removed GameObject' };
@@ -1724,16 +1953,16 @@ export function removeRemovedGameObject(options: PrefabSubArrayOptions): PrefabS
     return { success: false, file_path, error: `PrefabInstance "${prefab_instance}" not found` };
   }
 
-  // Remove component_ref from m_RemovedGameObjects array
-  const escapedRef = component_ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const refPattern = new RegExp(`\\s*- ${escapedRef}\\n?`, 'm');
-
-  if (!refPattern.test(targetBlock.raw)) {
-    return { success: false, file_path, error: `GameObject reference "${component_ref}" not found in m_RemovedGameObjects` };
+  const mutation = mutatePrefabReferenceList({
+    target_block: targetBlock,
+    key: 'm_RemovedGameObjects',
+    ref_text: component_ref,
+    action: 'remove',
+    item_label: 'GameObject',
+  });
+  if (!mutation.success) {
+    return { success: false, file_path, error: mutation.error };
   }
-
-  const updatedRaw = targetBlock.raw.replace(refPattern, '');
-  targetBlock.replace_raw(updatedRaw);
 
   if (!doc.validate()) {
     return { success: false, file_path, error: 'Validation failed after removing GameObject' };

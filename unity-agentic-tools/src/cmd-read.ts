@@ -10,7 +10,7 @@ import { UnityDocument } from './editor';
 import { extractGuidFromMeta, resolve_source_prefab } from './editor/shared';
 import { get_class_id } from './class-ids';
 import { load_guid_cache, load_guid_cache_for_file } from './guid-cache';
-import { path_glob_to_regex, find_unity_project_root } from './utils';
+import { path_glob_to_regex, find_unity_project_root, resolve_project_path } from './utils';
 import { list_packages } from './packages';
 import { load_input_actions } from './input-actions';
 import type { InputActionsFile } from './input-actions';
@@ -51,6 +51,138 @@ interface ParsedMaterial {
     textures: MaterialTexture[];
     floats: MaterialFloat[];
     colors: MaterialColor[];
+}
+
+interface UnityRefData {
+    file_id: string;
+    guid?: string;
+    type?: number;
+}
+
+interface AddedOverrideData {
+    target_corresponding_source_object: UnityRefData | null;
+    insert_index: number | null;
+    added_object: UnityRefData | null;
+}
+
+function parse_unity_ref(ref_text: string): UnityRefData | null {
+    const file_id_match = ref_text.match(/fileID:[ \t]*(-?\d+)/i);
+    if (!file_id_match) return null;
+
+    const guid_match = ref_text.match(/guid:[ \t]*([a-f0-9]{32})/i);
+    const type_match = ref_text.match(/type:[ \t]*(-?\d+)/i);
+
+    const parsed: UnityRefData = { file_id: file_id_match[1] };
+    if (guid_match) parsed.guid = guid_match[1].toLowerCase();
+    if (type_match) parsed.type = parseInt(type_match[1], 10);
+    return parsed;
+}
+
+function extract_prefab_list_section(raw: string, key: string): { key_indent: number; section_lines: string[] } | null {
+    const lines = raw.split('\n');
+    const key_pattern = new RegExp(`^(\\s*)${key}:[ \\t]*(.*)$`);
+
+    let key_index = -1;
+    let key_indent = 0;
+    for (let i = 0; i < lines.length; i++) {
+        const match = lines[i].match(key_pattern);
+        if (match) {
+            key_index = i;
+            key_indent = match[1].length;
+            break;
+        }
+    }
+
+    if (key_index === -1) return null;
+
+    const section_lines: string[] = [lines[key_index]];
+    for (let i = key_index + 1; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+        if (trimmed.length === 0) {
+            section_lines.push(line);
+            continue;
+        }
+
+        const indent = (line.match(/^\s*/) || [''])[0].length;
+        if (indent < key_indent) break;
+        if (indent === key_indent && !trimmed.startsWith('-') && /^[A-Za-z_][A-Za-z0-9_]*:/.test(trimmed)) {
+            break;
+        }
+
+        section_lines.push(line);
+    }
+
+    return { key_indent, section_lines };
+}
+
+function parse_removed_list(raw: string, key: string): UnityRefData[] {
+    const section = extract_prefab_list_section(raw, key);
+    if (!section) return [];
+
+    const key_line = section.section_lines[0].trim();
+    if (key_line.endsWith('[]')) return [];
+
+    const refs = section.section_lines.join('\n').match(/\{[^}]*fileID:[^}]*\}/g) || [];
+    const dedup = new Map<string, UnityRefData>();
+    for (const ref of refs) {
+        const parsed = parse_unity_ref(ref);
+        if (!parsed) continue;
+        const key_text = `${parsed.file_id}|${parsed.guid ?? ''}|${parsed.type ?? ''}`;
+        if (!dedup.has(key_text)) dedup.set(key_text, parsed);
+    }
+
+    return [...dedup.values()];
+}
+
+function parse_added_list(raw: string, key: string): AddedOverrideData[] {
+    const section = extract_prefab_list_section(raw, key);
+    if (!section) return [];
+
+    const key_line = section.section_lines[0].trim();
+    if (key_line.endsWith('[]')) return [];
+
+    const lines = section.section_lines.slice(1);
+    const entries: AddedOverrideData[] = [];
+
+    let i = 0;
+    while (i < lines.length) {
+        const line = lines[i];
+        const trimmed = line.trimStart();
+        if (!trimmed.startsWith('-')) {
+            i++;
+            continue;
+        }
+
+        const entry_indent = (line.match(/^\s*/) || [''])[0].length;
+        const entry_lines: string[] = [line];
+        i++;
+
+        while (i < lines.length) {
+            const next = lines[i];
+            const next_trimmed = next.trim();
+            const next_indent = (next.match(/^\s*/) || [''])[0].length;
+
+            if (next_trimmed.length > 0 && next_indent === entry_indent && next_trimmed.startsWith('-')) {
+                break;
+            }
+            entry_lines.push(next);
+            i++;
+        }
+
+        const entry_text = entry_lines.join('\n');
+        const target_match = entry_text.match(/targetCorrespondingSourceObject:[ \t]*(\{[^}]+\})/);
+        const insert_match = entry_text.match(/insertIndex:[ \t]*(-?\d+)/);
+        const added_match = entry_text.match(/addedObject:[ \t]*(\{[^}]+\})/);
+
+        entries.push({
+            target_corresponding_source_object: target_match ? parse_unity_ref(target_match[1]) : null,
+            insert_index: insert_match ? parseInt(insert_match[1], 10) : null,
+            added_object: added_match ? parse_unity_ref(added_match[1]) : null,
+        });
+    }
+
+    return entries;
 }
 
 /** Parse a Unity .mat file from raw YAML content. */
@@ -801,10 +933,17 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             if (result.total === 0 && !result.error) {
                 // Check if this is a PrefabVariant (has prefab_instances but no direct gameobjects)
                 const prefabInstances = (result as unknown as Record<string, unknown>).prefabInstances as Array<Record<string, unknown>> | undefined;
+                let variantDetected = false;
+                let variantResolvedFromSource = false;
                 if (prefabInstances && prefabInstances.length > 0) {
+                    variantDetected = true;
                     // Try to resolve source prefab hierarchy
                     try {
                         const doc = UnityDocument.from_file(file);
+                        const strippedGoCount = doc.blocks.filter(b => b.class_id === 1 && b.is_stripped).length;
+                        if (strippedGoCount > 0) {
+                            variantDetected = true;
+                        }
                         const projectPath = find_unity_project_root(dirname(file));
                         const resolved = resolve_source_prefab(doc, file, projectPath ?? undefined);
 
@@ -847,6 +986,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                                 resultRecord.resolvedFromSource = true;
                                 resultRecord.sourcePrefab = resolved.source_path;
                                 resultRecord.sourceGuid = resolved.source_guid;
+                                variantResolvedFromSource = true;
 
                                 const variantNote = `PrefabVariant resolved from source prefab: ${resolved.source_path}`;
                                 result.warning = result.warning ? `${result.warning}; ${variantNote}` : variantNote;
@@ -860,8 +1000,13 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     try {
                         const fileSize = statSync(file).size;
                         if (fileSize > 100) {
-                            const corruptWarning = 'File has valid Unity YAML header but contains no parseable GameObjects -- file may be corrupt or malformed';
-                            result.warning = result.warning ? `${result.warning}; ${corruptWarning}` : corruptWarning;
+                            if (variantDetected && !variantResolvedFromSource) {
+                                const variantWarning = 'PrefabVariant detected but source prefab hierarchy could not be resolved (missing project context or GUID cache). Use --project or run setup to resolve source hierarchy.';
+                                result.warning = result.warning ? `${result.warning}; ${variantWarning}` : variantWarning;
+                            } else {
+                                const corruptWarning = 'File has valid Unity YAML header but contains no parseable GameObjects -- file may be corrupt or malformed';
+                                result.warning = result.warning ? `${result.warning}; ${corruptWarning}` : corruptWarning;
+                            }
                         }
                     } catch { /* ignore stat errors */ }
                 }
@@ -1214,18 +1359,20 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 by_type: options.unresolved ? undefined : byType,
             };
             if (!cache) {
-                output._hint = "Run 'setup <project>' to resolve GUID paths";
+                output._hint = "Run 'setup' (or 'setup -p <path>') to resolve GUID paths";
             }
             console.log(JSON.stringify(output, null, 2));
         });
 
-    cmd.command('settings <project_path>')
+    cmd.command('settings')
         .description('Read Unity project settings (TagManager, DynamicsManager, QualitySettings, TimeManager, etc.)')
+        .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('-s, --setting <name>', 'Setting name or alias (tags, physics, quality, time)', 'TagManager')
         .option('-j, --json', 'Output as JSON')
-        .action((project_path, options) => {
+        .action((options) => {
+            const resolvedProjectPath = resolve_project_path(options.project);
             const result = read_settings({
-                project_path,
+                project_path: resolvedProjectPath,
                 setting: options.setting,
             });
 
@@ -1233,12 +1380,14 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             if (!result.success) process.exit(1);
         });
 
-    cmd.command('build <project_path>')
+    cmd.command('build')
         .description('Read build settings (scene list, build profiles)')
+        .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('-j, --json', 'Output as JSON')
-        .action((project_path, _options) => {
+        .action((options) => {
+            const resolvedProjectPath = resolve_project_path(options.project);
             try {
-                const result = get_build_settings(project_path);
+                const result = get_build_settings(resolvedProjectPath);
                 console.log(JSON.stringify(result, null, 2));
             } catch (err) {
                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
@@ -1246,12 +1395,14 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
         });
 
-    cmd.command('scenes <project_path>')
+    cmd.command('scenes')
         .description('Read build scenes (alias for "read build")')
+        .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('-j, --json', 'Output as JSON')
-        .action((project_path, _options) => {
+        .action((options) => {
+            const resolvedProjectPath = resolve_project_path(options.project);
             try {
-                const result = get_build_settings(project_path);
+                const result = get_build_settings(resolvedProjectPath);
                 console.log(JSON.stringify(result, null, 2));
             } catch (err) {
                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
@@ -1260,7 +1411,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         });
 
     cmd.command('overrides <file> <prefab_instance>')
-        .description('Read PrefabInstance override modifications')
+        .description('Read PrefabInstance overrides (modifications + removed/added state)')
         .option('--flat', 'Output simplified list')
         .option('-j, --json', 'Output as JSON')
         .action((file, prefab_instance, options) => {
@@ -1289,7 +1440,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     process.exit(1);
                 }
 
-                const modifications = [];
+                const modifications: Array<Record<string, unknown>> = [];
                 const lines = block.raw.split('\n');
                 let i = 0;
                 while (i < lines.length) {
@@ -1333,6 +1484,11 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     }
                 }
 
+                const removed_components = parse_removed_list(block.raw, 'm_RemovedComponents');
+                const removed_gameobjects = parse_removed_list(block.raw, 'm_RemovedGameObjects');
+                const added_gameobjects = parse_added_list(block.raw, 'm_AddedGameObjects');
+                const added_components = parse_added_list(block.raw, 'm_AddedComponents');
+
                 if (options.flat) {
                     const flat = modifications.map(m => ({
                         property_path: m.property_path,
@@ -1341,7 +1497,14 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     }));
                     console.log(JSON.stringify(flat, null, 2));
                 } else {
-                    console.log(JSON.stringify(modifications, null, 2));
+                    console.log(JSON.stringify({
+                        prefab_instance_id: block.file_id,
+                        modifications,
+                        removed_components,
+                        removed_gameobjects,
+                        added_gameobjects,
+                        added_components,
+                    }, null, 2));
                 }
             } catch (err) {
                 console.log(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }, null, 2));
@@ -1661,7 +1824,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         });
 
     // ========== P3.1: Editor.log reading ==========
-    cmd.command('log [project-path]')
+    cmd.command('log')
         .description('Read and filter the Unity Editor.log')
         .option('--path <file>', 'Path to Editor.log (auto-detected if omitted)')
         .option('--project <path>', 'Filter to log entries from a specific Unity project session')
@@ -1673,8 +1836,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--since <timestamp>', 'Filter entries after this timestamp (YYYY-MM-DD or HH:MM:SS)')
         .option('--search <pattern>', 'Regex filter on log content')
         .option('-j, --json', 'Output as JSON')
-        .action((projectPath: string | undefined, options) => {
-            if (projectPath && !options.project) options.project = projectPath;
+        .action((options) => {
             const logPath = options.path || get_editor_log_path();
             if (!logPath || !existsSync(logPath)) {
                 console.log(JSON.stringify({ error: `Editor.log not found${logPath ? `: ${logPath}` : '. Could not detect platform log path.'}` }, null, 2));
@@ -2209,7 +2371,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     });
                 }
                 const states_out: Record<string, unknown> = { file, states_by_layer: by_layer };
-                if (needs_setup_hint) states_out._hint = "Run 'setup <project>' to resolve motion paths";
+                if (needs_setup_hint) states_out._hint = "Run 'setup' (or 'setup -p <path>') to resolve motion paths";
                 console.log(JSON.stringify(states_out, null, 2));
                 return;
             }
@@ -2257,20 +2419,22 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     has_exit_time: t.has_exit_time,
                 })),
             };
-            if (needs_setup_hint) default_out._hint = "Run 'setup <project>' to resolve motion paths";
+            if (needs_setup_hint) default_out._hint = "Run 'setup' (or 'setup -p <path>') to resolve motion paths";
             console.log(JSON.stringify(default_out, null, 2));
         });
 
     // ========== P6.2: Reverse dependency lookup ==========
-    cmd.command('dependents <project_path> <guid>')
+    cmd.command('dependents <guid>')
         .description('Find which files reference a given GUID (reverse dependency lookup)')
+        .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('--type <type>', 'Filter to specific file types (scene, prefab, mat, etc.)')
         .option('-j, --json', 'Output as JSON')
-        .action((project_path, guid, options) => {
+        .action((guid, options) => {
             if (!/^[0-9a-f]{32}$/i.test(guid)) {
                 console.log(JSON.stringify({ error: 'GUID must be a 32-character hexadecimal string' }, null, 2));
                 process.exit(1);
             }
+            const project_path = resolve_project_path(options.project);
             const assetsDir = join(resolve(project_path), 'Assets');
             if (!existsSync(assetsDir)) {
                 console.log(JSON.stringify({ error: `Assets directory not found in "${project_path}"` }, null, 2));
@@ -2321,17 +2485,18 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         });
 
     // ========== P6.3: Unused asset detection ==========
-    cmd.command('unused <project_path>')
+    cmd.command('unused')
         .description('Find potentially unused assets (zero inbound GUID references)')
+        .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('--type <type>', 'Filter to specific asset types')
         .option('--ignore <glob>', 'Exclude paths matching this pattern')
         .option('--max <n>', 'Maximum results to return (default 200)', '200')
         .option('-j, --json', 'Output as JSON')
-        .action((project_path, options) => {
-            const resolvedProject = resolve(project_path);
+        .action((options) => {
+            const resolvedProject = resolve_project_path(options.project);
             const assetsDir = join(resolvedProject, 'Assets');
             if (!existsSync(assetsDir)) {
-                console.log(JSON.stringify({ error: `Assets directory not found in "${project_path}"` }, null, 2));
+                console.log(JSON.stringify({ error: `Assets directory not found in "${resolvedProject}"` }, null, 2));
                 process.exit(1);
             }
 
@@ -2431,11 +2596,13 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         });
 
     // ========== Package manifest reading ==========
-    cmd.command('manifest <project_path>')
+    cmd.command('manifest')
         .description('List packages from Packages/manifest.json')
+        .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('--search <pattern>', 'Filter packages by name pattern')
         .option('-j, --json', 'Output as JSON')
-        .action((project_path, options) => {
+        .action((options) => {
+            const project_path = resolve_project_path(options.project);
             const result = list_packages(project_path, options.search);
             if ('error' in result) {
                 console.log(JSON.stringify({ success: false, error: result.error }, null, 2));

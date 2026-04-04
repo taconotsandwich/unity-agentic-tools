@@ -53,11 +53,11 @@ unity-agentic-tools read scene <file>                         # GameObject hiera
 unity-agentic-tools read gameobject <file> <id>               # Single object by name or file ID
 unity-agentic-tools read asset <file>                         # Any Unity YAML asset file (--raw to skip mesh decode)
 unity-agentic-tools read material <file>                      # Structured material properties
-unity-agentic-tools read settings <project> -s tags           # Project settings (tags/physics/quality/time/etc.)
-unity-agentic-tools read build <project>                      # Build scene list
+unity-agentic-tools read settings -s tags                     # Project settings (defaults project to cwd)
+unity-agentic-tools read build                                # Build scene list (defaults project to cwd)
 unity-agentic-tools read dependencies <file>                  # Asset GUID dependencies
-unity-agentic-tools read dependents <project> <guid>          # Reverse dependency lookup
-unity-agentic-tools read unused <project>                     # Detect unused assets
+unity-agentic-tools read dependents <guid>                    # Reverse dependency lookup (defaults project to cwd)
+unity-agentic-tools read unused                               # Detect unused assets (defaults project to cwd)
 unity-agentic-tools read overrides <file> <prefab_instance>   # PrefabInstance overrides
 unity-agentic-tools read component <file> <file_id>           # Single component by fileID
 unity-agentic-tools read reference <file> <file_id>           # Trace fileID references
@@ -67,29 +67,28 @@ unity-agentic-tools read log                                  # Unity Editor.log
 unity-agentic-tools read meta <file>                          # .meta importer settings
 unity-agentic-tools read animation <file>                     # AnimationClip data
 unity-agentic-tools read animator <file>                      # AnimatorController data
-unity-agentic-tools read manifest <project>                   # Packages from manifest.json
+unity-agentic-tools read manifest                             # Packages from manifest.json (defaults project to cwd)
 unity-agentic-tools read input-actions <file>                 # Input Actions file
 ```
 
 ### Create Commands
 
 ```bash
-unity-agentic-tools create gameobject <file> <name>            # New GameObject
-unity-agentic-tools create scene <path>                        # New .unity file
-unity-agentic-tools create component <file> <name> <type>      # Add component
-unity-agentic-tools create component-copy <file> <src> <tgt>   # Copy component
-unity-agentic-tools create prefab-variant <source> <output>    # Prefab Variant
-unity-agentic-tools create prefab-instance <scene> <prefab>    # Instantiate prefab in scene
-unity-agentic-tools create scriptable-object <output> <script> # ScriptableObject .asset
-unity-agentic-tools create meta <script_path>                  # Generate .meta file
-unity-agentic-tools create material <output>                   # New Material .mat
-unity-agentic-tools create build <project> <scene>             # Add scene to build settings
-unity-agentic-tools create package <project> <name> <version>  # Add package to manifest.json
-unity-agentic-tools create input-actions <path> <name>         # Blank .inputactions file
-unity-agentic-tools create animation <path> [name]             # Blank .anim file
-unity-agentic-tools create animator <path> [name]              # Blank .controller file
-unity-agentic-tools create prefab <file> <name>                # Create prefab from GameObject
-```
+unity-agentic-tools create gameobject <file> <name>           # New GameObject
+unity-agentic-tools create scene <path>                       # New .unity file
+unity-agentic-tools create component <file> <name> <type>     # Add component
+unity-agentic-tools create component-copy <file> <src> <tgt>  # Copy component
+unity-agentic-tools create prefab-variant <source> <output>   # Prefab Variant
+unity-agentic-tools create prefab-instance <scene> <prefab>  # Instantiate prefab in scene
+unity-agentic-tools create scriptable-object <output> <script># ScriptableObject .asset
+unity-agentic-tools create meta <script_path>                 # Generate .meta file
+unity-agentic-tools create material <output>                  # New Material .mat
+unity-agentic-tools create build <scene>                      # Add scene to build settings (defaults project to cwd)
+unity-agentic-tools create package <name> <version>           # Add package to manifest.json (defaults project to cwd)
+unity-agentic-tools create input-actions <path> <name>        # Blank .inputactions file
+unity-agentic-tools create animation <path> [name]            # Blank .anim file
+unity-agentic-tools create animator <path> [name]             # Blank .controller file
+unity-agentic-tools create prefab <file> <name>               # Create prefab from GameObject
 
 ### Update Commands
 
@@ -98,12 +97,12 @@ unity-agentic-tools update gameobject <file> <name> <prop> <value>
 unity-agentic-tools update component <file> <file_id> <prop> <value>
 unity-agentic-tools update transform <file> <id> -p 1,2,3 -r 0,90,0
 unity-agentic-tools update scriptable-object <file> <prop> <value>
-unity-agentic-tools update settings <project> -s tags --property <name> --value <val>
-unity-agentic-tools update tag <project> add MyTag
-unity-agentic-tools update layer <project> 8 MyLayer
-unity-agentic-tools update sorting-layer <project> add MyLayer
+unity-agentic-tools update settings -s tags --property <name> --value <val>
+unity-agentic-tools update tag add MyTag
+unity-agentic-tools update layer 8 MyLayer
+unity-agentic-tools update sorting-layer add MyLayer
 unity-agentic-tools update parent <file> <child> <new_parent>
-unity-agentic-tools update build <project> <scene> --enable|--disable|--move <n>
+unity-agentic-tools update build <scene> --enable|--disable|--move <n>
 unity-agentic-tools update array <file> <fid> <prop> insert <idx> <val>
 unity-agentic-tools update batch <file> '<edits_json>'
 unity-agentic-tools update batch-components <file> '<edits_json>'
@@ -123,9 +122,9 @@ unity-agentic-tools update prefab unpack|override|remove-override|...
 ```bash
 unity-agentic-tools delete gameobject <file> <name>
 unity-agentic-tools delete component <file> <file_id>
-unity-agentic-tools delete build <project> <scene>
+unity-agentic-tools delete build <scene>
 unity-agentic-tools delete prefab <file> <prefab_instance>
-unity-agentic-tools delete package <project> <name>
+unity-agentic-tools delete package <name>
 ```
 
 ### Search & Utilities
@@ -133,10 +132,10 @@ unity-agentic-tools delete package <project> <name>
 ```bash
 unity-agentic-tools search <file> <pattern>                   # Find by name in file
 unity-agentic-tools search <project> -n <pattern>             # Search across project
-unity-agentic-tools grep <project> <regex>                    # Regex search
+unity-agentic-tools grep <regex>                              # Regex search (defaults project to cwd)
 unity-agentic-tools clone <file> <name>                       # Duplicate GameObject
 unity-agentic-tools docs <query>                              # Search Unity docs
-unity-agentic-tools version <project>                         # Unity version
+unity-agentic-tools version                                   # Unity version (defaults project to cwd)
 unity-agentic-tools setup -p <project>                        # Initialize GUID cache
 unity-agentic-tools cleanup -p <project>                      # Remove cached data
 ```
@@ -147,7 +146,7 @@ The editor commands require the C# bridge package installed in your Unity projec
 
 **Via CLI:**
 ```bash
-unity-agentic-tools editor install <unity-project-path>
+unity-agentic-tools editor install
 ```
 
 **Via Unity Package Manager:**

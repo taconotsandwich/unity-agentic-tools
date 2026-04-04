@@ -4,9 +4,9 @@
 |---------|-------------|
 | `search <file> <pattern>` | Find GameObjects by name in a file (`--exact`) |
 | `search <project> -n <pattern>` | Search across project files |
-| `grep <project> <regex>` | Regex search across project files |
+| `grep <regex>` | Regex search across project files (`--project <path>` optional; defaults to cwd) |
 | `clone <file> <name>` | Duplicate a GameObject and hierarchy (`-n <new_name>`) |
-| `version <project>` | Read Unity project version |
+| `version` | Read Unity project version (`--project <path>` optional; defaults to cwd) |
 | `docs <query>` | Search indexed Unity documentation |
 | `setup` | Initialize tools (`-p <path>`, `--index-docs`) |
 | `cleanup` | Remove .unity-agentic files (`--all` for full removal) |

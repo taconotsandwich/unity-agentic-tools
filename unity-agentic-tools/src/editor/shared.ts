@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync } from 'fs';
 import * as path from 'path';
 import { load_guid_cache, load_guid_cache_for_file } from '../guid-cache';
 import { normalize_property_path, find_unity_project_root } from '../utils';
@@ -930,6 +930,28 @@ export function resolveScriptGuid(
       } catch {
         // Cache read failed
       }
+    }
+
+    // Strategy 7: Filesystem fallback via readdirSync (recursive)
+    // Only used when registry/cache lookup fails
+    try {
+      const assetsDir = path.join(projectPath, 'Assets');
+      if (existsSync(assetsDir)) {
+        const entries = readdirSync(assetsDir, { recursive: true, withFileTypes: false }) as string[];
+        for (const entry of entries) {
+          if (!entry.endsWith('.cs')) continue;
+          const fileName = path.basename(entry, '.cs').toLowerCase();
+          if (fileName === scriptNameLower || (classNameOnly && fileName === classNameOnly)) {
+            const fullPath = path.join(assetsDir, entry);
+            const guid = extractGuidFromMeta(fullPath + '.meta');
+            if (guid) {
+              return { guid, path: path.join('Assets', entry) };
+            }
+          }
+        }
+      }
+    } catch {
+      // Filesystem scan failed
     }
   }
 
