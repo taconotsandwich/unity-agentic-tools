@@ -28,6 +28,12 @@ A CLI for reading and editing Unity scenes, prefabs, and assets with minimal tok
 npm install -g unity-agentic-tools
 ```
 
+### skills
+
+```bash
+npx skills install taconotsandwich/unity-agentic-tools # See more at https://github.com/vercel-labs/skills
+```
+
 ### From Source
 
 ```bash
@@ -43,7 +49,7 @@ bun run build            # build TypeScript
 ### Read Commands
 
 ```bash
-unity-agentic-tools read scene <file>                        # GameObject hierarchy (paginated)
+unity-agentic-tools read scene <file>                         # GameObject hierarchy (paginated)
 unity-agentic-tools read gameobject <file> <id>               # Single object by name or file ID
 unity-agentic-tools read asset <file>                         # Any Unity YAML asset file (--raw to skip mesh decode)
 unity-agentic-tools read material <file>                      # Structured material properties
@@ -83,7 +89,6 @@ unity-agentic-tools create input-actions <path> <name>        # Blank .inputacti
 unity-agentic-tools create animation <path> [name]            # Blank .anim file
 unity-agentic-tools create animator <path> [name]             # Blank .controller file
 unity-agentic-tools create prefab <file> <name>               # Create prefab from GameObject
-```
 
 ### Update Commands
 
