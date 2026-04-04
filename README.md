@@ -89,6 +89,7 @@ unity-agentic-tools create input-actions <path> <name>        # Blank .inputacti
 unity-agentic-tools create animation <path> [name]            # Blank .anim file
 unity-agentic-tools create animator <path> [name]             # Blank .controller file
 unity-agentic-tools create prefab <file> <name>               # Create prefab from GameObject
+```
 
 ### Update Commands
 
