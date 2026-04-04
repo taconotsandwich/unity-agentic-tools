@@ -9,38 +9,12 @@ using UnityAgenticTools.Refs;
 
 namespace UnityAgenticTools.Server
 {
-    public class HierarchyHandler : IRequestHandler
+    public static class HierarchyAPI
     {
-        public string MethodPrefix => "editor.hierarchy.";
 
-        public async Task<object> HandleAsync(string method, Dictionary<string, object> parameters)
+        public static object Snapshot(int maxDepth = 99, bool includeInactive = false)
         {
-            var action = method.Substring(MethodPrefix.Length);
-
-            switch (action)
-            {
-                case "snapshot":
-                    return await TakeSnapshot(parameters);
-                case "query":
-                    return await Query(parameters);
-                default:
-                    throw new InvalidOperationException($"Unknown hierarchy action: {action}");
-            }
-        }
-
-        private async Task<object> TakeSnapshot(Dictionary<string, object> parameters)
-        {
-            return await EditorWebSocketServer.RunOnMainThread(() =>
-            {
                 RefManager.ClearHierarchy();
-
-                int maxDepth = 99;
-                if (parameters.TryGetValue("maxDepth", out var mdObj))
-                    maxDepth = Convert.ToInt32(mdObj);
-
-                bool includeInactive = false;
-                if (parameters.TryGetValue("includeInactive", out var iiObj) && iiObj is bool ii)
-                    includeInactive = ii;
 
                 var scene = SceneManager.GetActiveScene();
                 var roots = scene.GetRootGameObjects();
@@ -59,7 +33,6 @@ namespace UnityAgenticTools.Server
                     { "refCount", RefManager.GetHierarchyRefCount() },
                     { "tree", tree.ToArray() }
                 };
-            });
         }
 
         private static object BuildNode(GameObject go, int depth, int maxDepth, bool includeInactive)
@@ -117,16 +90,8 @@ namespace UnityAgenticTools.Server
             return node;
         }
 
-        private async Task<object> Query(Dictionary<string, object> parameters)
+        public static object Query(string refStr, string query, string type = null)
         {
-            if (!parameters.TryGetValue("ref", out var refObj) || !(refObj is string refStr))
-                throw new ArgumentException("Missing required parameter: ref");
-
-            if (!parameters.TryGetValue("query", out var queryObj) || !(queryObj is string query))
-                throw new ArgumentException("Missing required parameter: query");
-
-            return await EditorWebSocketServer.RunOnMainThread(() =>
-            {
                 var go = RefManager.ResolveGameObject(refStr);
 
                 switch (query)
@@ -151,15 +116,14 @@ namespace UnityAgenticTools.Server
                         };
 
                     case "component":
-                        if (!parameters.TryGetValue("type", out var typeObj) || !(typeObj is string typeName))
+                        if (string.IsNullOrEmpty(type))
                             throw new ArgumentException("Missing required parameter: type (for component query)");
 
-                        return QueryComponent(go, refStr, typeName);
+                        return QueryComponent(go, refStr, type);
 
                     default:
                         throw new ArgumentException($"Unknown query type: {query}. Use: active, position, component");
                 }
-            });
         }
 
         private static object QueryComponent(GameObject go, string refStr, string typeName)

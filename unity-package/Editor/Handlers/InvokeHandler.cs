@@ -89,9 +89,13 @@ namespace UnityAgenticTools.Server
             foreach (var m in allMethods)
             {
                 if (m.Name != memberName || m.IsGenericMethodDefinition) continue;
-                var paramCount = m.GetParameters().Length;
+                var mParams = m.GetParameters();
+                var paramCount = mParams.Length;
+                int minParams = 0;
+                foreach (var p in mParams) if (!p.IsOptional) minParams++;
+
                 availableArities.Add(paramCount);
-                if (paramCount == argsArr.Length)
+                if (argsArr.Length >= minParams && argsArr.Length <= paramCount)
                 {
                     methodInfo = m;
                     matchCount++;
@@ -120,13 +124,19 @@ namespace UnityAgenticTools.Server
                 }
                 else
                 {
-                    int count = Math.Min(argsArr.Length, methodParams.Length);
-                    invokeArgs = new object[count];
-                    for (int i = 0; i < count; i++)
+                    invokeArgs = new object[methodParams.Length];
+                    for (int i = 0; i < methodParams.Length; i++)
                     {
-                        invokeArgs[i] = methodParams[i].ParameterType == typeof(string)
-                            ? argsArr[i]
-                            : Convert.ChangeType(argsArr[i], methodParams[i].ParameterType);
+                        if (i < argsArr.Length)
+                        {
+                            invokeArgs[i] = methodParams[i].ParameterType == typeof(string)
+                                ? argsArr[i]
+                                : Convert.ChangeType(argsArr[i], methodParams[i].ParameterType);
+                        }
+                        else
+                        {
+                            invokeArgs[i] = methodParams[i].HasDefaultValue ? methodParams[i].DefaultValue : Type.Missing;
+                        }
                     }
                 }
                 var result = methodInfo.Invoke(null, invokeArgs);
