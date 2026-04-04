@@ -18,6 +18,7 @@ import { generateGuid, validate_name, validate_file_path, find_unity_project_roo
 import { extractGuidFromMeta, resolve_script_with_fields, resolve_source_prefab, build_type_lookup } from './shared';
 import { generate_field_yaml, json_value_to_yaml_lines } from './yaml-fields';
 import { UnityDocument } from './unity-document';
+import { UnityBlock } from './unity-block';
 import type { UnityVersion } from '../build-version';
 import { read_project_version } from '../build-version';
 
@@ -302,59 +303,422 @@ function find_game_object_in_variant(
     return null;
 }
 
+interface ParsedPrefabRef {
+  file_id: string;
+  guid?: string;
+  type?: string;
+}
+
+interface NormalizedPrefabRef {
+  file_id: string;
+  guid: string;
+  type: string;
+}
+
+interface AddedOverrideEntry {
+  target: NormalizedPrefabRef;
+  insert_index: number;
+  added_object_file_id: string;
+}
+
+interface PrefabArraySection {
+  lines: string[];
+  key_index: number;
+  section_end: number;
+  indent: string;
+}
+
+function parsePrefabRef(refText: string): ParsedPrefabRef | null {
+  const fileIdMatch = refText.match(/fileID:[ \t]*(-?\d+)/i);
+  if (!fileIdMatch) return null;
+
+  const guidMatch = refText.match(/guid:[ \t]*([a-f0-9]{32})/i);
+  const typeMatch = refText.match(/type:[ \t]*(-?\d+)/i);
+
+  return {
+    file_id: fileIdMatch[1],
+    guid: guidMatch ? guidMatch[1].toLowerCase() : undefined,
+    type: typeMatch ? typeMatch[1] : undefined,
+  };
+}
+
+function extractPrefabSourceGuid(prefabInstanceRaw: string): string | null {
+  const sourceMatch = prefabInstanceRaw.match(/m_SourcePrefab:[ \t]*\{[^}]*guid:[ \t]*([a-f0-9]{32})/i);
+  return sourceMatch ? sourceMatch[1].toLowerCase() : null;
+}
+
+function normalizePrefabRef(refText: string, sourceGuid: string | null): { ref?: NormalizedPrefabRef; error?: string } {
+  const parsed = parsePrefabRef(refText);
+  if (!parsed) {
+    return { error: `Invalid reference "${refText}". Expected format: {fileID: N, guid: ..., type: T}` };
+  }
+
+  const guid = parsed.guid ?? sourceGuid;
+  if (!guid) {
+    return { error: `Reference "${refText}" is missing guid and source prefab guid could not be inferred.` };
+  }
+  if (!/^[a-f0-9]{32}$/i.test(guid)) {
+    return { error: `Invalid guid in reference "${refText}". Expected 32-character hex GUID.` };
+  }
+
+  const type = parsed.type ?? '3';
+  if (!/^-?\d+$/.test(type)) {
+    return { error: `Invalid type in reference "${refText}". Expected an integer type value.` };
+  }
+
+  return {
+    ref: {
+      file_id: parsed.file_id,
+      guid,
+      type,
+    }
+  };
+}
+
+function serializePrefabRef(ref: NormalizedPrefabRef): string {
+  return `{fileID: ${ref.file_id}, guid: ${ref.guid}, type: ${ref.type}}`;
+}
+
+function ensurePrefabModificationSerializedVersion(prefabInstanceBlock: UnityBlock): boolean {
+  const raw = prefabInstanceBlock.raw;
+  const updated = raw.replace(
+    /(^([ \t]*)m_Modification:[ \t]*\n)(?!\2[ \t]+serializedVersion:[ \t]*\d+)/m,
+    (_match, prefix: string, indent: string) => `${prefix}${indent}  serializedVersion: 3\n`
+  );
+
+  if (updated === raw) {
+    return false;
+  }
+
+  prefabInstanceBlock.replace_raw(updated);
+  return true;
+}
+
+function addedOverrideEntryKey(entry: AddedOverrideEntry): string {
+  return `${entry.target.file_id}|${entry.target.guid}|${entry.target.type}|${entry.insert_index}|${entry.added_object_file_id}`;
+}
+
+function splitPrefabArraySection(rawText: string, key: 'm_AddedGameObjects' | 'm_AddedComponents'): PrefabArraySection | null {
+  const lines = rawText.split('\n');
+  const keyPattern = new RegExp(`^([ \t]*)${key}:[ \t]*(.*)$`);
+
+  let keyIndex = -1;
+  let indent = '';
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(keyPattern);
+    if (match) {
+      keyIndex = i;
+      indent = match[1];
+      break;
+    }
+  }
+
+  if (keyIndex === -1) {
+    return null;
+  }
+
+  const keyIndentLen = indent.length;
+  let sectionEnd = keyIndex + 1;
+  for (let i = keyIndex + 1; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      sectionEnd = i + 1;
+      continue;
+    }
+
+    const indentLen = (line.match(/^[ \t]*/) || [''])[0].length;
+    if (indentLen < keyIndentLen) {
+      break;
+    }
+    if (
+      indentLen === keyIndentLen &&
+      !trimmed.startsWith('-') &&
+      /^[A-Za-z_][A-Za-z0-9_]*:/.test(trimmed)
+    ) {
+      break;
+    }
+
+    sectionEnd = i + 1;
+  }
+
+  return {
+    lines,
+    key_index: keyIndex,
+    section_end: sectionEnd,
+    indent,
+  };
+}
+
+function collectAddedOverrideEntries(
+  lines: string[],
+  key_index: number,
+  section_end: number,
+  sourceGuid: string | null,
+): AddedOverrideEntry[] {
+  const sectionLines = lines.slice(key_index + 1, section_end);
+  const dedup = new Map<string, AddedOverrideEntry>();
+
+  let i = 0;
+  while (i < sectionLines.length) {
+    const line = sectionLines[i];
+    const trimmed = line.trimStart();
+    if (!trimmed.startsWith('-')) {
+      i++;
+      continue;
+    }
+
+    const entryIndent = (line.match(/^[ \t]*/) || [''])[0].length;
+    const entryLines: string[] = [line];
+    i++;
+
+    while (i < sectionLines.length) {
+      const nextLine = sectionLines[i];
+      const nextTrimmed = nextLine.trim();
+      const nextIndent = (nextLine.match(/^[ \t]*/) || [''])[0].length;
+
+      if (nextTrimmed.length > 0 && nextIndent === entryIndent && nextTrimmed.startsWith('-')) {
+        break;
+      }
+      entryLines.push(nextLine);
+      i++;
+    }
+
+    const entryText = entryLines.join('\n');
+    const targetMatch = entryText.match(/targetCorrespondingSourceObject:[ \t]*(\{[^}]+\})/);
+    const insertMatch = entryText.match(/insertIndex:[ \t]*(-?\d+)/);
+    const addedObjectMatch = entryText.match(/addedObject:[ \t]*\{[^}]*fileID:[ \t]*(-?\d+)/);
+
+    if (!targetMatch || !addedObjectMatch) {
+      continue;
+    }
+
+    const normalizedTarget = normalizePrefabRef(targetMatch[1], sourceGuid).ref;
+    if (!normalizedTarget) {
+      continue;
+    }
+
+    const insertIndex = insertMatch ? Number.parseInt(insertMatch[1], 10) : -1;
+    const entry: AddedOverrideEntry = {
+      target: normalizedTarget,
+      insert_index: Number.isNaN(insertIndex) ? -1 : insertIndex,
+      added_object_file_id: addedObjectMatch[1],
+    };
+
+    const dedupKey = addedOverrideEntryKey(entry);
+    if (!dedup.has(dedupKey)) {
+      dedup.set(dedupKey, entry);
+    }
+  }
+
+  return [...dedup.values()];
+}
+
+function appendToAddedOverrideArray(
+  doc: UnityDocument,
+  piId: string,
+  key: 'm_AddedGameObjects' | 'm_AddedComponents',
+  targetSourceRef: string,
+  newObjectId: string,
+): { success: boolean; changed?: boolean; error?: string } {
+  const piBlock = doc.find_by_file_id(piId);
+  if (!piBlock) {
+    return { success: false, error: `PrefabInstance with fileID ${piId} not found` };
+  }
+
+  ensurePrefabModificationSerializedVersion(piBlock);
+
+  const split = splitPrefabArraySection(piBlock.raw, key);
+  if (!split) {
+    return { success: false, error: `${key} property not found in PrefabInstance ${piId}` };
+  }
+
+  const sourceGuid = extractPrefabSourceGuid(piBlock.raw);
+  const normalizedTarget = normalizePrefabRef(targetSourceRef, sourceGuid);
+  if (!normalizedTarget.ref) {
+    return { success: false, error: normalizedTarget.error };
+  }
+
+  const candidate: AddedOverrideEntry = {
+    target: normalizedTarget.ref,
+    insert_index: -1,
+    added_object_file_id: newObjectId,
+  };
+  const candidateKey = addedOverrideEntryKey(candidate);
+  const existing = collectAddedOverrideEntries(
+    split.lines,
+    split.key_index,
+    split.section_end,
+    sourceGuid,
+  );
+  if (existing.some(entry => addedOverrideEntryKey(entry) === candidateKey)) {
+    return { success: true, changed: false };
+  }
+
+  const entryLines = [
+    `${split.indent}- targetCorrespondingSourceObject: ${serializePrefabRef(candidate.target)}`,
+    `${split.indent}  insertIndex: ${candidate.insert_index}`,
+    `${split.indent}  addedObject: {fileID: ${candidate.added_object_file_id}}`,
+  ];
+
+  const keyLine = split.lines[split.key_index].trim();
+  let insertIndex = split.section_end;
+  while (insertIndex > split.key_index + 1 && split.lines[insertIndex - 1].trim().length === 0) {
+    insertIndex--;
+  }
+
+  let updatedLines: string[];
+  if (keyLine === `${key}: []`) {
+    const replacement = [`${split.indent}${key}:`, ...entryLines];
+    updatedLines = [
+      ...split.lines.slice(0, split.key_index),
+      ...replacement,
+      ...split.lines.slice(split.section_end),
+    ];
+  } else {
+    updatedLines = [
+      ...split.lines.slice(0, insertIndex),
+      ...entryLines,
+      ...split.lines.slice(insertIndex),
+    ];
+  }
+
+  piBlock.replace_raw(updatedLines.join('\n'));
+  return { success: true, changed: true };
+}
+
 /**
  * Append a new entry to a PrefabInstance's m_AddedGameObjects array.
  */
-function appendToAddedGameObjects(doc: UnityDocument, piId: string, targetSourceRef: string, newGoId: string): void {
-  const piBlock = doc.find_by_file_id(piId);
-  if (!piBlock) return;
-
-  const entry = `\n    - targetCorrespondingSourceObject: ${targetSourceRef}\n      insertIndex: -1\n      addedObject: {fileID: ${newGoId}}`;
-
-  let raw = piBlock.raw;
-
-  // Try replacing empty array: m_AddedGameObjects: []
-  const emptyPattern = /m_AddedGameObjects:[ \t]*\[\]/;
-  if (emptyPattern.test(raw)) {
-    raw = raw.replace(emptyPattern, `m_AddedGameObjects:${entry}`);
-    piBlock.replace_raw(raw);
-    return;
-  }
-
-  // Try appending to existing entries
-  const existingPattern = /(m_AddedGameObjects:[ \t]*\n(?:[ \t]+-[\s\S]*?(?=\n[ \t]+m_|$))*)/;
-  if (existingPattern.test(raw)) {
-    raw = raw.replace(existingPattern, `$1${entry}`);
-    piBlock.replace_raw(raw);
-  }
+function appendToAddedGameObjects(
+  doc: UnityDocument,
+  piId: string,
+  targetSourceRef: string,
+  newGoId: string,
+): { success: boolean; changed?: boolean; error?: string } {
+  return appendToAddedOverrideArray(doc, piId, 'm_AddedGameObjects', targetSourceRef, newGoId);
 }
 
 /**
  * Append a new entry to a PrefabInstance's m_AddedComponents array.
  */
-function appendToAddedComponents(doc: UnityDocument, piId: string, targetSourceRef: string, newComponentId: string): void {
-  const piBlock = doc.find_by_file_id(piId);
-  if (!piBlock) return;
-
-  const entry = `\n    - targetCorrespondingSourceObject: ${targetSourceRef}\n      insertIndex: -1\n      addedObject: {fileID: ${newComponentId}}`;
-
-  let raw = piBlock.raw;
-
-  // Try replacing empty array: m_AddedComponents: []
-  const emptyPattern = /m_AddedComponents:[ \t]*\[\]/;
-  if (emptyPattern.test(raw)) {
-    raw = raw.replace(emptyPattern, `m_AddedComponents:${entry}`);
-    piBlock.replace_raw(raw);
-    return;
-  }
-
-  // Try appending to existing entries
-  const existingPattern = /(m_AddedComponents:[ \t]*\n(?:[ \t]+-[\s\S]*?(?=\n[ \t]+m_|$))*)/;
-  if (existingPattern.test(raw)) {
-    raw = raw.replace(existingPattern, `$1${entry}`);
-    piBlock.replace_raw(raw);
-  }
+function appendToAddedComponents(
+  doc: UnityDocument,
+  piId: string,
+  targetSourceRef: string,
+  newComponentId: string,
+): { success: boolean; changed?: boolean; error?: string } {
+  return appendToAddedOverrideArray(doc, piId, 'm_AddedComponents', targetSourceRef, newComponentId);
 }
+
+/** Full YAML templates for built-in components that are sensitive to missing fields. */
+const COMPONENT_FULL_TEMPLATES: Record<number, (gameObjectId: string) => string> = {
+  65: (gameObjectId: string) => `  m_GameObject: {fileID: ${gameObjectId}}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 1, y: 1, z: 1}
+  m_Center: {x: 0, y: 0, z: 0}`,
+  82: (gameObjectId: string) => `  m_GameObject: {fileID: ${gameObjectId}}
+  m_Enabled: 1
+  serializedVersion: 4
+  OutputAudioMixerGroup: {fileID: 0}
+  m_audioClip: {fileID: 0}
+  m_PlayOnAwake: 1
+  m_Volume: 1
+  m_Pitch: 1
+  Loop: 0
+  Mute: 0
+  Spatialize: 0
+  SpatializePostEffects: 0
+  Priority: 128
+  DopplerLevel: 1
+  MinDistance: 1
+  MaxDistance: 500
+  Pan2D: 0
+  rolloffMode: 0
+  BypassEffects: 0
+  BypassListenerEffects: 0
+  BypassReverbZones: 0
+  rolloffCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  panLevelCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  spreadCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  reverbZoneMixCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4`,
+};
 
 /** Default property values for common built-in components. */
 const COMPONENT_DEFAULTS: Record<number, string> = {
@@ -394,6 +758,18 @@ function createGenericComponentYAML(
   componentId: string,
   gameObjectId: string
 ): string {
+  const fullTemplate = COMPONENT_FULL_TEMPLATES[classId];
+  if (fullTemplate) {
+    return `--- !u!${classId} &${componentId}
+${componentName}:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+${fullTemplate(gameObjectId)}
+`;
+  }
+
   const defaults = COMPONENT_DEFAULTS[classId] ? '\n' + COMPONENT_DEFAULTS[classId] + '\n' : '';
   return `--- !u!${classId} &${componentId}
 ${componentName}:
@@ -596,7 +972,14 @@ export function createGameObject(options: CreateGameObjectOptions): CreateGameOb
 
   // If variant, register in PrefabInstance's m_AddedGameObjects
   if (variantPiId && strippedSourceRef) {
-    appendToAddedGameObjects(doc, variantPiId, strippedSourceRef, gameObjectIdStr);
+    const appendResult = appendToAddedGameObjects(doc, variantPiId, strippedSourceRef, gameObjectIdStr);
+    if (!appendResult.success) {
+      return {
+        success: false,
+        file_path,
+        error: appendResult.error || `Failed to update m_AddedGameObjects for PrefabInstance ${variantPiId}`,
+      };
+    }
   }
 
   // Save
@@ -1126,6 +1509,7 @@ PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Modification:
+    serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
     - target: {fileID: ${rootInfo.game_object.file_id}, guid: ${sourceGuid}, type: 3}
@@ -1298,6 +1682,7 @@ PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Modification:
+    serializedVersion: 3
     m_TransformParent: {fileID: ${parentTransformIdStr}}
     m_Modifications:
     - target: {fileID: ${rootGoFileId}, guid: ${sourceGuid}, type: 3}
@@ -1652,6 +2037,7 @@ function is_valid_component_base(
         // plausibly a component base by name pattern (e.g., ends with "Behaviour")
         if (!fullPath.endsWith('.cs') || !existsSync(fullPath)) {
           if (match.kind === 'class') {
+            if (fullPath.includes('Assembly-CSharp.dll')) return true;
             return is_likely_component_base_name(base_class);
           }
         }
@@ -1835,11 +2221,9 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
     }
     if (resolved.base_class && !COMPONENT_BASE_CLASSES.has(resolved.base_class) &&
         !is_valid_component_base(resolved.base_class, project_path)) {
-      return {
-        success: false,
-        file_path,
-        error: `"${component_type}" extends ${resolved.base_class}, which does not inherit from MonoBehaviour. Cannot add as a component. If this is incorrect, ensure the type registry is up to date ("setup" command).`
-      };
+      const warn = `"${component_type}" extends ${resolved.base_class}, which does not inherit from MonoBehaviour. Adding anyway, but ensure the script is a valid component. (Re-run "setup" if the inheritance graph is stale).`;
+      if (!extractionError) extractionError = warn;
+      else extractionError += ' ' + warn;
     }
 
     // Read project version for version-gated field defaults
@@ -1859,12 +2243,22 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
     componentYAML = createMonoBehaviourYAML(componentId, gameObjectId, resolved.guid, resolved.fields, version, scriptFileId, type_lookup_comp);
     scriptGuid = resolved.guid;
     scriptPath = resolved.path || undefined;
-    extractionError = resolved.extraction_error;
+    if (resolved.extraction_error) {
+      if (!extractionError) extractionError = resolved.extraction_error;
+      else extractionError += ' ' + resolved.extraction_error;
+    }
   }
 
   // Add component reference -- variant path uses m_AddedComponents instead of m_Component
   if (variantInfo) {
-    appendToAddedComponents(doc, variantInfo.prefab_instance_id, variantInfo.source_ref, componentIdStr);
+    const appendResult = appendToAddedComponents(doc, variantInfo.prefab_instance_id, variantInfo.source_ref, componentIdStr);
+    if (!appendResult.success) {
+      return {
+        success: false,
+        file_path,
+        error: appendResult.error || `Failed to update m_AddedComponents for PrefabInstance ${variantInfo.prefab_instance_id}`,
+      };
+    }
   } else {
     const added = addComponentToGameObject(doc, gameObjectIdStr, componentIdStr);
     if (!added) {

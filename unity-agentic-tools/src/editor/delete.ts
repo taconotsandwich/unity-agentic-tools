@@ -130,6 +130,7 @@ export function removeComponent(options: RemoveComponentOptions): RemoveComponen
   }
 
   const resolved_file_id = found.file_id;
+  let removed_added_component_overrides = 0;
 
   // Extract m_GameObject from the component block and remove the component reference
   const goMatch = found.raw.match(/m_GameObject:[ \t]*\{fileID:[ \t]*(-?\d+)\}/);
@@ -144,6 +145,20 @@ export function removeComponent(options: RemoveComponentOptions): RemoveComponen
         // Component reference line not found in parent GO -- warn but proceed
       }
       goBlock.replace_raw(modifiedRaw);
+
+      if (goBlock.is_stripped) {
+        const piMatch = goBlock.raw.match(/m_PrefabInstance:[ \t]*\{fileID:[ \t]*(-?\d+)\}/);
+        if (piMatch) {
+          const piBlock = doc.find_by_file_id(piMatch[1]);
+          if (piBlock && piBlock.class_id === 1001) {
+            const updated = removeAddedComponentOverrideEntries(piBlock.raw, resolved_file_id);
+            if (updated.removed_count > 0) {
+              piBlock.replace_raw(updated.updated_raw);
+              removed_added_component_overrides += updated.removed_count;
+            }
+          }
+        }
+      }
     }
   }
 
@@ -173,7 +188,7 @@ export function removeComponent(options: RemoveComponentOptions): RemoveComponen
     removed_file_id: resolved_file_id,
     removed_class_id: found.class_id,
     warning: dangling.length > 0
-      ? `Dangling references to deleted component found in blocks: ${dangling.join(', ')}`
+      ? `Dangling references to deleted component found in blocks: ${dangling.join(', ')}${removed_added_component_overrides > 0 ? ` (removed ${removed_added_component_overrides} m_AddedComponents override entr${removed_added_component_overrides === 1 ? 'y' : 'ies'})` : ''}`
       : undefined,
   };
 }
@@ -332,6 +347,162 @@ function findPrefabInstanceBlock(doc: UnityDocument, identifier: string): UnityB
   return null;
 }
 
+function splitPrefabArraySection(rawText: string, key: string): {
+  lines: string[];
+  key_index: number;
+  section_end: number;
+} | null {
+  const lines = rawText.split('\n');
+  const keyPattern = new RegExp(`^[ \t]*${key}:[ \t]*(.*)$`);
+
+  let keyIndex = -1;
+  let keyIndentLen = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(keyPattern);
+    if (match) {
+      keyIndex = i;
+      keyIndentLen = (lines[i].match(/^[ \t]*/) || [''])[0].length;
+      break;
+    }
+  }
+
+  if (keyIndex === -1) {
+    return null;
+  }
+
+  let sectionEnd = keyIndex + 1;
+  for (let i = keyIndex + 1; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      sectionEnd = i + 1;
+      continue;
+    }
+
+    const indentLen = (line.match(/^[ \t]*/) || [''])[0].length;
+    if (indentLen < keyIndentLen) {
+      break;
+    }
+    if (
+      indentLen === keyIndentLen &&
+      !trimmed.startsWith('-') &&
+      /^[A-Za-z_][A-Za-z0-9_]*:/.test(trimmed)
+    ) {
+      break;
+    }
+
+    sectionEnd = i + 1;
+  }
+
+  return {
+    lines,
+    key_index: keyIndex,
+    section_end: sectionEnd,
+  };
+}
+
+function collectAddedObjectFileIdsFromArray(rawText: string, key: 'm_AddedGameObjects' | 'm_AddedComponents'): string[] {
+  const section = splitPrefabArraySection(rawText, key);
+  if (!section) return [];
+
+  const keyLine = section.lines[section.key_index].trim();
+  if (new RegExp(`^${key}:[ \t]*\[\]$`).test(keyLine)) {
+    return [];
+  }
+
+  const sectionText = section.lines.slice(section.key_index, section.section_end).join('\n');
+  const fileIds = new Set<string>();
+  const addedObjectPattern = /addedObject:[ \t]*\{[^}]*fileID:[ \t]*(-?\d+)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = addedObjectPattern.exec(sectionText)) !== null) {
+    fileIds.add(match[1]);
+  }
+
+  // Backward-compatibility: older malformed/legacy shape may use inline refs like:
+  //   m_AddedComponents:
+  //   - {fileID: 123}
+  if (fileIds.size === 0) {
+    const inlineEntryPattern = /^[ \t]*-[ \t]*\{[^}]*fileID:[ \t]*(-?\d+)/gm;
+    while ((match = inlineEntryPattern.exec(sectionText)) !== null) {
+      fileIds.add(match[1]);
+    }
+  }
+
+  return [...fileIds];
+}
+
+function removeAddedComponentOverrideEntries(
+  rawText: string,
+  componentId: string,
+): { updated_raw: string; removed_count: number } {
+  const section = splitPrefabArraySection(rawText, 'm_AddedComponents');
+  if (!section) return { updated_raw: rawText, removed_count: 0 };
+
+  const keyLine = section.lines[section.key_index].trim();
+  if (/^m_AddedComponents:[ \t]*\[\]$/.test(keyLine)) {
+    return { updated_raw: rawText, removed_count: 0 };
+  }
+
+  const bodyLines = section.lines.slice(section.key_index + 1, section.section_end);
+  const keptEntries: string[][] = [];
+  let removed = 0;
+
+  let i = 0;
+  while (i < bodyLines.length) {
+    const line = bodyLines[i];
+    const trimmed = line.trimStart();
+    if (!trimmed.startsWith('-')) {
+      i++;
+      continue;
+    }
+
+    const entryIndent = (line.match(/^[ \t]*/) || [''])[0].length;
+    const entryLines: string[] = [line];
+    i++;
+
+    while (i < bodyLines.length) {
+      const nextLine = bodyLines[i];
+      const nextTrimmed = nextLine.trim();
+      const nextIndent = (nextLine.match(/^[ \t]*/) || [''])[0].length;
+
+      if (nextTrimmed.length > 0 && nextIndent === entryIndent && nextTrimmed.startsWith('-')) {
+        break;
+      }
+
+      entryLines.push(nextLine);
+      i++;
+    }
+
+    const entryText = entryLines.join('\n');
+    const addedObjectMatch = entryText.match(/addedObject:[ \t]*\{[^}]*fileID:[ \t]*(-?\d+)/);
+    if (addedObjectMatch && addedObjectMatch[1] === componentId) {
+      removed++;
+      continue;
+    }
+
+    keptEntries.push(entryLines);
+  }
+
+  if (removed === 0) {
+    return { updated_raw: rawText, removed_count: 0 };
+  }
+
+  const keyIndent = (section.lines[section.key_index].match(/^[ \t]*/) || [''])[0];
+  const replacement: string[] =
+    keptEntries.length === 0
+      ? [`${keyIndent}m_AddedComponents: []`]
+      : [`${keyIndent}m_AddedComponents:`, ...keptEntries.flat()];
+
+  const updatedLines = [
+    ...section.lines.slice(0, section.key_index),
+    ...replacement,
+    ...section.lines.slice(section.section_end),
+  ];
+
+  return { updated_raw: updatedLines.join('\n'), removed_count: removed };
+}
+
 /**
  * Delete a PrefabInstance and all its associated blocks.
  */
@@ -375,44 +546,29 @@ export function deletePrefabInstance(options: DeletePrefabInstanceOptions): Dele
   }
 
   // Collect all AddedGameObjects and AddedComponents blocks
-  // Parse m_AddedGameObjects from PI block
-  const addedGOPattern = /m_AddedGameObjects:\s*\n((?:\s*- \{fileID: \d+\}\n)*)/m;
-  const addedGOMatch = piBlock.raw.match(addedGOPattern);
-  if (addedGOMatch) {
-    const addedGOSection = addedGOMatch[1];
-    const goMatches = addedGOSection.matchAll(/fileID:[ \t]*(\d+)/g);
-    for (const match of goMatches) {
-      const goId = match[1];
-      allToRemove.add(goId);
+  for (const goId of collectAddedObjectFileIdsFromArray(piBlock.raw, 'm_AddedGameObjects')) {
+    allToRemove.add(goId);
 
-      // For each added GO, collect its hierarchy too
-      const goBlock = doc.find_by_file_id(goId);
-      if (goBlock) {
-        // Find transform
-        const compMatch = goBlock.raw.match(/component:[ \t]*\{fileID:[ \t]*(\d+)\}/);
-        if (compMatch) {
-          const transformId = compMatch[1];
-          allToRemove.add(transformId);
+    // For each added GO, collect its hierarchy too
+    const goBlock = doc.find_by_file_id(goId);
+    if (goBlock) {
+      // Find transform
+      const compMatch = goBlock.raw.match(/component:[ \t]*\{fileID:[ \t]*(\d+)\}/);
+      if (compMatch) {
+        const transformId = compMatch[1];
+        allToRemove.add(transformId);
 
-          // Collect hierarchy
-          const descendants = doc.collect_hierarchy(transformId);
-          for (const id of descendants) {
-            allToRemove.add(id);
-          }
+        // Collect hierarchy
+        const descendants = doc.collect_hierarchy(transformId);
+        for (const id of descendants) {
+          allToRemove.add(id);
         }
       }
     }
   }
 
-  // Parse m_AddedComponents from PI block
-  const addedCompPattern = /m_AddedComponents:\s*\n((?:\s*- \{fileID: \d+\}\n)*)/m;
-  const addedCompMatch = piBlock.raw.match(addedCompPattern);
-  if (addedCompMatch) {
-    const addedCompSection = addedCompMatch[1];
-    const compMatches = addedCompSection.matchAll(/fileID:[ \t]*(\d+)/g);
-    for (const match of compMatches) {
-      allToRemove.add(match[1]);
-    }
+  for (const componentId of collectAddedObjectFileIdsFromArray(piBlock.raw, 'm_AddedComponents')) {
+    allToRemove.add(componentId);
   }
 
   // Find parent transform (m_TransformParent from PI block)

@@ -1381,6 +1381,7 @@ describe('createPrefabVariant', () => {
         // Check PrefabInstance block
         expect(content).toMatch(/--- !u!1001 &\d+/);
         expect(content).toContain('m_SourcePrefab: {fileID: 100100000');
+        expect(content).toContain('m_Modification:\n    serializedVersion: 3\n    m_TransformParent: {fileID: 0}');
     });
 
     it('should fail for nonexistent source prefab', () => {
@@ -1470,6 +1471,7 @@ describe('createPrefabInstance', () => {
         expect(content).toContain('stripped');
         expect(content).toContain('m_SourcePrefab:');
         expect(content).toContain('guid: a1b2c3d4e5f6789012345678abcdef12');
+        expect(content).toContain('m_Modification:\n    serializedVersion: 3\n    m_TransformParent: {fileID: 0}');
     });
 
     it('should default instance name to prefab filename stem', () => {
@@ -1878,6 +1880,49 @@ describe('removeComponent', () => {
         }
     });
 
+    it('should emit Unity-compatible AudioSource YAML fields', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'AudioSource',
+        });
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const blockPattern = new RegExp(`--- !u!82 &${result.component_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const blockMatch = content.match(blockPattern);
+        expect(blockMatch).not.toBeNull();
+        const block = blockMatch![0];
+
+        expect(block).toContain('serializedVersion: 4');
+        expect(block).toContain('OutputAudioMixerGroup: {fileID: 0}');
+        expect(block).toContain('m_audioClip: {fileID: 0}');
+        expect(block).toContain('rolloffCustomCurve:');
+        expect(block).toContain('reverbZoneMixCustomCurve:');
+    });
+
+    it('should emit Unity-compatible BoxCollider YAML fields', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'BoxCollider',
+        });
+        expect(result.success).toBe(true);
+
+        const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+        const blockPattern = new RegExp(`--- !u!65 &${result.component_id}[\\s\\S]*?(?=--- !u!|$)`);
+        const blockMatch = content.match(blockPattern);
+        expect(blockMatch).not.toBeNull();
+        const block = blockMatch![0];
+
+        expect(block).toContain('serializedVersion: 3');
+        expect(block).toContain('m_IncludeLayers:');
+        expect(block).toContain('m_ExcludeLayers:');
+        expect(block).toContain('m_ProvidesContacts: 0');
+        expect(block).toContain('m_Size: {x: 1, y: 1, z: 1}');
+        expect(block).toContain('m_Center: {x: 0, y: 0, z: 0}');
+    });
+
     it('should fail when target GameObject has no m_Component array', () => {
         // Corrupt the scene by stripping m_Component and its entries from Player GO
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
@@ -1933,6 +1978,36 @@ describe('removeComponent', () => {
         expect(result.warning).toBeDefined();
         expect(result.warning).toContain('Dangling references');
         expect(result.warning).toContain('1847675926');
+    });
+
+    it('should remove matching m_AddedComponents entry when deleting added variant component', () => {
+        const temp = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SamplePrefabVariant.prefab')
+        );
+        try {
+            const addResult = addComponent({
+                file_path: temp.temp_path,
+                game_object_name: 'EnemyVariant',
+                component_type: 'AudioSource',
+            });
+            expect(addResult.success).toBe(true);
+
+            const componentId = String(addResult.component_id!);
+            const before = readFileSync(temp.temp_path, 'utf-8');
+            expect(before).toContain(`addedObject: {fileID: ${componentId}}`);
+
+            const removeResult = removeComponent({
+                file_path: temp.temp_path,
+                file_id: componentId,
+            });
+            expect(removeResult.success).toBe(true);
+
+            const after = readFileSync(temp.temp_path, 'utf-8');
+            expect(after).not.toContain(`addedObject: {fileID: ${componentId}}`);
+            expect(after).not.toContain(`--- !u!82 &${componentId}`);
+        } finally {
+            temp.cleanup_fn();
+        }
     });
 });
 
@@ -4472,6 +4547,7 @@ describe('createGameObject - variant support', () => {
 
         // m_AddedGameObjects should no longer be empty
         expect(content).not.toMatch(/m_AddedGameObjects:\s*\[\]/);
+        expect(content).toContain('m_AddedGameObjects:\n    - targetCorrespondingSourceObject: {fileID: 400000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}\n      insertIndex: -1');
         // Should contain the new GO's fileID
         expect(content).toContain(`addedObject: {fileID: ${result.game_object_id}}`);
         // The new Transform should have m_Father set to the stripped Transform
@@ -4943,6 +5019,39 @@ describe('deletePrefabInstance', () => {
         expect(camera).not.toBeNull();
         expect(camera!.class_id).toBe(20);
     });
+
+    it('should remove added GameObjects and added components recorded in structured override arrays', () => {
+        const create_go_result = createGameObject({
+            file_path: temp_fixture.temp_path,
+            name: 'VariantAddedChild',
+        });
+        expect(create_go_result.success).toBe(true);
+        expect(create_go_result.game_object_id).toBeDefined();
+
+        const add_component_result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'MyEnemy',
+            component_type: 'AudioSource',
+        });
+        expect(add_component_result.success).toBe(true);
+        expect(add_component_result.component_id).toBeDefined();
+
+        const before_delete = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(before_delete).toContain('m_AddedGameObjects:\n    - targetCorrespondingSourceObject:');
+        expect(before_delete).toContain('m_AddedComponents:\n    - targetCorrespondingSourceObject:');
+
+        const delete_result = deletePrefabInstance({
+            file_path: temp_fixture.temp_path,
+            prefab_instance: '700000',
+        });
+        expect(delete_result.success).toBe(true);
+
+        const after_delete = readFileSync(temp_fixture.temp_path, 'utf-8');
+        expect(after_delete).not.toContain('&700000');
+        expect(after_delete).not.toContain(`&${create_go_result.game_object_id}`);
+        expect(after_delete).not.toContain(`&${create_go_result.transform_id}`);
+        expect(after_delete).not.toContain(`&${add_component_result.component_id}`);
+    });
 });
 
 // ========== UnityDocument.trace_references Tests ==========
@@ -5168,6 +5277,60 @@ describe('addComponent - PrefabVariant fileID precision', () => {
             // The stripped GO fileID is 5765656985498706498 (exceeds MAX_SAFE_INTEGER)
             // Must appear verbatim, not truncated to 5765656985498707000
             expect(content).toContain('m_GameObject: {fileID: 5765656985498706498}');
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+
+    it('should register component in m_AddedComponents with structured entry', () => {
+        const temp = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SamplePrefabVariant.prefab')
+        );
+        try {
+            const result = addComponent({
+                file_path: temp.temp_path,
+                game_object_name: 'EnemyVariant',
+                component_type: 'AudioSource',
+            });
+
+            expect(result.success).toBe(true);
+
+            const content = readFileSync(temp.temp_path, 'utf-8');
+            expect(content).toContain('m_AddedComponents:\n    - targetCorrespondingSourceObject: {fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}\n      insertIndex: -1');
+            expect(content).toContain(`addedObject: {fileID: ${result.component_id}}`);
+        } finally {
+            temp.cleanup_fn();
+        }
+    });
+
+    it('should append multiple structured entries to m_AddedComponents', () => {
+        const temp = create_temp_fixture(
+            resolve(__dirname, 'fixtures', 'SamplePrefabVariant.prefab')
+        );
+        try {
+            const add1 = addComponent({
+                file_path: temp.temp_path,
+                game_object_name: 'EnemyVariant',
+                component_type: 'AudioSource',
+            });
+            const add2 = addComponent({
+                file_path: temp.temp_path,
+                game_object_name: 'EnemyVariant',
+                component_type: 'BoxCollider',
+            });
+
+            expect(add1.success).toBe(true);
+            expect(add2.success).toBe(true);
+
+            const content = readFileSync(temp.temp_path, 'utf-8');
+            expect(content).toContain(`addedObject: {fileID: ${add1.component_id}}`);
+            expect(content).toContain(`addedObject: {fileID: ${add2.component_id}}`);
+
+            const sectionMatch = content.match(/m_AddedComponents:[\s\S]*?(?=\n\s*m_SourcePrefab:)/);
+            expect(sectionMatch).not.toBeNull();
+            const section = sectionMatch![0];
+            expect((section.match(/targetCorrespondingSourceObject:/g) || []).length).toBe(2);
+            expect((section.match(/insertIndex:[ \t]*-1/g) || []).length).toBe(2);
         } finally {
             temp.cleanup_fn();
         }
