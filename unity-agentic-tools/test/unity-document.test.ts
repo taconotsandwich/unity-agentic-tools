@@ -291,6 +291,27 @@ describe('require_unique_transform', () => {
         expect(result).not.toHaveProperty('error');
         expect((result as { file_id: string }).file_id).toBe('508316495');
     });
+
+    it('should accept PrefabInstance class 310 by fileID', () => {
+        const content = `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!310 &700000
+PrefabInstance:
+  m_Modification:
+    m_TransformParent: {fileID: 0}
+    m_Modifications: []
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}
+`;
+        const doc = UnityDocument.from_string(content);
+        const result = doc.require_unique_transform('700000');
+        expect(result).not.toHaveProperty('error');
+        expect((result as { file_id: string }).file_id).toBe('700000');
+        expect((result as { class_id: number }).class_id).toBe(310);
+    });
 });
 
 // ─── remove_blocks ─────────────────────────────────────────────────────

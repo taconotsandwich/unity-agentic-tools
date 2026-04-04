@@ -38,7 +38,7 @@ describe('UnityBlock', () => {
             ['Transform', 'SampleScene.unity', '508316495', 4, false, 'Transform'],
             ['MonoBehaviour', 'SampleScene.unity', '1847675927', 114, false, 'MonoBehaviour'],
             ['Stripped', 'SceneWithPrefab.unity', '600000', 1, true, 'GameObject'],
-            ['PrefabInstance', 'SceneWithPrefab.unity', '700000', 1001, false, 'Unknown_1001'],
+            ['PrefabInstance', 'SceneWithPrefab.unity', '700000', 1001, false, 'PrefabInstance'],
             ['Light', 'SampleScene.unity', '1028675096', 108, false, 'Light'],
         ] as [string, string, string, number, boolean, string][])(
             'should parse a %s header',
