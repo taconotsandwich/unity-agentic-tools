@@ -736,6 +736,19 @@ export interface DeletePrefabInstanceResult {
   error?: string;
 }
 
+export interface DeleteAssetFileOptions {
+  file_path: string;
+}
+
+export interface DeleteAssetFileResult {
+  success: boolean;
+  file_path: string;
+  deleted_file?: boolean;
+  deleted_meta?: boolean;
+  warning?: string;
+  error?: string;
+}
+
 // ========== Reference Graph Types ==========
 
 export interface ReferenceEdge {

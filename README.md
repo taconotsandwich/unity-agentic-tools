@@ -32,6 +32,8 @@ npm install -g unity-agentic-tools
 
 ```bash
 npx skills install taconotsandwich/unity-agentic-tools # See more at https://github.com/vercel-labs/skills
+
+npx skills add "." --all -g --copy
 ```
 
 ### From Source
@@ -124,6 +126,7 @@ unity-agentic-tools delete gameobject <file> <name>
 unity-agentic-tools delete component <file> <file_id>
 unity-agentic-tools delete build <scene>
 unity-agentic-tools delete prefab <file> <prefab_instance>
+unity-agentic-tools delete asset <file>
 unity-agentic-tools delete package <name>
 ```
 
@@ -139,6 +142,24 @@ unity-agentic-tools version                                   # Unity version (d
 unity-agentic-tools setup -p <project>                        # Initialize GUID cache
 unity-agentic-tools cleanup -p <project>                      # Remove cached data
 ```
+
+### Loaded Edit Protection
+
+When Unity Editor bridge is connected, commands that mutate existing `.unity`/`.prefab` files are soft-blocked if the target is currently loaded/open in editor. Pass `--bypass-loaded-protection` to force file-based edits.
+
+Applies to key mutators such as:
+- `clone <file> <name>`
+- `create gameobject|component|component-copy|prefab-instance`
+- `update gameobject|component|transform|parent|array|batch|batch-components|sibling-index|managed-reference|prefab ...`
+- `delete gameobject|component|prefab|asset`
+
+Offline behavior is unchanged: if editor bridge is not connected, operations proceed without this check.
+
+### Script Component Safety
+
+- `create component ... MonoBehaviour` is rejected (base class only).
+- All-zero script GUID is rejected.
+- Abstract scripts are rejected for `create component` and `create scriptable-object`.
 
 ### Editor Bridge Setup
 
@@ -162,58 +183,29 @@ The bridge starts automatically via `[InitializeOnLoad]` and writes connection i
 
 ### Editor Commands
 
+The editor bridge now uses a compact invoke-based CLI surface.
+
 ```bash
-# Connection & Play Mode
+# Core bridge commands
 unity-agentic-tools editor status -p <project>                # Check bridge connection
-unity-agentic-tools editor play                               # Enter play mode
-unity-agentic-tools editor stop                               # Exit play mode
-unity-agentic-tools editor pause                              # Toggle pause
-unity-agentic-tools editor step                               # Advance one frame
-
-# Discovery (snapshot interactive state with compact refs)
-unity-agentic-tools editor hierarchy-snapshot                  # Scene hierarchy with @hN refs
-unity-agentic-tools editor ui-snapshot                         # Interactive UI elements with @uN refs
-unity-agentic-tools editor input-map                           # List all input actions + legacy axes
-
-# State Queries (by ref)
-unity-agentic-tools editor get active @h1                      # Is GameObject active?
-unity-agentic-tools editor get position @h1                    # Transform world position
-unity-agentic-tools editor get component @h1 Rigidbody         # Component property values
-unity-agentic-tools editor get text @u1                        # UI element text content
-unity-agentic-tools editor get value @u2                       # UI element value (slider, toggle, etc.)
-
-# UI Interaction (by ref)
-unity-agentic-tools editor ui-click @u1                        # Click a Button
-unity-agentic-tools editor ui-fill @u2 "hello"                 # Clear + type into InputField
-unity-agentic-tools editor ui-type @u2 " world"                # Append text (no clear)
-unity-agentic-tools editor ui-toggle @u3                       # Toggle a Toggle
-unity-agentic-tools editor ui-slider @u4 0.75                  # Set Slider value
-unity-agentic-tools editor ui-select @u5 "Option A"            # Select Dropdown option
-unity-agentic-tools editor ui-scroll @u6 down 0.2              # Scroll a ScrollRect
-unity-agentic-tools editor ui-focus @u7                        # Focus an element
-
-# Input Simulation (requires Input System package)
-unity-agentic-tools editor input-key Space press               # Keyboard input
-unity-agentic-tools editor input-mouse 400 300 click           # Mouse at screen coords
-unity-agentic-tools editor input-touch 200 500 tap             # Touch simulation
-unity-agentic-tools editor input-action Jump                   # Trigger Input System action
-
-# Observation
-unity-agentic-tools editor screenshot --annotate               # Game view with numbered UI labels
-unity-agentic-tools editor wait --scene MainMenu               # Wait for scene to load
-unity-agentic-tools editor wait --ui @u1                       # Wait for UI element active
-unity-agentic-tools editor wait --ui-gone @u1                  # Wait for element to deactivate
-unity-agentic-tools editor wait --log "Level loaded"           # Wait for log message
-unity-agentic-tools editor wait --compile                      # Wait for compilation
-unity-agentic-tools editor wait 500                            # Wait N milliseconds
-
-# Console & Assets
-unity-agentic-tools editor console-logs --type Error           # Get console entries
-unity-agentic-tools editor console-clear                       # Clear console
+unity-agentic-tools editor invoke <type> <member> [args...]   # Call static API/property
 unity-agentic-tools editor console-follow                      # Stream logs real-time
-unity-agentic-tools editor screenshot -o shot.png              # Capture game view
-unity-agentic-tools editor tests-run --mode playmode           # Run Unity tests
-unity-agentic-tools editor menu "File/Save"                    # Execute menu item
+unity-agentic-tools editor list                                # Compact command catalog
+unity-agentic-tools editor install                             # Install bridge package
+unity-agentic-tools editor uninstall                           # Remove bridge package
+
+# Useful invoke examples
+unity-agentic-tools editor invoke UnityAgenticTools.API.PlayModeAPI Enter
+unity-agentic-tools editor invoke UnityAgenticTools.API.PlayModeAPI GetState
+unity-agentic-tools editor invoke UnityAgenticTools.API.SceneAPI Open "Assets/Scenes/L1.unity" false
+unity-agentic-tools editor invoke UnityAgenticTools.API.HierarchyAPI Snapshot "[2,false]"
+unity-agentic-tools editor invoke UnityAgenticTools.API.UIAPI Snapshot
+unity-agentic-tools editor invoke UnityAgenticTools.API.InputAPI Map
+unity-agentic-tools editor invoke UnityAgenticTools.API.ScreenshotAPI Take "[\"Temp/shot.png\",1]"
+unity-agentic-tools editor invoke UnityAgenticTools.API.TestRunnerAPI Run "[\"editmode\"]"
+
+# List commands with more detail when needed
+unity-agentic-tools editor list --scope all --show-options --show-args --show-desc
 ```
 
 ## Project Structure

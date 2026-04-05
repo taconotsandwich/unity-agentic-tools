@@ -14,6 +14,7 @@ import type { ProjectGrepFileType, ProjectSearchOptions, GameObjectWithComponent
 import { read_project_version } from './build-version';
 import { find_unity_project_root, glob_match, resolve_project_path } from './utils';
 import { load_guid_cache } from './guid-cache';
+import { enforce_loaded_edit_protection } from './loaded-protection';
 import * as path from 'path';
 import * as fs from 'fs';
 const { exec } = require('child_process');
@@ -57,8 +58,16 @@ program.addCommand(build_editor_command());
 program.command('clone <file> <object_name>')
   .description('Duplicate a GameObject and its hierarchy')
   .option('-n, --name <new_name>', 'Name for the duplicated object')
+  .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
   .option('-j, --json', 'Output as JSON')
-  .action((file, object_name, options) => {
+  .action(async (file, object_name, options) => {
+    const guard = await enforce_loaded_edit_protection(file, options.bypassLoadedProtection);
+    if (!guard.allowed) {
+      console.log(JSON.stringify({ success: false, file_path: file, error: guard.error }, null, 2));
+      process.exitCode = 1;
+      return;
+    }
+
     const result = duplicateGameObject({
       file_path: file,
       object_name: object_name,

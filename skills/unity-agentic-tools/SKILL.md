@@ -30,7 +30,7 @@ Run `unity-agentic-tools setup -p <project>` before first use. Run `unity-agenti
 | Change project settings | `read settings -s tags` then `update settings` |
 | Work with prefab overrides | `read overrides` then `update prefab override` |
 | Edit animations/animators | `read animation`/`read animator` then `update animation-curves`/`update animator-state` |
-| Test a running Unity app | `editor play` then `ui-snapshot` then `ui-click @uN` |
+| Test a running Unity app | `editor invoke UnityAgenticTools.API.PlayModeAPI Enter` then `editor invoke UnityAgenticTools.API.UIAPI Snapshot` then `editor invoke UnityAgenticTools.API.UIAPI Interact "[\"@uN\",\"click\"]"` |
 | Find text across project files | `grep "regex"` |
 | Batch edit multiple objects | `update batch <file> '<json>'` |
 | Manage build scenes | `read build` / `create build` / `update build` / `delete build` |
@@ -51,17 +51,17 @@ Use `--properties` only when component values are needed (saves tokens). Use `--
 
 **update** (31) -- Properties, transforms, settings, tags, layers, sorting layers, parent hierarchy, builds, arrays, batch edits, materials, meta, animations, animators, sibling index, input actions, animation curves, animator states, managed references, plus 9 prefab subcommands. See `reference/commands-update.md`
 
-**delete** (5) -- GameObjects, components, build entries, prefab instances, packages. See `reference/commands-delete.md`
+**delete** (6) -- GameObjects, components, build entries, prefab instances, asset files (+ .meta), packages. See `reference/commands-delete.md`
 
 **utilities** (8) -- search, grep, clone, version, docs, setup, cleanup, status. Setting aliases for `read settings`/`update settings`. See `reference/commands-utilities.md`
 
-**editor** (37) -- Live Unity Editor integration via WebSocket. See `reference/commands-editor.md`
+**editor** (6) -- Live Unity Editor integration via WebSocket using invoke/list/status model. See `reference/commands-editor.md`
 
 ## Editor bridge
 
 Install: `editor install` (defaults to cwd project, or use `--project <path>`). All editor commands accept `--project <path>`, `--timeout <ms>`, `--port <n>`.
 
-**Snapshot-then-interact**: Run `hierarchy-snapshot` or `ui-snapshot` to get compact refs (`@hN` for hierarchy, `@uN` for UI). Use refs in `get`, `ui-click`, `ui-fill`, `ui-toggle`, `ui-slider`, `ui-select`, `ui-scroll`, `input-*`, and other commands.
+**Snapshot-then-interact**: Run `editor invoke UnityAgenticTools.API.HierarchyAPI Snapshot` or `editor invoke UnityAgenticTools.API.UIAPI Snapshot` to get compact refs (`@hN` for hierarchy, `@uN` for UI). Use refs in `HierarchyAPI.Query`, `UIAPI.Query`, and `UIAPI.Interact`.
 
 Refs invalidate on: scene change, play mode transition, domain reload. Re-snapshot to refresh.
 
@@ -69,6 +69,7 @@ See `reference/workflows.md` for multi-step checklists (project setup, inspect-e
 
 ## Troubleshooting
 
-- **`get text/value @hN`**: `@hN` is hierarchy ref. `get text`/`get value` need UI refs (`@uN` from `ui-snapshot`). Use `get position`/`get active`/`get component` for hierarchy refs
+- **Invalid `@hN`/`@uN` refs**: refs are snapshot-scoped. Re-run `editor invoke UnityAgenticTools.API.HierarchyAPI Snapshot` or `editor invoke UnityAgenticTools.API.UIAPI Snapshot` after scene/play-mode changes.
 - **Editor bridge won't connect**: Ensure Unity is open, check `editor status`, re-run `editor install` (or `editor --project <path> install`)
-- **`scene-open` fails**: Use Assets-relative path (`Assets/Scenes/Main.unity`). Run `editor invoke UnityEditor.AssetDatabase Refresh` first for newly created scenes
+- **`SceneAPI.Open` fails**: use Assets-relative path (`Assets/Scenes/Main.unity`). Run `editor invoke UnityEditor.AssetDatabase Refresh` first for newly created scenes.
+- **Loaded edit protection error**: If editor is connected and target `.unity`/`.prefab` is currently loaded/open, pass `--bypass-loaded-protection` to force file-based edits
