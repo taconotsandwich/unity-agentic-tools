@@ -17,6 +17,7 @@ import { add_scene } from './build-editor';
 import { add_package } from './packages';
 import { save_input_actions } from './input-actions';
 import type { InputActionsFile } from './input-actions';
+import { enforce_loaded_edit_protection } from './loaded-protection';
 
 export function build_create_command(): Command {
     const cmd = new Command('create')
@@ -26,8 +27,9 @@ export function build_create_command(): Command {
         .description('Create a new GameObject in a Unity file')
         .option('-p, --parent <name|id>', 'Parent GameObject name or Transform fileID')
         .option('-n, --name <name>', 'GameObject name (alternative to positional arg)')
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
         .option('-j, --json', 'Output as JSON')
-        .action((file, name_positional, options) => {
+        .action(async (file, name_positional, options) => {
             const name = name_positional || options.name;
             if (!name) {
                 console.log(JSON.stringify({
@@ -52,6 +54,13 @@ export function build_create_command(): Command {
             if (options.parent) {
                 const asNumber = parseInt(options.parent, 10);
                 parent = isNaN(asNumber) ? options.parent : asNumber;
+            }
+
+            const guard = await enforce_loaded_edit_protection(file, options.bypassLoadedProtection);
+            if (!guard.allowed) {
+                console.log(JSON.stringify({ success: false, file_path: file, error: guard.error }, null, 2));
+                process.exitCode = 1;
+                return;
             }
 
             const result = createGameObject({
@@ -98,8 +107,9 @@ export function build_create_command(): Command {
         .option('-n, --name <name>', 'Instance name (defaults to prefab filename)')
         .option('-p, --parent <name|id>', 'Parent GameObject name or Transform fileID')
         .option('--position <x,y,z>', 'Local position (default: 0,0,0)')
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
         .option('-j, --json', 'Output as JSON')
-        .action((scene_file, prefab_path_arg, options) => {
+        .action(async (scene_file, prefab_path_arg, options) => {
             let position: { x: number; y: number; z: number } | undefined;
             if (options.position) {
                 const parts = (options.position as string).split(',').map(Number);
@@ -118,6 +128,13 @@ export function build_create_command(): Command {
             if (options.parent) {
                 const asNumber = parseInt(options.parent, 10);
                 parent = isNaN(asNumber) ? options.parent : asNumber;
+            }
+
+            const guard = await enforce_loaded_edit_protection(scene_file, options.bypassLoadedProtection);
+            if (!guard.allowed) {
+                console.log(JSON.stringify({ success: false, file_path: scene_file, error: guard.error }, null, 2));
+                process.exitCode = 1;
+                return;
             }
 
             const result = createPrefabInstance({
@@ -174,10 +191,18 @@ export function build_create_command(): Command {
     cmd.command('component <file> <object_name> <component>')
         .description('Add a Unity component (e.g., MeshRenderer, Animator, Rigidbody) or custom script')
         .option('-p, --project <path>', 'Unity project path (for script GUID lookup)')
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
         .option('-j, --json', 'Output as JSON')
-        .action((file, object_name, component, options) => {
+        .action(async (file, object_name, component, options) => {
             if (!component || component.trim() === '') {
                 console.log(JSON.stringify({ success: false, file_path: file, error: 'Component name must not be empty' }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            const guard = await enforce_loaded_edit_protection(file, options.bypassLoadedProtection, options.project);
+            if (!guard.allowed) {
+                console.log(JSON.stringify({ success: false, file_path: file, error: guard.error }, null, 2));
                 process.exitCode = 1;
                 return;
             }
@@ -195,8 +220,15 @@ export function build_create_command(): Command {
 
     cmd.command('component-copy <file> <source_file_id> <target_object_name>')
         .description('Copy a component to a target GameObject')
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
         .option('-j, --json', 'Output as JSON')
-        .action((file, source_file_id, target_object_name, _options) => {
+        .action(async (file, source_file_id, target_object_name, options) => {
+            const guard = await enforce_loaded_edit_protection(file, options.bypassLoadedProtection);
+            if (!guard.allowed) {
+                console.log(JSON.stringify({ success: false, file_path: file, error: guard.error }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
             const result = copyComponent({
                 file_path: file,
                 source_file_id: source_file_id,

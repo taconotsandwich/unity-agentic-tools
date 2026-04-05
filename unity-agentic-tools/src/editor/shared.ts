@@ -703,6 +703,9 @@ export function resolveScriptGuid(
 ): { guid: string; path: string | null } | null {
   // Check if it's already a valid GUID (32 hex chars)
   if (/^[a-f0-9]{32}$/i.test(script)) {
+    if (/^0{32}$/i.test(script)) {
+      throw new Error(`Invalid script GUID "${script}": all-zero GUID is not allowed. Provide a real script GUID from a .meta file.`);
+    }
     return { guid: script.toLowerCase(), path: null };
   }
 
@@ -1040,12 +1043,24 @@ export interface ResolvedScript {
   fields?: import('../types').CSharpFieldRef[];
   base_class?: string;
   kind?: string;
+  is_abstract?: boolean;
   /** Namespace of the resolved type (populated for DLL-backed scripts) */
   namespace?: string;
   /** Class name of the resolved type (populated for DLL-backed scripts) */
   class_name?: string;
   /** Set when field extraction failed — included as a warning in results */
   extraction_error?: string;
+}
+
+function detect_abstract_class_in_source(file_path: string, class_name: string): boolean {
+  try {
+    const source = readFileSync(file_path, 'utf-8');
+    const escaped_name = class_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`(^|[^\\w])abstract\\s+class\\s+${escaped_name}(?=$|[^\\w])`, 'm');
+    return pattern.test(source);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1066,6 +1081,22 @@ export function resolve_script_with_fields(
     guid: resolved.guid,
     path: resolved.path,
   };
+
+  // Best-effort abstract detection even without project_path
+  if (resolved.path && resolved.path.endsWith('.cs')) {
+    const full_path = resolved.path.startsWith('/')
+      ? resolved.path
+      : project_path
+        ? path.join(project_path, resolved.path)
+        : resolved.path;
+
+    if (existsSync(full_path)) {
+      const class_name = script.includes('.') ? script.split('.').pop()! : script;
+      if (class_name.length > 0) {
+        result.is_abstract = detect_abstract_class_in_source(full_path, class_name);
+      }
+    }
+  }
 
   // Can't extract fields without a project path
   if (!project_path) return result;
@@ -1094,6 +1125,10 @@ export function resolve_script_with_fields(
             result.fields = chosen.fields;
             result.base_class = chosen.baseClass ?? undefined;
             result.kind = chosen.kind;
+            result.class_name = chosen.name;
+            if (chosen.name) {
+              result.is_abstract = detect_abstract_class_in_source(full_path, chosen.name);
+            }
           }
         } else {
           result.extraction_error = 'Native extractSerializedFields function not available';

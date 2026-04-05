@@ -1804,6 +1804,9 @@ export function createScriptableObject(options: CreateScriptableObjectOptions): 
   if (resolved.kind === 'enum' || resolved.kind === 'interface') {
     return { success: false, output_path, error: `"${script}" is ${resolved.kind === 'enum' ? 'an enum' : 'an interface'}, not a ScriptableObject.` };
   }
+  if (resolved.is_abstract) {
+    return { success: false, output_path, error: `"${script}" is abstract and cannot be instantiated as a ScriptableObject asset.` };
+  }
   if (resolved.base_class && resolved.base_class !== 'ScriptableObject') {
     return { success: false, output_path, error: `"${script}" extends ${resolved.base_class}, not ScriptableObject. Cannot create as a ScriptableObject asset.` };
   }
@@ -2149,6 +2152,14 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
   // Check if it's a known Unity built-in component
   const classId = get_class_id(component_type);
 
+  if (classId === 114 && component_type.toLowerCase() === 'monobehaviour') {
+    return {
+      success: false,
+      file_path,
+      error: '"MonoBehaviour" is a base class, not a concrete component script. Provide a script type/path/GUID (for example, "PlayerController", "Assets/Scripts/PlayerController.cs", or a 32-char GUID).'
+    };
+  }
+
   // Check for existing component of the same type (warn but allow — some like AudioSource can be duplicated)
   let duplicateWarning: string | undefined;
   const goBlock = doc.find_by_file_id(gameObjectIdStr);
@@ -2217,6 +2228,13 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
         success: false,
         file_path,
         error: `"${component_type}" is ${resolved.kind === 'enum' ? 'an enum' : 'an interface'}, not a MonoBehaviour. Cannot add as a component.`
+      };
+    }
+    if (resolved.is_abstract) {
+      return {
+        success: false,
+        file_path,
+        error: `"${component_type}" is abstract and cannot be added as a component.`
       };
     }
     if (resolved.base_class && !COMPONENT_BASE_CLASSES.has(resolved.base_class) &&

@@ -116,6 +116,7 @@ All variants accept `--timeout <ms>` (default 10000).
 |---------|-------------|
 | `editor save` | Save current scene |
 | `editor scene-open <path>` | Open scene (`--additive` for additive mode) |
+| `editor invoke UnityEditor.AssetDatabase Refresh` | Refresh AssetDatabase after file-based edits |
 | `editor tests-run` | Run Unity tests (`--mode`, `--filter`) |
 | `editor invoke <type> <member> [args...]` | Call any static Unity Editor API method or property |
 

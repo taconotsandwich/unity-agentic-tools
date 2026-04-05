@@ -39,6 +39,7 @@ export {
     removeComponent,
     removeComponentBatch,
     deletePrefabInstance,
+    deleteAssetFile,
 } from './delete';
 
 // Duplicate & unpack operations
