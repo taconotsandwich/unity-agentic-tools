@@ -1,13 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityAgenticTools.Refs;
 
-namespace UnityAgenticTools.Server
+namespace UnityAgenticTools.API
 {
     public static class HierarchyAPI
     {

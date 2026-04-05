@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -36,10 +37,29 @@ namespace UnityAgenticTools.Server
                 return new Dictionary<string, object> { { "queued", true } };
             }
 
-            return await EditorWebSocketServer.RunOnMainThread(() =>
+            var result = await EditorWebSocketServer.RunOnMainThread(() =>
             {
                 return ExecuteInvoke(parameters);
             }, timeoutMs);
+
+            return await ResolveTaskResultAsync(result, timeoutMs);
+        }
+
+        private static async Task<object> ResolveTaskResultAsync(object invokeResult, int timeoutMs)
+        {
+            if (!(invokeResult is Dictionary<string, object> envelope))
+                return invokeResult;
+
+            if (!envelope.TryGetValue("result", out var resultObj) || !(resultObj is Task taskResult))
+                return envelope;
+
+            var completed = await Task.WhenAny(taskResult, Task.Delay(timeoutMs));
+            if (!ReferenceEquals(completed, taskResult))
+                throw new TimeoutException($"Timeout after {timeoutMs}ms waiting for async invoke result");
+
+            await taskResult;
+            envelope["result"] = UnwrapTaskResult(taskResult);
+            return envelope;
         }
 
         private static object ExecuteInvoke(Dictionary<string, object> parameters)
@@ -62,7 +82,7 @@ namespace UnityAgenticTools.Server
                 if (!prop.CanWrite)
                     throw new ArgumentException($"Property is read-only: {typeName}.{memberName}");
                 var converted = Convert.ChangeType(setValue, prop.PropertyType);
-                prop.SetValue(null, converted);
+                TryInvoke(() => prop.SetValue(null, converted));
                 return (object)new Dictionary<string, object> { { "success", true } };
             }
 
@@ -77,7 +97,7 @@ namespace UnityAgenticTools.Server
             {
                 if (!propInfo.CanRead)
                     throw new ArgumentException($"Property is write-only: {typeName}.{memberName}");
-                var value = propInfo.GetValue(null);
+                var value = TryInvoke(() => propInfo.GetValue(null));
                 return (object)new Dictionary<string, object> { { "value", value } };
             }
 
@@ -139,7 +159,7 @@ namespace UnityAgenticTools.Server
                         }
                     }
                 }
-                var result = methodInfo.Invoke(null, invokeArgs);
+                var result = TryInvoke(() => methodInfo.Invoke(null, invokeArgs));
                 return (object)new Dictionary<string, object>
                 {
                     { "success", true },
@@ -148,6 +168,49 @@ namespace UnityAgenticTools.Server
             }
 
             throw new ArgumentException($"No public static property or method '{memberName}' found on {typeName}");
+        }
+
+        private static object UnwrapTaskResult(object value)
+        {
+            if (!(value is Task task))
+                return value;
+
+            task.GetAwaiter().GetResult();
+
+            var taskType = task.GetType();
+            if (taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>))
+            {
+                var resultProp = taskType.GetProperty("Result", BindingFlags.Public | BindingFlags.Instance);
+                return resultProp != null ? resultProp.GetValue(task) : null;
+            }
+
+            return null;
+        }
+
+        private static T TryInvoke<T>(Func<T> invoker)
+        {
+            try
+            {
+                return invoker();
+            }
+            catch (TargetInvocationException ex) when (ex.InnerException != null)
+            {
+                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                throw;
+            }
+        }
+
+        private static void TryInvoke(Action invoker)
+        {
+            try
+            {
+                invoker();
+            }
+            catch (TargetInvocationException ex) when (ex.InnerException != null)
+            {
+                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                throw;
+            }
         }
 
         private static Type FindType(string fullName)

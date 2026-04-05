@@ -1,8 +1,10 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { Command } from 'commander';
 import { mkdtempSync, cpSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { add_package, remove_package } from '../src/packages';
+import { collect_command_entries } from '../src/cmd-editor';
 
 const FIXTURE_DIR = join(__dirname, 'fixtures', 'test-manifest');
 const BRIDGE_PACKAGE_NAME = 'com.unity-agentic-tools.editor-bridge';
@@ -76,6 +78,71 @@ describe('cmd-editor', () => {
                 expect(result.error).toContain('manifest.json not found');
             }
             rmSync(empty_dir, { recursive: true, force: true });
+        });
+    });
+
+    describe('collect_command_entries', () => {
+        test('returns compact output by default flags behavior', () => {
+            const root = new Command('unity-agentic-tools');
+            const read_cmd = new Command('read').description('Read data');
+            read_cmd.command('scene <file>').description('Read scene').option('--json', 'Output json');
+            root.addCommand(read_cmd);
+
+            const entries = collect_command_entries(root, {
+                scope: 'all',
+                show_options: false,
+                show_args: false,
+                show_desc: false,
+            });
+
+            expect(entries).toEqual([
+                { path: 'read' },
+                { path: 'read scene' },
+            ]);
+        });
+
+        test('includes options, args, and descriptions when enabled', () => {
+            const root = new Command('unity-agentic-tools');
+            const editor_cmd = new Command('editor').description('Editor bridge').option('--port <n>', 'Port override', '3000');
+            editor_cmd.command('invoke <type> <member> [args...]')
+                .description('Invoke method')
+                .option('--args <json>', 'Argument json');
+            root.addCommand(editor_cmd);
+
+            const entries = collect_command_entries(root, {
+                scope: 'editor',
+                show_options: true,
+                show_args: true,
+                show_desc: true,
+            });
+
+            expect(entries[0].path).toBe('editor');
+            expect(entries[0].description).toBe('Editor bridge');
+            expect(entries[0].options?.some((o) => o.long === '--port')).toBe(true);
+
+            const invoke_entry = entries.find((e) => e.path === 'editor invoke');
+            expect(invoke_entry).toBeTruthy();
+            expect(invoke_entry?.description).toBe('Invoke method');
+            expect(invoke_entry?.args?.map((a) => a.name)).toEqual(['type', 'member', 'args']);
+            expect(invoke_entry?.options?.some((o) => o.long === '--args')).toBe(true);
+        });
+
+        test('limits to top-level commands when scope is top', () => {
+            const root = new Command('unity-agentic-tools');
+            const create_cmd = new Command('create').description('Create things');
+            create_cmd.command('scene <file>').description('Create scene');
+            root.addCommand(create_cmd);
+            root.addCommand(new Command('editor').description('Editor bridge'));
+
+            const entries = collect_command_entries(root, {
+                scope: 'top',
+                show_options: false,
+                show_args: false,
+                show_desc: true,
+            });
+
+            expect(entries.map((e) => e.path)).toEqual(['create', 'editor']);
+            expect(entries.some((e) => e.path === 'create scene')).toBe(false);
         });
     });
 });

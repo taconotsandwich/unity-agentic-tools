@@ -7,6 +7,117 @@ import type { CallEditorOptions, RpcResponse } from './types';
 const BRIDGE_PACKAGE_NAME = 'com.unity-agentic-tools.editor-bridge';
 const BRIDGE_PACKAGE_VERSION = 'https://github.com/taconotsandwich/unity-agentic-tools.git?path=unity-package';
 
+type CommandListScope = 'all' | 'editor' | 'top';
+
+interface CommandListOptions {
+    scope: CommandListScope;
+    show_options: boolean;
+    show_args: boolean;
+    show_desc: boolean;
+}
+
+interface CommandListOptionInfo {
+    flags: string;
+    long?: string;
+    short?: string;
+    required: boolean;
+    optional: boolean;
+    mandatory: boolean;
+    description?: string;
+    default_value?: unknown;
+}
+
+interface CommandListArgInfo {
+    name: string;
+    required: boolean;
+    variadic: boolean;
+    description?: string;
+    default_value?: unknown;
+}
+
+interface CommandListEntry {
+    path: string;
+    description?: string;
+    args?: CommandListArgInfo[];
+    options?: CommandListOptionInfo[];
+}
+
+function get_root_command(cmd: Command): Command {
+    let current: Command = cmd;
+    while (current.parent) current = current.parent;
+    return current;
+}
+
+function get_command_start_nodes(root: Command, scope: CommandListScope): Command[] {
+    if (scope === 'top') {
+        return [...root.commands];
+    }
+
+    if (scope === 'editor') {
+        const editor_cmd = root.commands.find((child) => child.name() === 'editor');
+        return editor_cmd ? [editor_cmd] : [];
+    }
+
+    return [...root.commands];
+}
+
+function collect_command_entries(root: Command, options: CommandListOptions): CommandListEntry[] {
+    const entries: CommandListEntry[] = [];
+    const start_nodes = get_command_start_nodes(root, options.scope);
+    const recurse = options.scope !== 'top';
+
+    const visit = (cmd: Command, path: string): void => {
+        const entry: CommandListEntry = { path };
+
+        if (options.show_desc) {
+            const desc = cmd.description();
+            if (desc) entry.description = desc;
+        }
+
+        if (options.show_args) {
+            const args = cmd.registeredArguments
+                .map((arg) => ({
+                    name: arg.name(),
+                    required: arg.required,
+                    variadic: arg.variadic,
+                    description: arg.description,
+                    default_value: arg.defaultValue,
+                }));
+            if (args.length > 0) entry.args = args;
+        }
+
+        if (options.show_options) {
+            const cmd_options = cmd.options
+                .filter((opt) => opt.long !== '--help')
+                .map((opt) => ({
+                    flags: opt.flags,
+                    long: opt.long || undefined,
+                    short: opt.short || undefined,
+                    required: opt.required,
+                    optional: opt.optional,
+                    mandatory: opt.mandatory,
+                    description: opt.description || undefined,
+                    default_value: opt.defaultValue,
+                }));
+            if (cmd_options.length > 0) entry.options = cmd_options;
+        }
+
+        entries.push(entry);
+
+        if (recurse) {
+            for (const child of cmd.commands) {
+                visit(child, `${path} ${child.name()}`);
+            }
+        }
+    };
+
+    for (const cmd of start_nodes) {
+        visit(cmd, cmd.name());
+    }
+
+    return entries;
+}
+
 function get_common_options(cmd: Command): { project_path: string; timeout: number; port: number | undefined } {
     // Walk up the command chain to find editor-level options (handles nested subcommand groups like "get")
     let current: Command | null = cmd;
@@ -122,10 +233,7 @@ export function build_editor_command(): Command {
                     project_path,
                     timeout,
                     port,
-                    // Note: Use UnityAgenticTools.API.ConsoleAPI Subscribe for invoking via reflection if wanted,
-                    // but we directly invoke the notification stream method because it relies on the websocket events.
-                    method: 'editor.invoke',
-                    params: { type: 'UnityAgenticTools.API.ConsoleAPI', member: 'Subscribe' },
+                    method: 'editor.console.subscribe',
                     on_event: (event) => {
                         if (event.method === 'editor.console.logReceived') {
                             const params = event.params ?? {};
@@ -156,6 +264,40 @@ export function build_editor_command(): Command {
                 }, null, 2));
                 process.exitCode = 1;
             }
+        });
+
+    cmd.command('list')
+        .description('List available CLI commands (compact by default)')
+        .option('--scope <scope>', 'Scope: all, editor, top', 'all')
+        .option('--show-options', 'Include command options')
+        .option('--show-args', 'Include command arguments')
+        .option('--show-desc', 'Include command descriptions')
+        .action(function(this: Command, options: { scope?: string; showOptions?: boolean; showArgs?: boolean; showDesc?: boolean }) {
+            const scope_raw = (options.scope || 'all').toLowerCase();
+            const valid_scopes: CommandListScope[] = ['all', 'editor', 'top'];
+            if (!valid_scopes.includes(scope_raw as CommandListScope)) {
+                console.log(JSON.stringify({
+                    success: false,
+                    error: `Invalid --scope value "${options.scope}". Use: all, editor, top`,
+                }, null, 2));
+                process.exitCode = 1;
+                return;
+            }
+
+            const root = get_root_command(this);
+            const list = collect_command_entries(root, {
+                scope: scope_raw as CommandListScope,
+                show_options: options.showOptions === true,
+                show_args: options.showArgs === true,
+                show_desc: options.showDesc === true,
+            });
+
+            console.log(JSON.stringify({
+                success: true,
+                scope: scope_raw,
+                count: list.length,
+                commands: list,
+            }, null, 2));
         });
 
     // 4. install
@@ -190,3 +332,5 @@ export function build_editor_command(): Command {
 
     return cmd;
 }
+
+export { collect_command_entries };

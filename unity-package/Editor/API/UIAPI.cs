@@ -694,10 +694,9 @@ namespace UnityAgenticTools.API
                         return GetUGUIValue(component, refStr);
                     }
 
-                    default:
-                        throw new ArgumentException($"Unknown UI query: {query}. Use: text, value");
+                default:
+                    throw new ArgumentException($"Unknown UI query: {query}. Use: text, value");
                 }
-            });
         }
 
         private static object GetUGUIValue(Component component, string refStr)

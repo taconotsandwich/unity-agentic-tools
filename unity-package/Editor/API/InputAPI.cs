@@ -93,41 +93,101 @@ namespace UnityAgenticTools.API
         public static object Action(string name, string value = null)
         {
 #if ENABLE_INPUT_SYSTEM
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return new Dictionary<string, object>
+                {
+                    { "success", false },
+                    { "error", "Action name is required." }
+                };
+            }
+
             var playerInputType = FindType("UnityEngine.InputSystem.PlayerInput");
             if (playerInputType == null)
-                throw new InvalidOperationException("PlayerInput type not found. Is Input System installed?");
+            {
+                return new Dictionary<string, object>
+                {
+                    { "success", false },
+                    { "error", "PlayerInput type not found. Is Input System installed?" }
+                };
+            }
 
             var playerInputs = UnityEngine.Object.FindObjectsByType(playerInputType, FindObjectsSortMode.None);
             if (playerInputs.Length == 0)
-                throw new InvalidOperationException("No PlayerInput component found in scene.");
+            {
+                return new Dictionary<string, object>
+                {
+                    { "success", false },
+                    { "error", "No PlayerInput component found in scene." },
+                    { "action", name }
+                };
+            }
+
+            int checkedCount = 0;
+            var scannedObjects = new List<string>();
 
             foreach (var pi in playerInputs)
             {
+                checkedCount++;
                 var actionsProperty = playerInputType.GetProperty("actions", BindingFlags.Public | BindingFlags.Instance);
                 var inputActionAsset = actionsProperty?.GetValue(pi);
-                if (inputActionAsset == null) continue;
+                var ownerName = GetObjectName(pi);
+                if (inputActionAsset == null)
+                {
+                    scannedObjects.Add($"{ownerName}: actions=null");
+                    continue;
+                }
 
                 var findActionMethod = inputActionAsset.GetType().GetMethod("FindAction", new[] { typeof(string), typeof(bool) });
-                if (findActionMethod == null) continue;
+                if (findActionMethod == null)
+                {
+                    scannedObjects.Add($"{ownerName}: FindAction unavailable");
+                    continue;
+                }
 
                 var action = findActionMethod.Invoke(inputActionAsset, new object[] { name, false });
-                if (action == null) continue;
+                if (action == null)
+                {
+                    scannedObjects.Add($"{ownerName}: action not found");
+                    continue;
+                }
 
                 var triggerMethod = action.GetType().GetMethod("Trigger", BindingFlags.Public | BindingFlags.Instance);
                 if (triggerMethod != null)
                 {
                     triggerMethod.Invoke(action, null);
+                    return new Dictionary<string, object>
+                    {
+                        { "success", true },
+                        { "action", name },
+                        { "triggered", true },
+                        { "source", ownerName },
+                        { "method", "Trigger" }
+                    };
+                }
+
+                var performMethod = action.GetType().GetMethod("PerformInteractiveRebinding", Type.EmptyTypes);
+                if (performMethod != null)
+                {
+                    scannedObjects.Add($"{ownerName}: Trigger unavailable");
                 }
 
                 return new Dictionary<string, object>
                 {
-                    { "success", true },
+                    { "success", false },
                     { "action", name },
-                    { "triggered", true }
+                    { "error", $"Action '{name}' was found on {ownerName} but cannot be triggered via reflection (Trigger() not available)." }
                 };
             }
 
-            throw new ArgumentException($"Action '{name}' not found in any PlayerInput component.");
+            return new Dictionary<string, object>
+            {
+                { "success", false },
+                { "action", name },
+                { "error", $"Action '{name}' not found in any PlayerInput component." },
+                { "checkedPlayerInputs", checkedCount },
+                { "details", scannedObjects.ToArray() }
+            };
 #else
             return new Dictionary<string, object>
             {
@@ -151,6 +211,13 @@ namespace UnityAgenticTools.API
                 catch { }
             }
             return null;
+        }
+
+        private static string GetObjectName(object obj)
+        {
+            if (obj is UnityEngine.Object unityObj && !string.IsNullOrEmpty(unityObj.name))
+                return unityObj.name;
+            return obj != null ? obj.GetType().Name : "(null)";
         }
 
 #if ENABLE_INPUT_SYSTEM
