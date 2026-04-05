@@ -51,7 +51,7 @@ Use `--properties` only when component values are needed (saves tokens). Use `--
 
 **update** (31) -- Properties, transforms, settings, tags, layers, sorting layers, parent hierarchy, builds, arrays, batch edits, materials, meta, animations, animators, sibling index, input actions, animation curves, animator states, managed references, plus 9 prefab subcommands. See `reference/commands-update.md`
 
-**delete** (5) -- GameObjects, components, build entries, prefab instances, packages. See `reference/commands-delete.md`
+**delete** (6) -- GameObjects, components, build entries, prefab instances, asset files (+ .meta), packages. See `reference/commands-delete.md`
 
 **utilities** (8) -- search, grep, clone, version, docs, setup, cleanup, status. Setting aliases for `read settings`/`update settings`. See `reference/commands-utilities.md`
 
@@ -72,3 +72,4 @@ See `reference/workflows.md` for multi-step checklists (project setup, inspect-e
 - **`get text/value @hN`**: `@hN` is hierarchy ref. `get text`/`get value` need UI refs (`@uN` from `ui-snapshot`). Use `get position`/`get active`/`get component` for hierarchy refs
 - **Editor bridge won't connect**: Ensure Unity is open, check `editor status`, re-run `editor install` (or `editor --project <path> install`)
 - **`scene-open` fails**: Use Assets-relative path (`Assets/Scenes/Main.unity`). Run `editor invoke UnityEditor.AssetDatabase Refresh` first for newly created scenes
+- **Loaded edit protection error**: If editor is connected and target `.unity`/`.prefab` is currently loaded/open, pass `--bypass-loaded-protection` to force file-based edits

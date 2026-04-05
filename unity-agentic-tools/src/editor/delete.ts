@@ -1,9 +1,11 @@
-import { existsSync } from 'fs';
+import { existsSync, unlinkSync } from 'fs';
+import { extname } from 'path';
 import type {
     RemoveComponentOptions, RemoveComponentResult,
     DeleteGameObjectOptions, DeleteGameObjectResult,
     DeletePrefabInstanceOptions, DeletePrefabInstanceResult,
     BatchRemoveComponentOptions, BatchRemoveComponentResult,
+    DeleteAssetFileOptions, DeleteAssetFileResult,
 } from '../types';
 import { validate_file_path } from '../utils';
 import { UnityDocument } from './unity-document';
@@ -606,5 +608,81 @@ export function deletePrefabInstance(options: DeletePrefabInstanceOptions): Dele
     success: true,
     file_path,
     deleted_count: allToRemove.size
+  };
+}
+
+/**
+ * Delete a Unity asset file and its optional .meta sidecar.
+ * Missing .meta is treated as warning + success.
+ */
+export function deleteAssetFile(options: DeleteAssetFileOptions): DeleteAssetFileResult {
+  const { file_path } = options;
+
+  const pathError = validate_file_path(file_path, 'write');
+  if (pathError) {
+    return { success: false, file_path, error: pathError };
+  }
+
+  if (!existsSync(file_path)) {
+    return { success: false, file_path, error: `File not found: ${file_path}` };
+  }
+
+  const supportedExtensions = new Set([
+    '.unity',
+    '.prefab',
+    '.mat',
+    '.anim',
+    '.controller',
+    '.inputactions',
+    '.asset',
+  ]);
+  const extension = extname(file_path).toLowerCase();
+  if (!supportedExtensions.has(extension)) {
+    return {
+      success: false,
+      file_path,
+      error: `Unsupported asset type "${extension}". Supported extensions: .unity, .prefab, .mat, .anim, .controller, .inputactions, .asset`,
+    };
+  }
+
+  const metaPath = `${file_path}.meta`;
+  const hasMeta = existsSync(metaPath);
+
+  try {
+    unlinkSync(file_path);
+  } catch (err) {
+    return {
+      success: false,
+      file_path,
+      error: `Failed to delete file: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  if (hasMeta) {
+    try {
+      unlinkSync(metaPath);
+      return {
+        success: true,
+        file_path,
+        deleted_file: true,
+        deleted_meta: true,
+      };
+    } catch (err) {
+      return {
+        success: true,
+        file_path,
+        deleted_file: true,
+        deleted_meta: false,
+        warning: `Deleted asset file but failed to delete .meta file: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  return {
+    success: true,
+    file_path,
+    deleted_file: true,
+    deleted_meta: false,
+    warning: `Asset file deleted, but no .meta file found at ${metaPath}`,
   };
 }

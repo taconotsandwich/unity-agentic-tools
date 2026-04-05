@@ -32,3 +32,13 @@ Properties JSON format:
 For custom scripts, pass `-p <project>` so the tool can resolve the script GUID from the type registry.
 
 Built-in types (MeshRenderer, Rigidbody, etc.) don't need `-p`.
+
+`MonoBehaviour` is a base class and cannot be added directly. Provide a concrete script type/path/GUID.
+
+All-zero script GUID (`00000000000000000000000000000000`) is rejected.
+
+Abstract scripts are rejected for component/ScriptableObject creation.
+
+## Loaded edit protection
+
+When the editor bridge is connected, mutating `.unity`/`.prefab` commands (for example `create gameobject`, `create component`, `create component-copy`, `create prefab-instance`) require `--bypass-loaded-protection` if the target file is currently loaded/open in Unity.

@@ -399,6 +399,99 @@ describeIfNative('CLI', () => {
             }
         });
 
+        it('should reject MonoBehaviour as component type', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+
+            try {
+                try {
+                    run_cli([
+                        'create', 'component',
+                        temp_fixture.temp_path,
+                        'Player',
+                        'MonoBehaviour',
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('base class');
+                }
+            } finally {
+                temp_fixture.cleanup_fn();
+            }
+        });
+
+        it('should reject all-zero script GUID', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+
+            try {
+                try {
+                    run_cli([
+                        'create', 'component',
+                        temp_fixture.temp_path,
+                        'Player',
+                        '00000000000000000000000000000000',
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('all-zero GUID');
+                }
+            } finally {
+                temp_fixture.cleanup_fn();
+            }
+        });
+
+        it('should reject abstract MonoBehaviour script', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-abstract-script-'));
+            const scriptsDir = join(projectDir, 'Assets', 'Scripts');
+            const scriptPath = join(scriptsDir, 'AbstractActor.cs');
+
+            mkdirSync(scriptsDir, { recursive: true });
+            writeFileSync(scriptPath, 'public abstract class AbstractActor : MonoBehaviour { }', 'utf-8');
+            writeFileSync(scriptPath + '.meta', 'fileFormatVersion: 2\nguid: 1234567890abcdef1234567890abcdef\n', 'utf-8');
+
+            try {
+                try {
+                    run_cli([
+                        'create', 'component',
+                        temp_fixture.temp_path,
+                        'Player',
+                        scriptPath,
+                        '--project', projectDir,
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('abstract');
+                }
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+
         it('should add variant component and expose structured added_components in read overrides', () => {
             const fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SamplePrefabVariant.prefab')
@@ -2097,6 +2190,67 @@ describeIfNative('CLI', () => {
                 expect(content).not.toContain(`&${added_component.component_id}`);
             } finally {
                 fixture.cleanup_fn();
+            }
+        });
+    });
+
+    describe('delete asset command', () => {
+        it('should delete prefab file and .meta', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'uat-del-prefab-'));
+            const file = join(tmp, 'DeleteMe.prefab');
+            writeFileSync(file, '%YAML 1.1\n', 'utf-8');
+            writeFileSync(file + '.meta', 'fileFormatVersion: 2\nguid: abcdefabcdefabcdefabcdefabcdefab\n', 'utf-8');
+
+            try {
+                const result = run_cli(['delete', 'asset', file, '--json']);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+                expect(json.deleted_file).toBe(true);
+                expect(json.deleted_meta).toBe(true);
+                expect(existsSync(file)).toBe(false);
+                expect(existsSync(file + '.meta')).toBe(false);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('should return warning when .meta is missing', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'uat-del-prefab-nometa-'));
+            const file = join(tmp, 'DeleteMe.prefab');
+            writeFileSync(file, '%YAML 1.1\n', 'utf-8');
+
+            try {
+                const result = run_cli(['delete', 'asset', file, '--json']);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+                expect(json.deleted_file).toBe(true);
+                expect(json.deleted_meta).toBe(false);
+                expect(json.warning).toContain('no .meta file found');
+                expect(existsSync(file)).toBe(false);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('should fail for unsupported extension', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'uat-del-unsupported-'));
+            const file = join(tmp, 'DeleteMe.txt');
+            writeFileSync(file, 'plain text', 'utf-8');
+
+            try {
+                try {
+                    run_cli(['delete', 'asset', file, '--json']);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('Unsupported asset type');
+                }
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
             }
         });
     });
