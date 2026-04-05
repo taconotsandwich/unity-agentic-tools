@@ -160,6 +160,12 @@ Type can be `Namespace.ClassName` (registry lookup) or `Assembly Namespace.Class
 | `update prefab managed-reference <file> <instance> <field_path> <type_name>` | Add SerializeReference to prefab override |
 | `update prefab restore-gameobject <file> <instance> <ref>` | Restore removed child |
 
+## Loaded edit protection
+
+When the editor bridge is connected, mutating `.unity`/`.prefab` update commands require `--bypass-loaded-protection` if the target file is currently loaded/open in Unity.
+
+This includes commands like `update gameobject`, `update component`, `update transform`, `update parent`, `update array`, `update batch`, `update batch-components`, `update sibling-index`, `update managed-reference`, and all `update prefab ...` mutators.
+
 ### update prefab batch-overrides
 
 JSON format: `[{"property_path":"...","value":"...","target":"...","object_reference":"..."}]`

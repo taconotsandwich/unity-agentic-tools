@@ -22,6 +22,8 @@ Standard read-before-write pattern for any Unity YAML edit.
 3. **Mutate** with the appropriate update/create/delete command
 4. **Verify** by re-reading the same target to confirm the change
 
+When editor bridge is connected and target `.unity`/`.prefab` is loaded/open, mutating commands require `--bypass-loaded-protection`.
+
 ## 3. Prefab editing
 
 1. `read scene <file> --summary` -- find PrefabInstance names and fileIDs
@@ -32,6 +34,8 @@ Standard read-before-write pattern for any Unity YAML edit.
    - `update prefab remove-component <file> <instance> <ref>` -- suppress a component
    - `update prefab unpack <file> <instance>` -- break prefab link entirely
 4. `read overrides <file> <instance_id>` -- verify changes
+
+If the prefab is open in Prefab Mode and editor bridge is connected, pass `--bypass-loaded-protection` for file-based mutations.
 
 ## 4. Editor bridge UI testing
 

@@ -399,6 +399,171 @@ describeIfNative('CLI', () => {
             }
         });
 
+        it('should reject MonoBehaviour as component type', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+
+            try {
+                try {
+                    run_cli([
+                        'create', 'component',
+                        temp_fixture.temp_path,
+                        'Player',
+                        'MonoBehaviour',
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('base class');
+                }
+            } finally {
+                temp_fixture.cleanup_fn();
+            }
+        });
+
+        it('should reject all-zero script GUID', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+
+            try {
+                try {
+                    run_cli([
+                        'create', 'component',
+                        temp_fixture.temp_path,
+                        'Player',
+                        '00000000000000000000000000000000',
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('all-zero GUID');
+                }
+            } finally {
+                temp_fixture.cleanup_fn();
+            }
+        });
+
+        it('should reject abstract MonoBehaviour script', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-abstract-script-'));
+            const scriptsDir = join(projectDir, 'Assets', 'Scripts');
+            const scriptPath = join(scriptsDir, 'AbstractActor.cs');
+
+            mkdirSync(scriptsDir, { recursive: true });
+            writeFileSync(scriptPath, 'public abstract class AbstractActor : MonoBehaviour { }', 'utf-8');
+            writeFileSync(scriptPath + '.meta', 'fileFormatVersion: 2\nguid: 1234567890abcdef1234567890abcdef\n', 'utf-8');
+
+            try {
+                try {
+                    run_cli([
+                        'create', 'component',
+                        temp_fixture.temp_path,
+                        'Player',
+                        scriptPath,
+                        '--project', projectDir,
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('abstract');
+                }
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should resolve Grid as built-in when GridManager script exists', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-grid-built-in-'));
+            const cacheDir = join(projectDir, '.unity-agentic');
+            const cachePath = join(cacheDir, 'guid-cache.json');
+
+            mkdirSync(cacheDir, { recursive: true });
+            writeFileSync(cachePath, JSON.stringify({
+                ['11111111111111111111111111111111']: 'Assets/Scripts/GridManager.cs'
+            }), 'utf-8');
+
+            try {
+                const result = run_cli([
+                    'create', 'component',
+                    temp_fixture.temp_path,
+                    'Player',
+                    'Grid',
+                    '--project', projectDir,
+                    '--json'
+                ]);
+
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+                expect(json.script_guid).toBeUndefined();
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should return ambiguity error for exact script-name collisions', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-strict-ambiguity-'));
+            const cacheDir = join(projectDir, '.unity-agentic');
+            const cachePath = join(cacheDir, 'guid-cache.json');
+
+            mkdirSync(cacheDir, { recursive: true });
+            writeFileSync(cachePath, JSON.stringify({
+                ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']: 'Assets/Scripts/Foo.cs',
+                ['bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb']: 'Packages/com.test/Foo.cs'
+            }), 'utf-8');
+
+            try {
+                try {
+                    run_cli([
+                        'create', 'component',
+                        temp_fixture.temp_path,
+                        'Player',
+                        'Foo',
+                        '--project', projectDir,
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('Ambiguous type "Foo"');
+                    expect(json.error).toContain('exact script name matches');
+                }
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+
         it('should add variant component and expose structured added_components in read overrides', () => {
             const fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SamplePrefabVariant.prefab')
@@ -629,6 +794,36 @@ describeIfNative('CLI', () => {
                 ]);
                 const json = JSON.parse(result);
                 expect(json).toHaveProperty('success', true);
+            } finally {
+                temp_fixture.cleanup_fn();
+            }
+        });
+
+        it('should not write PrefabInstance IDs into m_Children for no-stripped prefab reparent', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'Track1.unity')
+            );
+
+            try {
+                const result = run_cli([
+                    'update', 'parent',
+                    temp_fixture.temp_path,
+                    '206181830',
+                    '208971438',
+                    '--by-id',
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+
+                const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+                const parentTransformBlock = content.match(/--- !u!4 &208971439[\s\S]*?(?=--- !u!|$)/);
+                expect(parentTransformBlock).not.toBeNull();
+                expect(parentTransformBlock![0]).not.toContain('- {fileID: 206181830}');
+
+                const childPiBlock = content.match(/--- !u!1001 &206181830[\s\S]*?(?=--- !u!|$)/);
+                expect(childPiBlock).not.toBeNull();
+                expect(childPiBlock![0]).toContain('m_TransformParent: {fileID: 208971439}');
             } finally {
                 temp_fixture.cleanup_fn();
             }
@@ -883,6 +1078,59 @@ describeIfNative('CLI', () => {
                     const json = JSON.parse(execErr.stdout);
                     expect(json.success).toBe(false);
                     expect(json.error).toContain('Could not resolve');
+                }
+            } finally {
+                temp_fixture.cleanup_fn();
+            }
+        });
+
+        it('should support --by-id for transform updates', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+
+            try {
+                // Player Transform fileID in SampleScene fixture
+                const result = run_cli([
+                    'update', 'transform',
+                    temp_fixture.temp_path,
+                    '1847675924',
+                    '--by-id',
+                    '--position', '11,22,33',
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+
+                const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+                expect(content).toContain('m_LocalPosition: {x: 11, y: 22, z: 33}');
+            } finally {
+                temp_fixture.cleanup_fn();
+            }
+        });
+
+        it('should reject non-numeric identifier with update transform --by-id', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+
+            try {
+                try {
+                    run_cli([
+                        'update', 'transform',
+                        temp_fixture.temp_path,
+                        'Player',
+                        '--by-id',
+                        '--position', '1,2,3',
+                        '--json'
+                    ]);
+                    expect.unreachable('Should have thrown');
+                } catch (err: unknown) {
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('Invalid fileID');
                 }
             } finally {
                 temp_fixture.cleanup_fn();
@@ -2014,6 +2262,67 @@ describeIfNative('CLI', () => {
                 expect(content).not.toContain(`&${added_component.component_id}`);
             } finally {
                 fixture.cleanup_fn();
+            }
+        });
+    });
+
+    describe('delete asset command', () => {
+        it('should delete prefab file and .meta', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'uat-del-prefab-'));
+            const file = join(tmp, 'DeleteMe.prefab');
+            writeFileSync(file, '%YAML 1.1\n', 'utf-8');
+            writeFileSync(file + '.meta', 'fileFormatVersion: 2\nguid: abcdefabcdefabcdefabcdefabcdefab\n', 'utf-8');
+
+            try {
+                const result = run_cli(['delete', 'asset', file, '--json']);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+                expect(json.deleted_file).toBe(true);
+                expect(json.deleted_meta).toBe(true);
+                expect(existsSync(file)).toBe(false);
+                expect(existsSync(file + '.meta')).toBe(false);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('should return warning when .meta is missing', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'uat-del-prefab-nometa-'));
+            const file = join(tmp, 'DeleteMe.prefab');
+            writeFileSync(file, '%YAML 1.1\n', 'utf-8');
+
+            try {
+                const result = run_cli(['delete', 'asset', file, '--json']);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+                expect(json.deleted_file).toBe(true);
+                expect(json.deleted_meta).toBe(false);
+                expect(json.warning).toContain('no .meta file found');
+                expect(existsSync(file)).toBe(false);
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
+            }
+        });
+
+        it('should fail for unsupported extension', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'uat-del-unsupported-'));
+            const file = join(tmp, 'DeleteMe.txt');
+            writeFileSync(file, 'plain text', 'utf-8');
+
+            try {
+                try {
+                    run_cli(['delete', 'asset', file, '--json']);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('Unsupported asset type');
+                }
+            } finally {
+                rmSync(tmp, { recursive: true, force: true });
             }
         });
     });

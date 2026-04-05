@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEditor.SceneManagement;
+using UnityEditor.Experimental.SceneManagement;
 using UnityEngine.SceneManagement;
 
 namespace UnityAgenticTools.Server
@@ -66,6 +67,42 @@ namespace UnityAgenticTools.Server
                             { "name", scene.name },
                             { "path", scene.path },
                             { "buildIndex", scene.buildIndex }
+                        };
+                    });
+
+                case "loaded":
+                    return await EditorWebSocketServer.RunOnMainThread(() =>
+                    {
+                        var loadedScenePaths = new List<string>();
+                        string activeScenePath = string.Empty;
+                        string prefabStagePath = string.Empty;
+
+                        var activeScene = SceneManager.GetActiveScene();
+                        if (activeScene.IsValid() && !string.IsNullOrEmpty(activeScene.path))
+                        {
+                            activeScenePath = activeScene.path;
+                        }
+
+                        for (int i = 0; i < SceneManager.sceneCount; i++)
+                        {
+                            var scene = SceneManager.GetSceneAt(i);
+                            if (scene.isLoaded && !string.IsNullOrEmpty(scene.path))
+                            {
+                                loadedScenePaths.Add(scene.path);
+                            }
+                        }
+
+                        var stage = PrefabStageUtility.GetCurrentPrefabStage();
+                        if (stage != null && !string.IsNullOrEmpty(stage.assetPath))
+                        {
+                            prefabStagePath = stage.assetPath;
+                        }
+
+                        return new Dictionary<string, object>
+                        {
+                            { "loaded_scene_paths", loadedScenePaths.ToArray() },
+                            { "active_scene_path", activeScenePath },
+                            { "prefab_stage_path", prefabStagePath },
                         };
                     });
 

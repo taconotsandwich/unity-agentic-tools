@@ -31,6 +31,7 @@ import { update_root_order_in_block, extractGuidFromMeta } from './editor/shared
 import { split_yaml_blocks, parse_inline_ref, find_state_by_name, find_state_machine_for_layer, generate_file_id, collect_file_ids } from './animator-utils';
 import type { AnimatorBlock } from './animator-utils';
 import { resolve_project_path } from './utils';
+import { enforce_loaded_edit_protection } from './loaded-protection';
 
 function parseVector(str: string): { x: number; y: number; z: number } {
     const parts = str.split(',').map(Number);
@@ -42,7 +43,19 @@ function parseVector(str: string): { x: number; y: number; z: number } {
 }
 
 /** Resolve a GameObject name or numeric fileID to a Transform fileID. */
-function resolve_transform_id(scanner: UnityScanner, file: string, identifier: string): { transform_id: string } | { error: string } {
+function resolve_transform_id(
+    scanner: UnityScanner,
+    file: string,
+    identifier: string,
+    by_id: boolean = false,
+): { transform_id: string } | { error: string } {
+    if (by_id) {
+        if (!/^-?\d+$/.test(identifier)) {
+            return { error: `Invalid fileID: "${identifier}" — expected a numeric value when using --by-id` };
+        }
+        return { transform_id: identifier };
+    }
+
     // Check for duplicate names before inspect
     let resolved_id = identifier;
     if (!/^-?\d+$/.test(identifier)) {
@@ -79,11 +92,21 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
     const cmd = new Command('update')
         .description('Update Unity object properties, transforms, settings, and hierarchy');
 
+    async function check_loaded_edit_protection(file: string, bypass: boolean | undefined, project_path?: string): Promise<boolean> {
+        const guard = await enforce_loaded_edit_protection(file, bypass, project_path);
+        if (guard.allowed) return true;
+        console.log(JSON.stringify({ success: false, file_path: file, error: guard.error }, null, 2));
+        process.exitCode = 1;
+        return false;
+    }
+
     cmd.command('gameobject <file> <object_name> <property> <value>')
         .description('Edit GameObject property value safely')
         .option('-j, --json', 'Output as JSON')
         .option('-p, --project <path>', 'Unity project path (for tag validation)')
-        .action((file, object_name, property, value, options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, object_name, property, value, options) => {
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection, options.project)) return;
             const result = editProperty({
                 file_path: file,
                 object_name: object_name,
@@ -100,7 +123,8 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .description('Edit any component property by file ID. Supports dotted paths (m_LocalPosition.x) and array paths (m_Materials.Array.data[0]). Quote paths with brackets or use dot notation (data.0) to avoid shell glob expansion')
         .option('-j, --json', 'Output as JSON')
         .option('-p, --project <path>', 'Unity project path (for asset reference resolution)')
-        .action((file, file_id, property, value, options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, file_id, property, value, options) => {
             // Validate m_RootOrder: must be a non-negative integer
             if (property === 'm_RootOrder') {
                 const num = Number(value);
@@ -110,6 +134,8 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                     return;
                 }
             }
+
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection, options.project)) return;
 
             const result = editComponentByFileId({
                 file_path: file,
@@ -124,12 +150,14 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         });
 
     cmd.command('transform <file> <identifier>')
-        .description('Edit Transform by GameObject name or transform fileID')
+        .description('Edit Transform by GameObject name or transform fileID. Use --by-id to force numeric fileID mode')
         .option('-p, --position <x,y,z>', 'Set local position')
         .option('-r, --rotation <x,y,z>', 'Set local rotation (Euler angles in degrees)')
         .option('-s, --scale <x,y,z>', 'Set local scale')
+        .option('--by-id', 'Treat identifier as a numeric fileID instead of name lookup')
         .option('-j, --json', 'Output as JSON')
-        .action((file, identifier, options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, identifier, options) => {
             if (!options.position && !options.rotation && !options.scale) {
                 console.log(JSON.stringify({
                     success: false,
@@ -140,7 +168,9 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 return;
             }
 
-            const resolved = resolve_transform_id(getScanner(), file, identifier);
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection)) return;
+
+            const resolved = resolve_transform_id(getScanner(), file, identifier, options.byId);
 
             if ('error' in resolved) {
                 console.log(JSON.stringify({
@@ -291,7 +321,9 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .description('Move a GameObject under a new parent. Use "root" to move to scene root. Use --by-id to specify fileIDs instead of names')
         .option('-j, --json', 'Output as JSON')
         .option('--by-id', 'Treat object_name and new_parent as numeric fileIDs instead of names')
-        .action((file, object_name, new_parent, options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, object_name, new_parent, options) => {
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection)) return;
             const result = reparentGameObject({
                 file_path: file,
                 object_name: object_name,
@@ -311,7 +343,9 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .description('Unpack a PrefabInstance into standalone GameObjects')
         .option('-p, --project <path>', 'Unity project path (for GUID cache lookup)')
         .option('-j, --json', 'Output as JSON')
-        .action((file, prefab_instance, options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, prefab_instance, options) => {
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection, options.project)) return;
             const result = unpackPrefab({
                 file_path: file,
                 prefab_instance: prefab_instance,
@@ -328,7 +362,9 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .option('--managed-reference <id>', 'Managed reference ID -- placed in value: field, forces objectReference: {fileID: 0}')
         .option('--target <target>', 'Target reference for new entries (e.g., "{fileID: 400000, guid: abc, type: 3}")')
         .option('-j, --json', 'Output as JSON')
-        .action((file, prefab_instance, property_path, value, options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, prefab_instance, property_path, value, options) => {
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection)) return;
             // Validate --object-reference looks like a PPtr
             if (options.objectReference && !/^\{fileID:/.test(options.objectReference)) {
                 console.error(`Warning: --object-reference "${options.objectReference}" does not look like a Unity object reference ({fileID: ...}). For managed reference IDs, use --managed-reference instead or pass the ID as the <value> argument.`);
@@ -350,7 +386,9 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
     prefab_cmd.command('batch-overrides <file> <prefab_instance> <edits_json>')
         .description('Batch edit multiple property overrides in a PrefabInstance. JSON format: [{"property_path":"...","value":"...","target":"...","object_reference":"..."}]')
         .option('-j, --json', 'Output as JSON')
-        .action((file, prefab_instance, edits_json, _options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, prefab_instance, edits_json, options) => {
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection)) return;
             let raw_edits: Array<Record<string, unknown>>;
             try {
                 const parsed = JSON.parse(edits_json);
@@ -398,7 +436,9 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .option('--index <n>', 'Array index (default: 0)', '0')
         .option('-p, --project <path>', 'Unity project path (for type registry)')
         .option('-j, --json', 'Output as JSON')
-        .action((file, prefab_instance, field_path, type_name, options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, prefab_instance, field_path, type_name, options) => {
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection, options.project)) return;
             const result = addPrefabManagedReference({
                 file_path: file,
                 prefab_instance,
@@ -448,7 +488,8 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .description('Insert, append, or remove array elements in a component. Insert: <index> <value> or <value> --index <n>. Append: <value>. Remove: <index> or --index <n>. Quote paths with brackets or use dot notation (data.0) to avoid shell glob expansion')
         .option('--index <n>', 'Index for insert/remove')
         .option('-j, --json', 'Output as JSON')
-        .action((file, file_id, array_property, action, args: string[], options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, file_id, array_property, action, args: string[], options) => {
             if (action !== 'insert' && action !== 'append' && action !== 'remove') {
                 console.log(JSON.stringify({ success: false, error: 'Action must be "insert", "append", or "remove"' }, null, 2));
                 process.exit(1);
@@ -494,6 +535,8 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 }
             }
 
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection)) return;
+
             const result = editArray({
                 file_path: file,
                 file_id,
@@ -509,7 +552,9 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
     cmd.command('batch <file> <edits_json>')
         .description('Batch edit multiple GameObject properties in a single file operation. JSON format: [{"object_name":"...","property":"...","value":"..."}]')
         .option('-j, --json', 'Output as JSON')
-        .action((file, edits_json, _options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, edits_json, options) => {
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection)) return;
             let raw_edits: Array<{ object_name: string; property: string; new_value?: string; value?: string }>;
             try {
                 const parsed = JSON.parse(edits_json);
@@ -555,7 +600,9 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
     cmd.command('batch-components <file> <edits_json>')
         .description('Batch edit multiple component properties by fileID in a single operation. JSON format: [{"file_id":"...","property":"...","value":"..."}]')
         .option('-j, --json', 'Output as JSON')
-        .action((file, edits_json, _options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, edits_json, options) => {
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection)) return;
             let raw_edits: Array<{ file_id: string; property: string; new_value?: string; value?: string }>;
             try {
                 const parsed = JSON.parse(edits_json);
@@ -602,7 +649,9 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .description('Remove a property override from a PrefabInstance. Quote paths with brackets or use dot notation (data.0) to avoid shell glob expansion')
         .option('--target <ref>', 'Target reference to match (for disambiguation)')
         .option('-j, --json', 'Output as JSON')
-        .action((file, prefab_instance, property_path, options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, prefab_instance, property_path, options) => {
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection)) return;
             const result = removePrefabOverride({
                 file_path: file,
                 prefab_instance,
@@ -616,7 +665,9 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
     prefab_cmd.command('remove-component <file> <prefab_instance> <component_ref>')
         .description('Add a component to the PrefabInstance m_RemovedComponents list')
         .option('-j, --json', 'Output as JSON')
-        .action((file, prefab_instance, component_ref, _options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, prefab_instance, component_ref, options) => {
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection)) return;
             const result = addRemovedComponent({
                 file_path: file,
                 prefab_instance,
@@ -629,7 +680,9 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
     prefab_cmd.command('restore-component <file> <prefab_instance> <component_ref>')
         .description('Remove a component from the PrefabInstance m_RemovedComponents list (restore it)')
         .option('-j, --json', 'Output as JSON')
-        .action((file, prefab_instance, component_ref, _options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, prefab_instance, component_ref, options) => {
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection)) return;
             const result = removeRemovedComponent({
                 file_path: file,
                 prefab_instance,
@@ -642,7 +695,9 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
     prefab_cmd.command('remove-gameobject <file> <prefab_instance> <gameobject_ref>')
         .description('Add a GameObject to the PrefabInstance m_RemovedGameObjects list')
         .option('-j, --json', 'Output as JSON')
-        .action((file, prefab_instance, gameobject_ref, _options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, prefab_instance, gameobject_ref, options) => {
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection)) return;
             const result = addRemovedGameObject({
                 file_path: file,
                 prefab_instance,
@@ -655,7 +710,9 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
     prefab_cmd.command('restore-gameobject <file> <prefab_instance> <gameobject_ref>')
         .description('Remove a GameObject from the PrefabInstance m_RemovedGameObjects list (restore it)')
         .option('-j, --json', 'Output as JSON')
-        .action((file, prefab_instance, gameobject_ref, _options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, prefab_instance, gameobject_ref, options) => {
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection)) return;
             const result = removeRemovedGameObject({
                 file_path: file,
                 prefab_instance,
@@ -1328,13 +1385,16 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
     cmd.command('sibling-index <file> <object_name> <index>')
         .description('Set the sibling index of a GameObject, renumbering all siblings')
         .option('-j, --json', 'Output as JSON')
-        .action((file, object_name, index_str, _options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, object_name, index_str, options) => {
             const target_index = parseInt(index_str, 10);
             if (!Number.isFinite(target_index) || target_index < 0) {
                 console.log(JSON.stringify({ success: false, error: 'Index must be a non-negative integer' }, null, 2));
                 process.exitCode = 1;
                 return;
             }
+
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection)) return;
 
             if (!existsSync(file)) {
                 console.log(JSON.stringify({ success: false, error: `File not found: ${file}` }, null, 2));
@@ -2286,7 +2346,8 @@ AnimatorStateTransition:
         .option('--append', 'Append to array (do not update field rid)')
         .option('--properties <json>', 'JSON object of initial field values for the data block (e.g. \'{"damage": "10"}\')')
         .option('-j, --json', 'Output as JSON')
-        .action((file, component_id, field_path, type_name, options) => {
+        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+        .action(async (file, component_id, field_path, type_name, options) => {
             let initial_values: Record<string, string> | undefined;
             if (options.properties) {
                 try {
@@ -2297,6 +2358,7 @@ AnimatorStateTransition:
                     return;
                 }
             }
+            if (!await check_loaded_edit_protection(file, options.bypassLoadedProtection, options.project)) return;
             const result = editManagedReference({
                 file_path: file,
                 file_id: component_id,

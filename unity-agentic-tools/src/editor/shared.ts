@@ -699,10 +699,15 @@ export function resolve_source_prefab(
  */
 export function resolveScriptGuid(
   script: string,
-  projectPath?: string
+  projectPath?: string,
+  options?: { strict_exact_name?: boolean }
 ): { guid: string; path: string | null } | null {
+  const strictExactName = options?.strict_exact_name === true;
   // Check if it's already a valid GUID (32 hex chars)
   if (/^[a-f0-9]{32}$/i.test(script)) {
+    if (/^0{32}$/i.test(script)) {
+      throw new Error(`Invalid script GUID "${script}": all-zero GUID is not allowed. Provide a real script GUID from a .meta file.`);
+    }
     return { guid: script.toLowerCase(), path: null };
   }
 
@@ -732,8 +737,22 @@ export function resolveScriptGuid(
   if (projectPath) {
     const guidCache = load_guid_cache(projectPath);
     if (guidCache) {
-      const result = guidCache.find_by_name(script, '.cs');
-      if (result) return result;
+      if (strictExactName) {
+        const exactMatches = guidCache.find_all_by_name_exact(script, '.cs');
+        if (exactMatches.length === 1) {
+          return exactMatches[0];
+        }
+        if (exactMatches.length > 1) {
+          const paths = exactMatches.map(m => m.path).join(', ');
+          throw new Error(
+            `Ambiguous type "${script}": found ${exactMatches.length} exact script name matches (${paths}). ` +
+            'Use a qualified name (e.g., "Namespace.TypeName") or provide the full script path.'
+          );
+        }
+      } else {
+        const result = guidCache.find_by_name(script, '.cs');
+        if (result) return result;
+      }
     }
 
     // Strategy 4: Type registry lookup by class name
@@ -920,16 +939,35 @@ export function resolveScriptGuid(
       try {
         const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
 
+        const exactMatches: Array<{ guid: string; path: string }> = [];
         for (const [guid, assetPath] of Object.entries(cache)) {
           if (!assetPath.endsWith('.cs')) continue;
           const fileName = path.basename(assetPath, '.cs').toLowerCase();
           if (fileName === scriptNameLower || (classNameOnly && fileName === classNameOnly)) {
-            return { guid, path: assetPath };
+            exactMatches.push({ guid, path: assetPath });
           }
         }
-      } catch {
+
+        if (exactMatches.length === 1) {
+          return exactMatches[0];
+        }
+        if (exactMatches.length > 1) {
+          const paths = exactMatches.map(m => m.path).join(', ');
+          throw new Error(
+            `Ambiguous type "${script}": found ${exactMatches.length} exact script name matches (${paths}). ` +
+            'Use a qualified name (e.g., "Namespace.TypeName") or provide the full script path.'
+          );
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith('Ambiguous type')) {
+          throw err;
+        }
         // Cache read failed
       }
+    }
+
+    if (strictExactName) {
+      return null;
     }
 
     // Strategy 7: Filesystem fallback via readdirSync (recursive)
@@ -1040,12 +1078,24 @@ export interface ResolvedScript {
   fields?: import('../types').CSharpFieldRef[];
   base_class?: string;
   kind?: string;
+  is_abstract?: boolean;
   /** Namespace of the resolved type (populated for DLL-backed scripts) */
   namespace?: string;
   /** Class name of the resolved type (populated for DLL-backed scripts) */
   class_name?: string;
   /** Set when field extraction failed — included as a warning in results */
   extraction_error?: string;
+}
+
+function detect_abstract_class_in_source(file_path: string, class_name: string): boolean {
+  try {
+    const source = readFileSync(file_path, 'utf-8');
+    const escaped_name = class_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`(^|[^\\w])abstract\\s+class\\s+${escaped_name}(?=$|[^\\w])`, 'm');
+    return pattern.test(source);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1057,9 +1107,10 @@ export interface ResolvedScript {
  */
 export function resolve_script_with_fields(
   script: string,
-  project_path?: string
+  project_path?: string,
+  options?: { strict_exact_name?: boolean }
 ): ResolvedScript | null {
-  const resolved = resolveScriptGuid(script, project_path);
+  const resolved = resolveScriptGuid(script, project_path, options);
   if (!resolved) return null;
 
   const result: ResolvedScript = {
@@ -1067,13 +1118,29 @@ export function resolve_script_with_fields(
     path: resolved.path,
   };
 
+  // Best-effort abstract detection even without project_path
+  if (resolved.path && resolved.path.endsWith('.cs')) {
+    const full_path = path.isAbsolute(resolved.path)
+      ? resolved.path
+      : project_path
+        ? path.join(project_path, resolved.path)
+        : resolved.path;
+
+    if (existsSync(full_path)) {
+      const class_name = script.includes('.') ? script.split('.').pop()! : script;
+      if (class_name.length > 0) {
+        result.is_abstract = detect_abstract_class_in_source(full_path, class_name);
+      }
+    }
+  }
+
   // Can't extract fields without a project path
   if (!project_path) return result;
 
   // Extract fields from the resolved script file
   if (resolved.path) {
     try {
-      const full_path = resolved.path.startsWith('/')
+      const full_path = path.isAbsolute(resolved.path)
         ? resolved.path
         : path.join(project_path, resolved.path);
 
@@ -1094,6 +1161,10 @@ export function resolve_script_with_fields(
             result.fields = chosen.fields;
             result.base_class = chosen.baseClass ?? undefined;
             result.kind = chosen.kind;
+            result.class_name = chosen.name;
+            if (chosen.name) {
+              result.is_abstract = detect_abstract_class_in_source(full_path, chosen.name);
+            }
           }
         } else {
           result.extraction_error = 'Native extractSerializedFields function not available';

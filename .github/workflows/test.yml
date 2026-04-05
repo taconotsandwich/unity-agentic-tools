@@ -48,6 +48,9 @@ jobs:
       - name: Type check
         run: bun run type-check
 
+      - name: Check Unity ClassID drift
+        run: bun run check:classids
+
       - name: Run Rust tests
         working-directory: ./rust-core
         run: cargo test

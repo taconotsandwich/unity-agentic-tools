@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve, join } from 'path';
 import { readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
-import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, createPrefabInstance, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile, createScene, editPrefabOverride, batchEditPrefabOverrides, editArray, batchEditComponentProperties, removePrefabOverride, addRemovedComponent, removeRemovedComponent, addRemovedGameObject, removeRemovedGameObject, deletePrefabInstance, editManagedReference } from '../src/editor';
+import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, createPrefabInstance, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile, createScene, editPrefabOverride, batchEditPrefabOverrides, editArray, batchEditComponentProperties, removePrefabOverride, addRemovedComponent, removeRemovedComponent, addRemovedGameObject, removeRemovedGameObject, deletePrefabInstance, editManagedReference, deleteAssetFile } from '../src/editor';
 import { UnityDocument } from '../src/editor/unity-document';
 import { resolveAssetPathToPPtr } from '../src/editor/shared';
 import { create_temp_fixture } from './test-utils';
@@ -1215,6 +1215,64 @@ describe('addComponent', () => {
         }
     });
 
+    it('should resolve Grid as built-in component when similarly named script exists', () => {
+        const projectDir = join(tmpdir(), 'test-unity-grid-builtin-precedence');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const cachePath = join(cacheDir, 'guid-cache.json');
+        const gridManagerGuid = '11111111111111111111111111111111';
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(cachePath, JSON.stringify({
+            [gridManagerGuid]: 'Assets/Scripts/GridManager.cs'
+        }));
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'Grid',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.script_guid).toBeUndefined();
+            expect(result.script_path).toBeUndefined();
+
+            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+            expect(content).toContain('--- !u!156049354 &');
+            expect(content).toContain('Grid:');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
+    it('should return ambiguity error for exact script-name collisions in strict component resolver', () => {
+        const projectDir = join(tmpdir(), 'test-unity-strict-ambiguity');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const cachePath = join(cacheDir, 'guid-cache.json');
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(cachePath, JSON.stringify({
+            ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']: 'Assets/Scripts/Foo.cs',
+            ['bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb']: 'Packages/com.test/Foo.cs'
+        }));
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'Foo',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Ambiguous type "Foo"');
+            expect(result.error).toContain('exact script name matches');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
     it('should prefer exact filename match over substring match in GUID cache', () => {
         // Regression: "CampStateMgr" was resolving to "ArenaCampStateMgr.cs"
         const projectDir = join(tmpdir(), 'test-unity-exact-match');
@@ -1255,6 +1313,53 @@ describe('addComponent', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('Component or script not found');
+    });
+
+    it('should reject MonoBehaviour as component type', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: 'MonoBehaviour'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('base class');
+    });
+
+    it('should reject all-zero script GUID', () => {
+        const result = addComponent({
+            file_path: temp_fixture.temp_path,
+            game_object_name: 'Player',
+            component_type: '00000000000000000000000000000000'
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('all-zero GUID');
+    });
+
+    it('should reject abstract MonoBehaviour script', () => {
+        const projectDir = join(tmpdir(), `test-unity-abstract-mono-${Date.now()}`);
+        const scriptDir = join(projectDir, 'Assets', 'Scripts');
+        const scriptPath = join(scriptDir, 'AbstractActor.cs');
+        const guid = '11112222333344445555666677778888';
+
+        mkdirSync(scriptDir, { recursive: true });
+        writeFileSync(scriptPath, 'public abstract class AbstractActor : MonoBehaviour { }', 'utf-8');
+        writeFileSync(scriptPath + '.meta', `fileFormatVersion: 2\nguid: ${guid}\n`, 'utf-8');
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: scriptPath,
+                project_path: projectDir,
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('abstract');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
     });
 
     it('should include setup hint when script lookup fails with project path', () => {
@@ -2463,6 +2568,30 @@ describe('createScriptableObject', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('not found');
+    });
+
+    it('should reject abstract ScriptableObject script', () => {
+        const projectDir = join(tmpdir(), `test-unity-abstract-so-${Date.now()}`);
+        const scriptDir = join(projectDir, 'Assets', 'Scripts');
+        const scriptPath = join(scriptDir, 'AbstractConfig.cs');
+        const guid = '9999aaaabbbbccccddddeeeeffff0000';
+
+        mkdirSync(scriptDir, { recursive: true });
+        writeFileSync(scriptPath, 'public abstract class AbstractConfig : ScriptableObject { }', 'utf-8');
+        writeFileSync(scriptPath + '.meta', `fileFormatVersion: 2\nguid: ${guid}\n`, 'utf-8');
+
+        try {
+            const result = createScriptableObject({
+                output_path: outputPath,
+                script: scriptPath,
+                project_path: projectDir,
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('abstract');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
     });
 
     it('should apply initial_values to the generated asset', () => {
@@ -5625,6 +5754,46 @@ MonoBehaviour:
 
             const content = readFileSync(scenePath, 'utf-8');
             expect(content).toContain('fallbackInputAsset: {fileID: 11400000, guid: aabbccdd11223344aabbccdd11223344, type: 2}');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+});
+
+describe('deleteAssetFile', () => {
+    it('should delete asset and .meta file', () => {
+        const projectDir = join(tmpdir(), `delete-asset-${Date.now()}`);
+        const assetPath = join(projectDir, 'Assets', 'Data', 'MyAsset.asset');
+        mkdirSync(join(projectDir, 'Assets', 'Data'), { recursive: true });
+        writeFileSync(assetPath, 'dummy', 'utf-8');
+        writeFileSync(assetPath + '.meta', 'fileFormatVersion: 2\nguid: abcdefabcdefabcdefabcdefabcdefab\n', 'utf-8');
+
+        try {
+            const result = deleteAssetFile({ file_path: assetPath });
+            expect(result.success).toBe(true);
+            expect(result.deleted_file).toBe(true);
+            expect(result.deleted_meta).toBe(true);
+            expect(result.warning).toBeUndefined();
+            expect(existsSync(assetPath)).toBe(false);
+            expect(existsSync(assetPath + '.meta')).toBe(false);
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
+    it('should succeed with warning when .meta file is missing', () => {
+        const projectDir = join(tmpdir(), `delete-asset-nometa-${Date.now()}`);
+        const assetPath = join(projectDir, 'Assets', 'Data', 'MyAsset.asset');
+        mkdirSync(join(projectDir, 'Assets', 'Data'), { recursive: true });
+        writeFileSync(assetPath, 'dummy', 'utf-8');
+
+        try {
+            const result = deleteAssetFile({ file_path: assetPath });
+            expect(result.success).toBe(true);
+            expect(result.deleted_file).toBe(true);
+            expect(result.deleted_meta).toBe(false);
+            expect(result.warning).toContain('no .meta file found');
+            expect(existsSync(assetPath)).toBe(false);
         } finally {
             rmSync(projectDir, { recursive: true, force: true });
         }

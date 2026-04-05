@@ -32,6 +32,8 @@ npm install -g unity-agentic-tools
 
 ```bash
 npx skills install taconotsandwich/unity-agentic-tools # See more at https://github.com/vercel-labs/skills
+
+npx skills add "/Users/taco/Documents/Projects/unity-agentic-tools" --all -g --copy # from local for dev
 ```
 
 ### From Source
@@ -125,6 +127,7 @@ unity-agentic-tools delete gameobject <file> <name>
 unity-agentic-tools delete component <file> <file_id>
 unity-agentic-tools delete build <scene>
 unity-agentic-tools delete prefab <file> <prefab_instance>
+unity-agentic-tools delete asset <file>
 unity-agentic-tools delete package <name>
 ```
 
@@ -140,6 +143,24 @@ unity-agentic-tools version                                   # Unity version (d
 unity-agentic-tools setup -p <project>                        # Initialize GUID cache
 unity-agentic-tools cleanup -p <project>                      # Remove cached data
 ```
+
+### Loaded Edit Protection
+
+When Unity Editor bridge is connected, commands that mutate existing `.unity`/`.prefab` files are soft-blocked if the target is currently loaded/open in editor. Pass `--bypass-loaded-protection` to force file-based edits.
+
+Applies to key mutators such as:
+- `clone <file> <name>`
+- `create gameobject|component|component-copy|prefab-instance`
+- `update gameobject|component|transform|parent|array|batch|batch-components|sibling-index|managed-reference|prefab ...`
+- `delete gameobject|component|prefab|asset`
+
+Offline behavior is unchanged: if editor bridge is not connected, operations proceed without this check.
+
+### Script Component Safety
+
+- `create component ... MonoBehaviour` is rejected (base class only).
+- All-zero script GUID is rejected.
+- Abstract scripts are rejected for `create component` and `create scriptable-object`.
 
 ### Editor Bridge Setup
 
