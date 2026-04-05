@@ -1215,6 +1215,64 @@ describe('addComponent', () => {
         }
     });
 
+    it('should resolve Grid as built-in component when similarly named script exists', () => {
+        const projectDir = join(tmpdir(), 'test-unity-grid-builtin-precedence');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const cachePath = join(cacheDir, 'guid-cache.json');
+        const gridManagerGuid = '11111111111111111111111111111111';
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(cachePath, JSON.stringify({
+            [gridManagerGuid]: 'Assets/Scripts/GridManager.cs'
+        }));
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'Grid',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.script_guid).toBeUndefined();
+            expect(result.script_path).toBeUndefined();
+
+            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+            expect(content).toContain('--- !u!156049354 &');
+            expect(content).toContain('Grid:');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
+    it('should return ambiguity error for exact script-name collisions in strict component resolver', () => {
+        const projectDir = join(tmpdir(), 'test-unity-strict-ambiguity');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const cachePath = join(cacheDir, 'guid-cache.json');
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(cachePath, JSON.stringify({
+            ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']: 'Assets/Scripts/Foo.cs',
+            ['bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb']: 'Packages/com.test/Foo.cs'
+        }));
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'Foo',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Ambiguous type "Foo"');
+            expect(result.error).toContain('exact script name matches');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
     it('should prefer exact filename match over substring match in GUID cache', () => {
         // Regression: "CampStateMgr" was resolving to "ArenaCampStateMgr.cs"
         const projectDir = join(tmpdir(), 'test-unity-exact-match');

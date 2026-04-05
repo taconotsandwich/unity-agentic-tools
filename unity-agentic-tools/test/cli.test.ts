@@ -492,6 +492,78 @@ describeIfNative('CLI', () => {
             }
         });
 
+        it('should resolve Grid as built-in when GridManager script exists', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-grid-built-in-'));
+            const cacheDir = join(projectDir, '.unity-agentic');
+            const cachePath = join(cacheDir, 'guid-cache.json');
+
+            mkdirSync(cacheDir, { recursive: true });
+            writeFileSync(cachePath, JSON.stringify({
+                ['11111111111111111111111111111111']: 'Assets/Scripts/GridManager.cs'
+            }), 'utf-8');
+
+            try {
+                const result = run_cli([
+                    'create', 'component',
+                    temp_fixture.temp_path,
+                    'Player',
+                    'Grid',
+                    '--project', projectDir,
+                    '--json'
+                ]);
+
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+                expect(json.script_guid).toBeUndefined();
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should return ambiguity error for exact script-name collisions', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-strict-ambiguity-'));
+            const cacheDir = join(projectDir, '.unity-agentic');
+            const cachePath = join(cacheDir, 'guid-cache.json');
+
+            mkdirSync(cacheDir, { recursive: true });
+            writeFileSync(cachePath, JSON.stringify({
+                ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']: 'Assets/Scripts/Foo.cs',
+                ['bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb']: 'Packages/com.test/Foo.cs'
+            }), 'utf-8');
+
+            try {
+                try {
+                    run_cli([
+                        'create', 'component',
+                        temp_fixture.temp_path,
+                        'Player',
+                        'Foo',
+                        '--project', projectDir,
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('Ambiguous type "Foo"');
+                    expect(json.error).toContain('exact script name matches');
+                }
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+
         it('should add variant component and expose structured added_components in read overrides', () => {
             const fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SamplePrefabVariant.prefab')

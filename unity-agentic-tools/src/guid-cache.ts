@@ -21,6 +21,8 @@ export interface GuidCache {
     resolve_many(guids: string[]): Record<string, string | null>;
     /** Reverse lookup: find a GUID+path by filename, optionally filtered by extension. */
     find_by_name(name: string, extension?: string): { guid: string; path: string } | null;
+    /** Reverse lookup: return all exact filename matches, optionally filtered by extension. */
+    find_all_by_name_exact(name: string, extension?: string): Array<{ guid: string; path: string }>;
 }
 
 /** In-process cache keyed by project_path to avoid re-reading JSON. */
@@ -75,6 +77,22 @@ function build_guid_cache(project_path: string, raw: Record<string, string>): Gu
             }
 
             return substringMatch;
+        },
+
+        find_all_by_name_exact(name: string, extension?: string): Array<{ guid: string; path: string }> {
+            const nameLower = name.toLowerCase().replace(/\.[^.]+$/, '');
+            const matches: Array<{ guid: string; path: string }> = [];
+
+            for (const [guid, assetPath] of Object.entries(raw)) {
+                if (extension && !assetPath.endsWith(extension)) continue;
+
+                const fileName = basename(assetPath, extname(assetPath)).toLowerCase();
+                if (fileName === nameLower) {
+                    matches.push({ guid, path: assetPath });
+                }
+            }
+
+            return matches;
         },
     };
 }
