@@ -1120,7 +1120,7 @@ export function resolve_script_with_fields(
 
   // Best-effort abstract detection even without project_path
   if (resolved.path && resolved.path.endsWith('.cs')) {
-    const full_path = resolved.path.startsWith('/')
+    const full_path = path.isAbsolute(resolved.path)
       ? resolved.path
       : project_path
         ? path.join(project_path, resolved.path)
@@ -1140,7 +1140,7 @@ export function resolve_script_with_fields(
   // Extract fields from the resolved script file
   if (resolved.path) {
     try {
-      const full_path = resolved.path.startsWith('/')
+      const full_path = path.isAbsolute(resolved.path)
         ? resolved.path
         : path.join(project_path, resolved.path);
 
