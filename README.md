@@ -32,6 +32,8 @@ npm install -g unity-agentic-tools
 
 ```bash
 npx skills install taconotsandwich/unity-agentic-tools # See more at https://github.com/vercel-labs/skills
+
+npx skills add "." --all -g --copy
 ```
 
 ### From Source
