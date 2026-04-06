@@ -36,6 +36,24 @@ npx skills install taconotsandwich/unity-agentic-tools # See more at https://git
 npx skills add "." --all -g --copy
 ```
 
+Skill split (single source of truth):
+
+- `unity-agentic-tools` -> setup, routing, read, utilities
+- `unity-agentic-create` -> all `create` commands
+- `unity-agentic-update` -> all `update` commands
+- `unity-agentic-delete` -> all `delete` commands
+- `unity-agentic-editor` -> all `editor` commands
+
+Recommended install flow:
+
+```bash
+npx skills add "./skills/unity-agentic-tools" -g --copy
+npx skills add "./skills/unity-agentic-create" -g --copy
+npx skills add "./skills/unity-agentic-update" -g --copy
+npx skills add "./skills/unity-agentic-delete" -g --copy
+npx skills add "./skills/unity-agentic-editor" -g --copy
+```
+
 ### From Source
 
 ```bash

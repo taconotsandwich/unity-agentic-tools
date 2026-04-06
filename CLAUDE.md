@@ -128,11 +128,20 @@ unity-package/      Unity Editor bridge (C# UPM package)
 
 ## Skills
 
-- The `unity-agentic-tools` skill is installed globally at `~/.claude/skills/unity-agentic-tools`
-- Skill source files live in `skills/unity-agentic-tools/` within this repo
-- **Sync to global install**: `bun run sync-skill` copies SKILL.md, reference files, and scripts to `~/.claude/skills/`
-- **Structure**: SKILL.md is a navigation hub (~80 lines); detailed command tables live in `reference/` files (loaded on demand by Claude)
-- **Verification**: `node skills/unity-agentic-tools/scripts/check-setup.mjs` checks binary and native module availability
+- Skills are split into 5 directories under `skills/`:
+  - `unity-agentic-tools` (umbrella: setup/routing/read/utilities)
+  - `unity-agentic-create`
+  - `unity-agentic-update`
+  - `unity-agentic-delete`
+  - `unity-agentic-editor`
+- **Single source of truth**: no fallback docs; each command group is documented in exactly one skill.
+- **Sync to global install**: `bun run sync-skill` copies all 5 skills (SKILL.md, `reference/`, `scripts/`) to `~/.claude/skills/`.
+- **Verification**:
+  - `node skills/unity-agentic-tools/scripts/check-setup.mjs`
+  - `node skills/unity-agentic-create/scripts/check-setup.mjs`
+  - `node skills/unity-agentic-update/scripts/check-setup.mjs`
+  - `node skills/unity-agentic-delete/scripts/check-setup.mjs`
+  - `node skills/unity-agentic-editor/scripts/check-setup.mjs`
 
 ## Code Style
 
