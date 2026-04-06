@@ -757,7 +757,7 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('clone command', () => {
+    describe('create clone command', () => {
         it('should duplicate a GameObject', () => {
             const temp_fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SampleScene.unity')
@@ -765,7 +765,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const result = run_cli([
-                    'clone',
+                    'create', 'clone',
                     temp_fixture.temp_path,
                     'Player',
                     '--json'
