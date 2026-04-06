@@ -10,7 +10,31 @@ permissions:
   id-token: write
 
 jobs:
+  verify-tag-on-main:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify release tag points to main HEAD
+        run: |
+          git fetch origin main --depth=1
+          TAG_COMMIT="$GITHUB_SHA"
+          MAIN_COMMIT="$(git rev-parse origin/main)"
+
+          echo "Tag commit:  $TAG_COMMIT"
+          echo "Main commit: $MAIN_COMMIT"
+
+          if [ "$TAG_COMMIT" != "$MAIN_COMMIT" ]; then
+            echo "ERROR: Release tags must point to origin/main HEAD."
+            exit 1
+          fi
+
   build-native:
+    needs: verify-tag-on-main
     strategy:
       fail-fast: false
       matrix:
@@ -174,22 +198,6 @@ jobs:
             ## What's Changed
 
             ${{ steps.changelog.outputs.CHANGELOG }}
-
-            ## Installation
-
-            ### Claude Code Plugin
-            See [unity-agentic-tools-claude-plugin](https://github.com/taconotsandwich/unity-agentic-tools-claude-plugin) for Claude Code integration.
-
-            ### npm
-            ```bash
-            bun add -g unity-agentic-tools
-            ```
-
-            ### From Source
-            ```bash
-            git clone https://github.com/taconotsandwich/unity-agentic-tools.git
-            cd unity-agentic-tools && bun install
-            ```
           draft: false
           prerelease: true
         env:

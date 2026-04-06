@@ -15,10 +15,10 @@ unity-agentic-tools read gameobject MyScene.unity "Main Camera" -p
 unity-agentic-tools update transform MyScene.unity "Main Camera" -p 0,5,-10
 ```
 
-## Commands (123 total)
+## Commands (125 total)
 
-### Read (21)
-`read scene` | `read gameobject` | `read asset` | `read scriptable-object` | `read material` | `read dependencies` | `read dependents` | `read unused` | `read settings` | `read build` | `read overrides` | `read component` | `read reference` | `read script` | `read scripts` | `read log` | `read meta` | `read animation` | `read animator` | `read manifest` | `read input-actions`
+### Read (20)
+`read scene` | `read gameobject` | `read asset` | `read scriptable-object` | `read material` | `read dependencies` | `read dependents` | `read unused` | `read settings` | `read build` | `read overrides` | `read component` | `read reference` | `read script` | `read scripts` | `read meta` | `read animation` | `read animator` | `read manifest` | `read input-actions`
 
 ### Create (15)
 `create gameobject` | `create scene` | `create prefab-variant` | `create prefab-instance` | `create scriptable-object` | `create meta` | `create component` | `create component-copy` | `create build` | `create material` | `create package` | `create input-actions` | `create animation` | `create animator` | `create prefab`

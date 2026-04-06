@@ -699,8 +699,10 @@ export function resolve_source_prefab(
  */
 export function resolveScriptGuid(
   script: string,
-  projectPath?: string
+  projectPath?: string,
+  options?: { strict_exact_name?: boolean }
 ): { guid: string; path: string | null } | null {
+  const strictExactName = options?.strict_exact_name === true;
   // Check if it's already a valid GUID (32 hex chars)
   if (/^[a-f0-9]{32}$/i.test(script)) {
     if (/^0{32}$/i.test(script)) {
@@ -735,8 +737,22 @@ export function resolveScriptGuid(
   if (projectPath) {
     const guidCache = load_guid_cache(projectPath);
     if (guidCache) {
-      const result = guidCache.find_by_name(script, '.cs');
-      if (result) return result;
+      if (strictExactName) {
+        const exactMatches = guidCache.find_all_by_name_exact(script, '.cs');
+        if (exactMatches.length === 1) {
+          return exactMatches[0];
+        }
+        if (exactMatches.length > 1) {
+          const paths = exactMatches.map(m => m.path).join(', ');
+          throw new Error(
+            `Ambiguous type "${script}": found ${exactMatches.length} exact script name matches (${paths}). ` +
+            'Use a qualified name (e.g., "Namespace.TypeName") or provide the full script path.'
+          );
+        }
+      } else {
+        const result = guidCache.find_by_name(script, '.cs');
+        if (result) return result;
+      }
     }
 
     // Strategy 4: Type registry lookup by class name
@@ -923,16 +939,35 @@ export function resolveScriptGuid(
       try {
         const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
 
+        const exactMatches: Array<{ guid: string; path: string }> = [];
         for (const [guid, assetPath] of Object.entries(cache)) {
           if (!assetPath.endsWith('.cs')) continue;
           const fileName = path.basename(assetPath, '.cs').toLowerCase();
           if (fileName === scriptNameLower || (classNameOnly && fileName === classNameOnly)) {
-            return { guid, path: assetPath };
+            exactMatches.push({ guid, path: assetPath });
           }
         }
-      } catch {
+
+        if (exactMatches.length === 1) {
+          return exactMatches[0];
+        }
+        if (exactMatches.length > 1) {
+          const paths = exactMatches.map(m => m.path).join(', ');
+          throw new Error(
+            `Ambiguous type "${script}": found ${exactMatches.length} exact script name matches (${paths}). ` +
+            'Use a qualified name (e.g., "Namespace.TypeName") or provide the full script path.'
+          );
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith('Ambiguous type')) {
+          throw err;
+        }
         // Cache read failed
       }
+    }
+
+    if (strictExactName) {
+      return null;
     }
 
     // Strategy 7: Filesystem fallback via readdirSync (recursive)
@@ -1072,9 +1107,10 @@ function detect_abstract_class_in_source(file_path: string, class_name: string):
  */
 export function resolve_script_with_fields(
   script: string,
-  project_path?: string
+  project_path?: string,
+  options?: { strict_exact_name?: boolean }
 ): ResolvedScript | null {
-  const resolved = resolveScriptGuid(script, project_path);
+  const resolved = resolveScriptGuid(script, project_path, options);
   if (!resolved) return null;
 
   const result: ResolvedScript = {
@@ -1084,7 +1120,7 @@ export function resolve_script_with_fields(
 
   // Best-effort abstract detection even without project_path
   if (resolved.path && resolved.path.endsWith('.cs')) {
-    const full_path = resolved.path.startsWith('/')
+    const full_path = path.isAbsolute(resolved.path)
       ? resolved.path
       : project_path
         ? path.join(project_path, resolved.path)
@@ -1104,7 +1140,7 @@ export function resolve_script_with_fields(
   // Extract fields from the resolved script file
   if (resolved.path) {
     try {
-      const full_path = resolved.path.startsWith('/')
+      const full_path = path.isAbsolute(resolved.path)
         ? resolved.path
         : path.join(project_path, resolved.path);
 

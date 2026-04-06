@@ -2190,7 +2190,7 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
     // Treat as custom script -- resolve with field extraction
     let resolved: ReturnType<typeof resolve_script_with_fields>;
     try {
-      resolved = resolve_script_with_fields(component_type, project_path);
+      resolved = resolve_script_with_fields(component_type, project_path, { strict_exact_name: true });
     } catch (e) {
       return {
         success: false,
