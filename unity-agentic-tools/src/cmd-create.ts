@@ -12,7 +12,6 @@ import {
     createMetaFile,
     addComponent,
     copyComponent,
-    duplicateGameObject,
 } from './editor';
 import { add_scene } from './build-editor';
 import { add_package } from './packages';
@@ -23,29 +22,6 @@ import { enforce_loaded_edit_protection } from './loaded-protection';
 export function build_create_command(): Command {
     const cmd = new Command('create')
         .description('Create Unity objects (GameObjects, scenes, prefabs, components)');
-
-    cmd.command('clone <file> <object_name>')
-        .description('Duplicate a GameObject and its hierarchy')
-        .option('-n, --name <new_name>', 'Name for the duplicated object')
-        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
-        .option('-j, --json', 'Output as JSON')
-        .action(async (file, object_name, options) => {
-            const guard = await enforce_loaded_edit_protection(file, options.bypassLoadedProtection);
-            if (!guard.allowed) {
-                console.log(JSON.stringify({ success: false, file_path: file, error: guard.error }, null, 2));
-                process.exitCode = 1;
-                return;
-            }
-
-            const result = duplicateGameObject({
-                file_path: file,
-                object_name,
-                new_name: options.name,
-            });
-
-            console.log(JSON.stringify(result, null, 2));
-            if (!result.success) process.exitCode = 1;
-        });
 
     cmd.command('gameobject <file> [name]')
         .description('Create a new GameObject in a Unity file')

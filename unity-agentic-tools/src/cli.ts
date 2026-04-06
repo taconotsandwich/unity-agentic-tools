@@ -8,11 +8,13 @@ import { build_read_command } from './cmd-read';
 import { build_update_command } from './cmd-update';
 import { build_delete_command } from './cmd-delete';
 import { build_editor_command } from './cmd-editor';
+import { duplicateGameObject } from './editor';
 import { search_project, grep_project } from './project-search';
 import type { ProjectGrepFileType, ProjectSearchOptions, GameObjectWithComponents, Component } from './types';
 import { read_project_version } from './build-version';
 import { find_unity_project_root, glob_match, resolve_project_path } from './utils';
 import { load_guid_cache } from './guid-cache';
+import { enforce_loaded_edit_protection } from './loaded-protection';
 import * as path from 'path';
 import * as fs from 'fs';
 const { exec } = require('child_process');
@@ -51,6 +53,30 @@ program.addCommand(build_read_command(getScanner));
 program.addCommand(build_update_command(getScanner));
 program.addCommand(build_delete_command());
 program.addCommand(build_editor_command());
+
+// Clone command (top-level — duplicates a GameObject and its hierarchy)
+program.command('clone <file> <object_name>')
+  .description('Duplicate a GameObject and its hierarchy')
+  .option('-n, --name <new_name>', 'Name for the duplicated object')
+  .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
+  .option('-j, --json', 'Output as JSON')
+  .action(async (file, object_name, options) => {
+    const guard = await enforce_loaded_edit_protection(file, options.bypassLoadedProtection);
+    if (!guard.allowed) {
+      console.log(JSON.stringify({ success: false, file_path: file, error: guard.error }, null, 2));
+      process.exitCode = 1;
+      return;
+    }
+
+    const result = duplicateGameObject({
+      file_path: file,
+      object_name: object_name,
+      new_name: options.name,
+    });
+
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.success) process.exitCode = 1;
+  });
 
 // Search command (top-level — auto-detects file vs directory)
 // File path → single-file find (like old `find`)
