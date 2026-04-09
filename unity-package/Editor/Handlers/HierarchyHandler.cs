@@ -64,7 +64,7 @@ namespace UnityAgenticTools.Server
 
         private static object BuildNode(GameObject go, int depth, int maxDepth, bool includeInactive)
         {
-            string refStr = RefManager.RegisterHierarchy(go.GetInstanceID());
+            string refStr = RefManager.RegisterHierarchy(UnityObjectCompat.GetObjectId(go));
 
             var node = new Dictionary<string, object>
             {

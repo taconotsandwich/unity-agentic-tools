@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
+using UnityAgenticTools.Refs;
 
 namespace UnityAgenticTools.Server
 {
@@ -69,7 +70,7 @@ namespace UnityAgenticTools.Server
             var playerInputType = FindType("UnityEngine.InputSystem.PlayerInput");
             if (playerInputType == null) return actions;
 
-            var playerInputs = UnityEngine.Object.FindObjectsByType(playerInputType, FindObjectsSortMode.None);
+            var playerInputs = UnityObjectCompat.FindObjects(playerInputType);
             foreach (var pi in playerInputs)
             {
                 var actionsProperty = playerInputType.GetProperty("actions", BindingFlags.Public | BindingFlags.Instance);
@@ -522,7 +523,7 @@ namespace UnityAgenticTools.Server
                 if (playerInputType == null)
                     throw new InvalidOperationException("PlayerInput type not found. Is Input System installed?");
 
-                var playerInputs = UnityEngine.Object.FindObjectsByType(playerInputType, FindObjectsSortMode.None);
+                var playerInputs = UnityObjectCompat.FindObjects(playerInputType);
                 if (playerInputs.Length == 0)
                     throw new InvalidOperationException("No PlayerInput component found in scene.");
 
