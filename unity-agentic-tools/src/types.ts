@@ -811,6 +811,17 @@ export interface EditorConfig {
   port: number;
   pid: number;
   version: string;
+  project_path?: string;
+  source?: 'lockfile' | 'discovered' | 'cached' | 'manual';
+}
+
+export interface EditorBridgeInfo {
+  port: number;
+  pid: number;
+  version: string;
+  project_path: string;
+  project_name?: string;
+  unity_version?: string;
 }
 
 export interface CallEditorOptions {
