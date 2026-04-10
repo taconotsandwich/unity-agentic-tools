@@ -183,5 +183,43 @@ namespace UnityAgenticTools.Tests
                 Object.DestroyImmediate(gameObject);
             }
         }
+
+        [Test]
+        public void JsonRpcParser_IsTransportSafeValue_RecognizesNormalizedPayloads()
+        {
+            var payload = new System.Collections.Generic.Dictionary<string, object>
+            {
+                { "success", true },
+                { "result", new System.Collections.Generic.Dictionary<string, object>
+                    {
+                        { "type", "GameObject" },
+                        { "name", "AppRoot" },
+                        { "instanceId", 42 }
+                    }
+                }
+            };
+
+            Assert.That(JsonRpcParser.IsTransportSafeValue(payload), Is.True);
+        }
+
+        [Test]
+        public void JsonRpcParser_IsTransportSafeValue_RejectsRawUnityObjects()
+        {
+            var gameObject = new GameObject("AppRoot");
+            try
+            {
+                var payload = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "result", gameObject }
+                };
+
+                Assert.That(JsonRpcParser.IsTransportSafeValue(payload), Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
+        }
     }
 }

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using UnityAgenticTools.Refs;
 using UnityEditor;
 using UnityEngine;
 
@@ -55,10 +56,14 @@ namespace UnityAgenticTools.Server
         public static async Task<string> Dispatch(string message)
         {
             string id = null;
+            string method = null;
+            int timeoutMs = 30000;
             try
             {
                 var request = JsonRpcParser.ParseRequest(message);
                 id = request.Id;
+                method = request.Method;
+                timeoutMs = ResolveRequestTimeoutMs(request.Params);
 
                 if (string.IsNullOrEmpty(request.Method))
                 {
@@ -72,9 +77,32 @@ namespace UnityAgenticTools.Server
                 }
 
                 var result = await handler.HandleAsync(request.Method, request.Params);
-                var transportResult = await EditorWebSocketServer.RunOnMainThread(
-                    () => JsonRpcParser.NormalizeValueForTransport(result));
+                var transportResult = JsonRpcParser.IsTransportSafeValue(result)
+                    ? result
+                    : await EditorWebSocketServer.RunOnMainThread(
+                        () => JsonRpcParser.NormalizeValueForTransport(result),
+                        timeoutMs);
                 return JsonRpcParser.BuildResult(id, transportResult);
+            }
+            catch (TaskCanceledException ex)
+            {
+                Debug.LogWarning($"[UnityAgenticTools] Dispatch was canceled (likely bridge restart): {ex.Message}");
+                return JsonRpcParser.BuildError(
+                    id ?? "0",
+                    -32000,
+                    method == "editor.invoke"
+                        ? "Editor invoke was interrupted by a server transition before its response could be delivered."
+                        : "Bridge request was canceled by server transition. Retry the request.");
+            }
+            catch (TimeoutException ex)
+            {
+                Debug.LogWarning($"[UnityAgenticTools] Dispatch timed out: {ex.Message}");
+                return JsonRpcParser.BuildError(
+                    id ?? "0",
+                    -32000,
+                    method == "editor.invoke"
+                        ? "Editor invoke timed out while waiting for a stable main-thread response."
+                        : "Bridge request timed out while waiting for main thread work.");
             }
             catch (Exception ex)
             {
@@ -93,6 +121,36 @@ namespace UnityAgenticTools.Server
                 }
             }
             return null;
+        }
+
+        private static int ResolveRequestTimeoutMs(Dictionary<string, object> parameters)
+        {
+            if (parameters == null || !parameters.TryGetValue("_timeout", out var timeoutObj))
+            {
+                return 30000;
+            }
+
+            if (timeoutObj is int timeoutInt)
+            {
+                return Math.Max(1, timeoutInt);
+            }
+
+            if (timeoutObj is long timeoutLong)
+            {
+                return (int)Math.Max(1L, Math.Min(timeoutLong, int.MaxValue));
+            }
+
+            if (timeoutObj is double timeoutDouble)
+            {
+                return (int)Math.Max(1d, Math.Min(timeoutDouble, int.MaxValue));
+            }
+
+            if (timeoutObj is string timeoutString && int.TryParse(timeoutString, out var parsedTimeout))
+            {
+                return Math.Max(1, parsedTimeout);
+            }
+
+            return 30000;
         }
 
         public static void Reset()
@@ -353,6 +411,11 @@ namespace UnityAgenticTools.Server
             return NormalizeValueForTransport(value, 0);
         }
 
+        public static bool IsTransportSafeValue(object value)
+        {
+            return IsTransportSafeValue(value, 0);
+        }
+
         private static object NormalizeValueForTransport(object value, int depth)
         {
             if (depth > 8)
@@ -425,6 +488,84 @@ namespace UnityAgenticTools.Server
             return NormalizeObject(value, depth);
         }
 
+        private static bool IsTransportSafeValue(object value, int depth)
+        {
+            if (depth > 8)
+            {
+                return false;
+            }
+
+            if (value == null ||
+                value is string ||
+                value is bool ||
+                value is int ||
+                value is long ||
+                value is float ||
+                value is double)
+            {
+                return true;
+            }
+
+            if (value is UnityEngine.Object)
+            {
+                return false;
+            }
+
+            if (value is Dictionary<string, object> typedDict)
+            {
+                foreach (var kvp in typedDict)
+                {
+                    if (!IsTransportSafeValue(kvp.Value, depth + 1))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            if (value is IDictionary dictionary)
+            {
+                foreach (DictionaryEntry entry in dictionary)
+                {
+                    if (!(entry.Key is string) || !IsTransportSafeValue(entry.Value, depth + 1))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            if (value is Array array)
+            {
+                foreach (var item in array)
+                {
+                    if (!IsTransportSafeValue(item, depth + 1))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            if (value is IEnumerable enumerable)
+            {
+                foreach (var item in enumerable)
+                {
+                    if (!IsTransportSafeValue(item, depth + 1))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+
         private static string SerializeUnityObject(UnityEngine.Object unityObject)
         {
             return SerializeValue(BuildUnityObjectPayload(unityObject));
@@ -439,43 +580,67 @@ namespace UnityAgenticTools.Server
 
             var payload = new Dictionary<string, object>
             {
-                { "type", unityObject.GetType().Name },
-                { "name", string.IsNullOrEmpty(unityObject.name) ? unityObject.GetType().Name : unityObject.name },
-                { "instanceId", unityObject.GetInstanceID() },
+                { "type", GetUnityTypeName(unityObject) },
             };
+
+            TryAddUnityProperty(payload, "name", () => unityObject.name);
+            TryAddUnityProperty(payload, "instanceId", () => UnityObjectCompat.GetObjectId(unityObject));
 
             if (unityObject is GameObject gameObject)
             {
-                payload["path"] = GetHierarchyPath(gameObject.transform);
-                payload["activeSelf"] = gameObject.activeSelf;
-                payload["activeInHierarchy"] = gameObject.activeInHierarchy;
+                TryAddUnityProperty(payload, "path", () => GetHierarchyPath(gameObject.transform));
+                TryAddUnityProperty(payload, "activeSelf", () => gameObject.activeSelf);
+                TryAddUnityProperty(payload, "activeInHierarchy", () => gameObject.activeInHierarchy);
 
                 if (gameObject.scene.IsValid())
                 {
-                    payload["scene"] = gameObject.scene.name;
-                    payload["scenePath"] = gameObject.scene.path;
+                    TryAddUnityProperty(payload, "scene", () => gameObject.scene.name);
+                    TryAddUnityProperty(payload, "scenePath", () => gameObject.scene.path);
                 }
             }
             else if (unityObject is Component component)
             {
-                payload["gameObjectName"] = component.gameObject.name;
-                payload["gameObjectInstanceId"] = component.gameObject.GetInstanceID();
-                payload["path"] = GetHierarchyPath(component.transform);
+                TryAddUnityProperty(payload, "gameObjectName", () => component.gameObject.name);
+                TryAddUnityProperty(payload, "gameObjectInstanceId", () => UnityObjectCompat.GetObjectId(component.gameObject));
+                TryAddUnityProperty(payload, "path", () => GetHierarchyPath(component.transform));
 
                 if (component.gameObject.scene.IsValid())
                 {
-                    payload["scene"] = component.gameObject.scene.name;
-                    payload["scenePath"] = component.gameObject.scene.path;
+                    TryAddUnityProperty(payload, "scene", () => component.gameObject.scene.name);
+                    TryAddUnityProperty(payload, "scenePath", () => component.gameObject.scene.path);
                 }
             }
 
-            var assetPath = AssetDatabase.GetAssetPath(unityObject);
-            if (!string.IsNullOrEmpty(assetPath))
-            {
-                payload["assetPath"] = assetPath;
-            }
+            TryAddUnityProperty(payload, "assetPath", () => AssetDatabase.GetAssetPath(unityObject));
 
             return payload;
+        }
+
+        private static string GetUnityTypeName(UnityEngine.Object unityObject)
+        {
+            try
+            {
+                return unityObject == null ? "UnityEngine.Object" : unityObject.GetType().Name;
+            }
+            catch
+            {
+                return "UnityEngine.Object";
+            }
+        }
+
+        private static void TryAddUnityProperty(Dictionary<string, object> payload, string key, Func<object> supplier)
+        {
+            try
+            {
+                var value = supplier();
+                if (value != null)
+                {
+                    payload[key] = value;
+                }
+            }
+            catch
+            {
+            }
         }
 
         private static string GetHierarchyPath(Transform transform)
@@ -485,16 +650,23 @@ namespace UnityAgenticTools.Server
                 return string.Empty;
             }
 
-            var names = new List<string>();
-            var current = transform;
-            while (current != null)
+            try
             {
-                names.Add(current.name);
-                current = current.parent;
-            }
+                var names = new List<string>();
+                var current = transform;
+                while (current != null)
+                {
+                    names.Add(current.name);
+                    current = current.parent;
+                }
 
-            names.Reverse();
-            return string.Join("/", names);
+                names.Reverse();
+                return string.Join("/", names);
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         private static string SerializeObject(object obj)

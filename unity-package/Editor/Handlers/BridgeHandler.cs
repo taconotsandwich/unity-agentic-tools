@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
+using UnityEditor;
 using UnityEngine;
 
 namespace UnityAgenticTools.Server
@@ -28,7 +29,14 @@ namespace UnityAgenticTools.Server
                             { "version", "0.1.0" },
                             { "project_path", projectPath },
                             { "project_name", Path.GetFileName(projectPath) ?? string.Empty },
-                            { "unity_version", Application.unityVersion }
+                            { "unity_version", Application.unityVersion },
+                            { "is_playing", EditorApplication.isPlaying },
+                            { "is_paused", EditorApplication.isPaused },
+                            { "is_compiling", EditorApplication.isCompiling },
+                            { "is_updating", EditorApplication.isUpdating },
+                            { "is_playmode_transitioning", EditorWebSocketServer.IsPlayModeTransitionInProgress },
+                            { "is_reloading", EditorWebSocketServer.IsAssemblyReloadInProgress },
+                            { "is_stable", EditorWebSocketServer.IsEditorStable }
                         };
                     });
 

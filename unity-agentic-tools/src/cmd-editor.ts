@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { resolve } from 'path';
 import { call_editor, stream_editor, ping_editor, discover_editor_config } from './editor-client';
-import { add_package, remove_package } from './packages';
+import { add_package, load_manifest, remove_package } from './packages';
 import type { CallEditorOptions, RpcResponse } from './types';
 
 const BRIDGE_PACKAGE_NAME = 'com.unity-agentic-tools.editor-bridge';
@@ -40,6 +40,13 @@ interface CommandListEntry {
     description?: string;
     args?: CommandListArgInfo[];
     options?: CommandListOptionInfo[];
+}
+
+interface BridgeInstallResult {
+    success: true;
+    action: 'added' | 'updated' | 'preserved';
+    name: string;
+    version: string;
 }
 
 function get_root_command(cmd: Command): Command {
@@ -157,6 +164,25 @@ function output_response(response: RpcResponse): void {
     } else {
         console.log(JSON.stringify(response.result, null, 2));
     }
+}
+
+function install_bridge_package(project_path: string): BridgeInstallResult | { error: string } {
+    const manifest_result = load_manifest(project_path);
+    if ('error' in manifest_result) {
+        return manifest_result;
+    }
+
+    const existing_version = manifest_result.manifest.dependencies[BRIDGE_PACKAGE_NAME];
+    if (typeof existing_version === 'string' && existing_version.startsWith('file:')) {
+        return {
+            success: true,
+            action: 'preserved',
+            name: BRIDGE_PACKAGE_NAME,
+            version: existing_version,
+        };
+    }
+
+    return add_package(project_path, BRIDGE_PACKAGE_NAME, BRIDGE_PACKAGE_VERSION);
 }
 
 export function build_editor_command(): Command {
@@ -307,7 +333,7 @@ export function build_editor_command(): Command {
         .option('-p, --project <path>', 'Path to Unity project (defaults to cwd)')
         .action(function(this: Command) {
             const { project_path } = get_common_options(this);
-            const result = add_package(project_path, BRIDGE_PACKAGE_NAME, BRIDGE_PACKAGE_VERSION);
+            const result = install_bridge_package(project_path);
             if ('error' in result) {
                 console.log(JSON.stringify({ success: false, error: result.error }, null, 2));
                 process.exitCode = 1;
@@ -334,4 +360,4 @@ export function build_editor_command(): Command {
     return cmd;
 }
 
-export { collect_command_entries };
+export { collect_command_entries, install_bridge_package };

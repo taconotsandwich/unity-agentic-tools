@@ -4,7 +4,7 @@ import { mkdtempSync, cpSync, readFileSync, rmSync, mkdirSync, writeFileSync } f
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { add_package, remove_package } from '../src/packages';
-import { collect_command_entries } from '../src/cmd-editor';
+import { collect_command_entries, install_bridge_package } from '../src/cmd-editor';
 
 const FIXTURE_DIR = join(__dirname, 'fixtures', 'test-manifest');
 const BRIDGE_PACKAGE_NAME = 'com.unity-agentic-tools.editor-bridge';
@@ -24,7 +24,7 @@ describe('cmd-editor', () => {
 
     describe('install (add_package)', () => {
         test('adds bridge package to manifest.json', () => {
-            const result = add_package(tmp_dir, BRIDGE_PACKAGE_NAME, BRIDGE_PACKAGE_VERSION);
+            const result = install_bridge_package(tmp_dir);
             expect('error' in result).toBe(false);
             if (!('error' in result)) {
                 expect(result.success).toBe(true);
@@ -36,13 +36,33 @@ describe('cmd-editor', () => {
             expect(manifest.dependencies[BRIDGE_PACKAGE_NAME]).toBe(BRIDGE_PACKAGE_VERSION);
         });
 
-        test('updates bridge package if already installed', () => {
-            add_package(tmp_dir, BRIDGE_PACKAGE_NAME, BRIDGE_PACKAGE_VERSION);
-            const result = add_package(tmp_dir, BRIDGE_PACKAGE_NAME, 'https://example.com/new-url.git');
+        test('updates bridge package if already installed from a non-local source', () => {
+            add_package(tmp_dir, BRIDGE_PACKAGE_NAME, 'https://example.com/old-url.git');
+            const result = install_bridge_package(tmp_dir);
             expect('error' in result).toBe(false);
             if (!('error' in result)) {
                 expect(result.action).toBe('updated');
             }
+
+            const manifest = JSON.parse(readFileSync(join(tmp_dir, 'Packages', 'manifest.json'), 'utf-8'));
+            expect(manifest.dependencies[BRIDGE_PACKAGE_NAME]).toBe(BRIDGE_PACKAGE_VERSION);
+        });
+
+        test('preserves an existing local file bridge dependency', () => {
+            const manifest_path = join(tmp_dir, 'Packages', 'manifest.json');
+            const manifest = JSON.parse(readFileSync(manifest_path, 'utf-8'));
+            manifest.dependencies[BRIDGE_PACKAGE_NAME] = 'file:../../unity-agentic-tools/unity-package';
+            writeFileSync(manifest_path, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+
+            const result = install_bridge_package(tmp_dir);
+            expect('error' in result).toBe(false);
+            if (!('error' in result)) {
+                expect(result.action).toBe('preserved');
+                expect(result.version).toBe('file:../../unity-agentic-tools/unity-package');
+            }
+
+            const updated_manifest = JSON.parse(readFileSync(manifest_path, 'utf-8'));
+            expect(updated_manifest.dependencies[BRIDGE_PACKAGE_NAME]).toBe('file:../../unity-agentic-tools/unity-package');
         });
     });
 

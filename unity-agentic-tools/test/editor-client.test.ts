@@ -1,16 +1,25 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, unlinkSync } from 'fs';
+import { existsSync, mkdtempSync, writeFileSync, mkdirSync, rmSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { call_editor, discover_editor_config, read_editor_config } from '../src/editor-client';
+import { call_editor, discover_editor_config, ping_editor, read_editor_config } from '../src/editor-client';
 
 let original_websocket: typeof WebSocket | undefined;
+
+interface MockRpcError {
+    code: number;
+    message: string;
+}
 
 interface MockPortBehavior {
     reachable?: boolean;
     reachable_sequence?: boolean[];
     bridge_info?: Record<string, unknown>;
     rpc_result?: unknown;
+    rpc_error?: MockRpcError;
+    rpc_error_sequence?: Array<MockRpcError | null>;
+    close_before_response?: boolean;
+    close_before_response_sequence?: boolean[];
 }
 
 function install_mock_websocket(port_behaviors: Record<number, MockPortBehavior>): void {
@@ -53,7 +62,18 @@ function install_mock_websocket(port_behaviors: Record<number, MockPortBehavior>
             }
 
             const request = JSON.parse(data) as { id: string; method: string };
+            const connection_count = connection_counts.get(port) ?? 1;
             setTimeout(() => {
+                const close_before_response = resolve_sequence_value(
+                    behavior.close_before_response_sequence,
+                    behavior.close_before_response ?? false,
+                    connection_count,
+                );
+                if (close_before_response) {
+                    this.onclose?.();
+                    return;
+                }
+
                 if (request.method === 'editor.bridge.getInfo') {
                     if (behavior.bridge_info) {
                         this.onmessage?.({
@@ -71,6 +91,22 @@ function install_mock_websocket(port_behaviors: Record<number, MockPortBehavior>
                             jsonrpc: '2.0',
                             id: request.id,
                             error: { code: -32601, message: 'Method not found: editor.bridge.getInfo' },
+                        }),
+                    });
+                    return;
+                }
+
+                const rpc_error = resolve_sequence_value(
+                    behavior.rpc_error_sequence,
+                    behavior.rpc_error ?? null,
+                    connection_count,
+                );
+                if (rpc_error) {
+                    this.onmessage?.({
+                        data: JSON.stringify({
+                            jsonrpc: '2.0',
+                            id: request.id,
+                            error: rpc_error,
                         }),
                     });
                     return;
@@ -100,12 +136,16 @@ function resolve_reachable(behavior: MockPortBehavior | undefined, connection_co
         return false;
     }
 
-    if (behavior.reachable_sequence && behavior.reachable_sequence.length > 0) {
-        const index = Math.min(connection_count - 1, behavior.reachable_sequence.length - 1);
-        return behavior.reachable_sequence[index] !== false;
+    return resolve_sequence_value(behavior.reachable_sequence, behavior.reachable !== false, connection_count) !== false;
+}
+
+function resolve_sequence_value<T>(sequence: T[] | undefined, fallback: T, connection_count: number): T {
+    if (sequence && sequence.length > 0) {
+        const index = Math.min(connection_count - 1, sequence.length - 1);
+        return sequence[index] as T;
     }
 
-    return behavior.reachable !== false;
+    return fallback;
 }
 
 describe('editor-client', () => {
@@ -187,6 +227,38 @@ describe('editor-client', () => {
                 expect(result.port).toBe(53782);
                 expect(result.pid).toBe(process.pid);
                 expect(result.version).toBe("0.1.0");
+            }
+        });
+
+        test('treats EPERM from process.kill(pid, 0) as a live process', () => {
+            const config_dir = join(tmp_dir, '.unity-agentic');
+            mkdirSync(config_dir, { recursive: true });
+            writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({
+                port: 53782,
+                pid: 424242,
+                version: "0.1.0",
+            }), 'utf-8');
+
+            const original_kill = process.kill;
+            process.kill = (((pid: number, signal?: NodeJS.Signals | number) => {
+                if (pid === 424242 && signal === 0) {
+                    const err = Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+                    throw err;
+                }
+
+                return original_kill(pid, signal);
+            }) as typeof process.kill);
+
+            try {
+                const result = read_editor_config(tmp_dir);
+                expect('error' in result).toBe(false);
+                if (!('error' in result)) {
+                    expect(result.port).toBe(53782);
+                    expect(result.pid).toBe(424242);
+                    expect(result.version).toBe("0.1.0");
+                }
+            } finally {
+                process.kill = original_kill;
             }
         });
 
@@ -370,7 +442,68 @@ describe('editor-client', () => {
             expect(response.error?.message).toContain('Autodiscovery could not find a matching Unity project bridge');
         });
 
-        test('discover_editor_config falls back to the cached project bridge when the lockfile disappears mid-transition', async () => {
+        test('EditorApplication.isPlaying invoke gets transition-tolerant retries for play-mode entry', async () => {
+            install_mock_websocket({
+                53785: {
+                    reachable_sequence: [false, false, false, true, true, true],
+                    bridge_info: {
+                        port: 53785,
+                        pid: 2222,
+                        version: '0.1.0',
+                        project_path: tmp_dir,
+                        project_name: 'editor-client-test',
+                    },
+                    rpc_result: { success: true },
+                },
+            });
+
+            const response = await call_editor({
+                project_path: tmp_dir,
+                method: 'editor.invoke',
+                params: {
+                    type: 'UnityEditor.EditorApplication',
+                    member: 'isPlaying',
+                    set: 'true',
+                },
+                timeout: 100,
+            });
+
+            expect(response.error).toBeUndefined();
+            expect(response.result).toEqual({ success: true });
+        });
+
+        test('EditorApplication.isPlaying invoke retries clean socket closes during play-mode entry', async () => {
+            const config_dir = join(tmp_dir, '.unity-agentic');
+            mkdirSync(config_dir, { recursive: true });
+            writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({
+                port: 53785,
+                pid: process.pid,
+                version: '0.1.0',
+            }), 'utf-8');
+
+            install_mock_websocket({
+                53785: {
+                    close_before_response_sequence: [false, true, false, false],
+                    rpc_result: { success: true },
+                },
+            });
+
+            const response = await call_editor({
+                project_path: tmp_dir,
+                method: 'editor.invoke',
+                params: {
+                    type: 'UnityEditor.EditorApplication',
+                    member: 'isPlaying',
+                    set: 'true',
+                },
+                timeout: 100,
+            });
+
+            expect(response.error).toBeUndefined();
+            expect(response.result).toEqual({ success: true });
+        });
+
+        test('discover_editor_config does not return an unreachable cached project bridge', async () => {
             const config_dir = join(tmp_dir, '.unity-agentic');
             mkdirSync(config_dir, { recursive: true });
             writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({
@@ -402,11 +535,25 @@ describe('editor-client', () => {
             });
 
             const cached = await discover_editor_config(tmp_dir, 20);
-            expect('error' in cached).toBe(false);
-            if (!('error' in cached)) {
-                expect(cached.port).toBe(53785);
-                expect(cached.source).toBe('cached');
+            expect('error' in cached).toBe(true);
+            if ('error' in cached) {
+                expect(cached.error).toContain('Cached bridge port 53785 was also unreachable');
             }
+
+            expect(existsSync(join(config_dir, 'editor.last.json'))).toBe(false);
+        });
+
+        test('ping_editor reports a readable websocket failure instead of ErrorEvent', async () => {
+            install_mock_websocket({
+                53785: {
+                    reachable: false,
+                },
+            });
+
+            const result = await ping_editor(53785, 20);
+            expect(result.reachable).toBe(false);
+            expect(result.error).toContain('WebSocket connection failed to ws://127.0.0.1:53785/unity-agentic');
+            expect(result.error).not.toBe('[object ErrorEvent]');
         });
     });
 });

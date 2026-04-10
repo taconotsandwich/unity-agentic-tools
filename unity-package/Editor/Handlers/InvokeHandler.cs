@@ -4,6 +4,8 @@ using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading.Tasks;
+using UnityAgenticTools.Refs;
+using UnityEditor;
 
 namespace UnityAgenticTools.Server
 {
@@ -37,12 +39,22 @@ namespace UnityAgenticTools.Server
                 return new Dictionary<string, object> { { "queued", true } };
             }
 
+            await WaitForEditorStabilityAsync(timeoutMs);
+
             var result = await EditorWebSocketServer.RunOnMainThread(() =>
             {
                 return ExecuteInvoke(parameters);
             }, timeoutMs);
 
-            return await ResolveTaskResultAsync(result, timeoutMs);
+            var resolved = await ResolveTaskResultAsync(result, timeoutMs);
+            if (JsonRpcParser.IsTransportSafeValue(resolved))
+            {
+                return resolved;
+            }
+
+            return await EditorWebSocketServer.RunOnMainThread(
+                () => JsonRpcParser.NormalizeValueForTransport(resolved),
+                timeoutMs);
         }
 
         private static async Task<object> ResolveTaskResultAsync(object invokeResult, int timeoutMs)
@@ -68,6 +80,8 @@ namespace UnityAgenticTools.Server
                 throw new ArgumentException("Missing required parameter: type");
             if (!parameters.TryGetValue("member", out var memberObj) || !(memberObj is string memberName))
                 throw new ArgumentException("Missing required parameter: member");
+
+            EnsureInvocationAllowed(typeName, memberName);
 
             var type = FindType(typeName);
             if (type == null)
@@ -168,6 +182,52 @@ namespace UnityAgenticTools.Server
             }
 
             throw new ArgumentException($"No public static property or method '{memberName}' found on {typeName}");
+        }
+
+        private static async Task WaitForEditorStabilityAsync(int timeoutMs)
+        {
+            var effectiveTimeoutMs = Math.Max(1, timeoutMs);
+            var isAlreadyStable = await EditorWebSocketServer.RunOnMainThread(
+                () => EditorWebSocketServer.IsEditorStable,
+                effectiveTimeoutMs);
+            if (isAlreadyStable)
+            {
+                return;
+            }
+
+            var waitResult = await WaitConditionRunner.WaitForCondition(
+                () => EditorWebSocketServer.IsEditorStable,
+                effectiveTimeoutMs,
+                "editor stability");
+
+            if (waitResult is Dictionary<string, object> result &&
+                result.TryGetValue("success", out var successObj) &&
+                successObj is bool success &&
+                success)
+            {
+                return;
+            }
+
+            if (waitResult is Dictionary<string, object> failure &&
+                failure.TryGetValue("error", out var errorObj) &&
+                errorObj is string errorMessage &&
+                !string.IsNullOrWhiteSpace(errorMessage))
+            {
+                throw new InvalidOperationException(errorMessage);
+            }
+
+            throw new InvalidOperationException("Timed out waiting for the editor to stabilize.");
+        }
+
+        private static void EnsureInvocationAllowed(string typeName, string memberName)
+        {
+            if (typeName == "UnityEditor.SceneManagement.EditorSceneManager" &&
+                memberName == "OpenScene" &&
+                EditorApplication.isPlayingOrWillChangePlaymode)
+            {
+                throw new InvalidOperationException(
+                    "UnityEditor.SceneManagement.EditorSceneManager.OpenScene is unavailable during play mode or a play-mode transition. Exit play mode before calling it.");
+            }
         }
 
         private static object UnwrapTaskResult(object value)

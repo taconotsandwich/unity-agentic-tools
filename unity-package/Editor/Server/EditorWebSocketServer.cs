@@ -33,8 +33,19 @@ namespace UnityAgenticTools.Server
         private const double HealthCheckIntervalSeconds = 1.0d;
 
         private static double _nextHealthCheckAt;
+        private static volatile bool _assemblyReloadInProgress;
+        private static volatile bool _playModeTransitionInProgress;
+        private static volatile bool _editorCompiling;
+        private static volatile bool _editorUpdating;
         public static int Port => _port;
         public static bool IsRunning => _running;
+        public static bool IsAssemblyReloadInProgress => _assemblyReloadInProgress;
+        public static bool IsPlayModeTransitionInProgress => _playModeTransitionInProgress;
+        public static bool IsEditorStable =>
+            !_assemblyReloadInProgress &&
+            !_playModeTransitionInProgress &&
+            !_editorCompiling &&
+            !_editorUpdating;
         public static IReadOnlyList<WebSocketConnection> Connections
         {
             get
@@ -58,6 +69,7 @@ namespace UnityAgenticTools.Server
             // during InitializeOnLoad (causes timeouts on heavy projects in Unity 6.4+)
             EditorApplication.delayCall += () =>
             {
+                RefreshEditorStateSnapshot();
                 var autoStart = EditorServerSettings.instance.autoStart;
                 SessionState.SetBool(CachedAutoStartKey, autoStart);
                 if (autoStart)
@@ -97,6 +109,7 @@ namespace UnityAgenticTools.Server
                 return;
             }
 
+            RefreshEditorStateSnapshot();
             LockfileManager.Write(_port, System.Diagnostics.Process.GetCurrentProcess().Id);
             MessageDispatcher.Reset();
 
@@ -294,6 +307,8 @@ namespace UnityAgenticTools.Server
 
         private static void PumpMainThreadQueue()
         {
+            RefreshEditorStateSnapshot();
+
             while (_mainThreadQueue.TryDequeue(out var action))
             {
                 try
@@ -386,6 +401,7 @@ namespace UnityAgenticTools.Server
 
         private static void OnBeforeAssemblyReload()
         {
+            _assemblyReloadInProgress = true;
             // Cache settings before reload while ScriptableSingleton is accessible
             try { SessionState.SetBool(CachedAutoStartKey, EditorServerSettings.instance.autoStart); } catch { }
             StopForReload();
@@ -393,9 +409,11 @@ namespace UnityAgenticTools.Server
 
         private static void OnAfterAssemblyReload()
         {
+            _assemblyReloadInProgress = false;
             // Drain any stale items from before reload (their TaskCompletionSources are orphaned)
             while (_mainThreadQueue.TryDequeue(out _)) { }
 
+            RefreshEditorStateSnapshot();
             EditorApplication.update -= PumpMainThreadQueue;
             EditorApplication.update += PumpMainThreadQueue;
             Debug.Log("[UnityAgenticTools] Re-registered main thread pump after assembly reload");
@@ -406,9 +424,18 @@ namespace UnityAgenticTools.Server
 
         private static void OnPlayModeChanged(PlayModeStateChange state)
         {
+            if (state == PlayModeStateChange.ExitingEditMode ||
+                state == PlayModeStateChange.ExitingPlayMode)
+            {
+                _playModeTransitionInProgress = true;
+                return;
+            }
+
             if (state == PlayModeStateChange.EnteredPlayMode ||
                 state == PlayModeStateChange.EnteredEditMode)
             {
+                _playModeTransitionInProgress = false;
+                RefreshEditorStateSnapshot();
                 EditorApplication.update -= PumpMainThreadQueue;
                 EditorApplication.update += PumpMainThreadQueue;
                 Debug.Log($"[UnityAgenticTools] Re-registered main thread pump after {state}");
@@ -492,6 +519,12 @@ namespace UnityAgenticTools.Server
             {
                 return;
             }
+        }
+
+        private static void RefreshEditorStateSnapshot()
+        {
+            _editorCompiling = EditorApplication.isCompiling;
+            _editorUpdating = EditorApplication.isUpdating;
         }
 
         private static IEnumerable<int> GetCandidatePorts()
