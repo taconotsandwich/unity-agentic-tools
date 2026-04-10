@@ -77,14 +77,20 @@ Options:
 
 ## Ref and snapshot guidance
 
-For interactive UI/hierarchy workflows use the richer editor command set listed by:
+For interactive UI and hierarchy workflows, use `editor invoke` against the built-in bridge APIs:
 
 ```bash
-unity-agentic-tools editor list --scope editor --show-options --show-args --show-desc
+unity-agentic-tools editor invoke UnityAgenticTools.API.HierarchyAPI Snapshot "[99,false]"
+unity-agentic-tools editor invoke UnityAgenticTools.API.UIAPI Snapshot
 ```
 
-If available in your build, use snapshot-first pattern:
-- `editor hierarchy-snapshot` -> `@hN`
-- `editor ui-snapshot` -> `@uN`
+Snapshot-first pattern:
+- `editor invoke UnityAgenticTools.API.HierarchyAPI Snapshot ...` -> `@hN`
+- `editor invoke UnityAgenticTools.API.UIAPI Snapshot` -> `@uN`
 
-Then act on refs (`ui-click`, `ui-fill`, `get`, etc.), and re-snapshot after scene/play/domain changes.
+Then query or interact through invoke calls such as:
+- `editor invoke UnityAgenticTools.API.HierarchyAPI Query "[\"@h1\",\"active\"]"`
+- `editor invoke UnityAgenticTools.API.UIAPI Query "[\"@u1\",\"text\"]"`
+- `editor invoke UnityAgenticTools.API.UIAPI Interact "[\"@u1\",\"click\"]"`
+
+Re-snapshot after scene changes, play mode changes, or domain reload.

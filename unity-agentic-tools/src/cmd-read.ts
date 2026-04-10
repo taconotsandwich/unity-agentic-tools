@@ -6,8 +6,8 @@ import { getNativeExtractCsharpTypes, getNativeExtractDllTypes, getNativeBuildTy
 import { read_settings } from './settings';
 import { get_build_settings } from './build-settings';
 import { UnityDocument } from './editor';
-import { extractGuidFromMeta, resolve_source_prefab } from './editor/shared';
-import { get_class_id } from './class-ids';
+import { extractGuidFromMeta, resolveScriptGuid, resolve_source_prefab } from './editor/shared';
+import { get_component_class_id } from './class-ids';
 import { load_guid_cache, load_guid_cache_for_file } from './guid-cache';
 import { path_glob_to_regex, find_unity_project_root, resolve_project_path } from './utils';
 import { list_packages } from './packages';
@@ -1560,7 +1560,13 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
                 // If component_type specified, find the component on the GO
                 if (component_type) {
-                    const classId = get_class_id(component_type);
+                    const project = options.project || find_unity_project_root(dirname(file));
+                    const explicitClassId = component_type.includes('.') ? get_component_class_id(component_type) : null;
+                    let resolvedScript: { guid: string; path: string | null } | null = null;
+                    if (explicitClassId === null) {
+                        resolvedScript = resolveScriptGuid(component_type, project ?? undefined, { strict_exact_name: true });
+                    }
+                    const classId = resolvedScript ? null : (explicitClassId ?? (!component_type.includes('.') ? get_component_class_id(component_type) : null));
                     const goBlock = doc.find_by_file_id(targetFileId!);
 
                     if (goBlock && !goBlock.is_stripped) {
@@ -1576,21 +1582,12 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                                 break;
                             }
                             // Script-based match: check m_Script guid for MonoBehaviours
-                            if (classId === null && compBlock.class_id === 114) {
+                            if (resolvedScript && compBlock.class_id === 114) {
                                 const scriptMatch = compBlock.raw.match(/m_Script:[ \t]*\{[^}]*guid:[ \t]*([a-f0-9]{32})/);
-                                if (scriptMatch) {
-                                    const project = options.project || find_unity_project_root(dirname(file));
-                                    if (project) {
-                                        const cache = load_guid_cache(project);
-                                        if (cache) {
-                                            const scriptPath = cache.resolve(scriptMatch[1]);
-                                            if (scriptPath && basename(scriptPath, '.cs').toLowerCase() === component_type.toLowerCase().replace(/\.cs$/, '')) {
-                                                targetFileId = refId;
-                                                compFound = true;
-                                                break;
-                                            }
-                                        }
-                                    }
+                                if (scriptMatch && scriptMatch[1] === resolvedScript.guid) {
+                                    targetFileId = refId;
+                                    compFound = true;
+                                    break;
                                 }
                             }
                         }
@@ -1600,7 +1597,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                         }
                     } else {
                         // Stripped GO or not found directly: search source prefab for component
-                        const project = options.project || find_unity_project_root(dirname(file));
                         const resolved = resolve_source_prefab(doc, file, project ?? undefined);
                         if (resolved) {
                             const sourceDoc = UnityDocument.from_file(resolved.source_path);
@@ -1615,6 +1611,14 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                                         targetFileId = refId;
                                         compFound = true;
                                         break;
+                                    }
+                                    if (resolvedScript && compBlock.class_id === 114) {
+                                        const scriptMatch = compBlock.raw.match(/m_Script:[ \t]*\{[^}]*guid:[ \t]*([a-f0-9]{32})/);
+                                        if (scriptMatch && scriptMatch[1] === resolvedScript.guid) {
+                                            targetFileId = refId;
+                                            compFound = true;
+                                            break;
+                                        }
                                     }
                                 }
                                 if (!compFound) {

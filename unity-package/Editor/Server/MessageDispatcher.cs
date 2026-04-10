@@ -1,8 +1,11 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using UnityAgenticTools.Refs;
+using UnityEditor;
 using UnityEngine;
 
 namespace UnityAgenticTools.Server
@@ -53,10 +56,14 @@ namespace UnityAgenticTools.Server
         public static async Task<string> Dispatch(string message)
         {
             string id = null;
+            string method = null;
+            int timeoutMs = 30000;
             try
             {
                 var request = JsonRpcParser.ParseRequest(message);
                 id = request.Id;
+                method = request.Method;
+                timeoutMs = ResolveRequestTimeoutMs(request.Params);
 
                 if (string.IsNullOrEmpty(request.Method))
                 {
@@ -70,7 +77,32 @@ namespace UnityAgenticTools.Server
                 }
 
                 var result = await handler.HandleAsync(request.Method, request.Params);
-                return JsonRpcParser.BuildResult(id, result);
+                var transportResult = JsonRpcParser.IsTransportSafeValue(result)
+                    ? result
+                    : await EditorWebSocketServer.RunOnMainThread(
+                        () => JsonRpcParser.NormalizeValueForTransport(result),
+                        timeoutMs);
+                return JsonRpcParser.BuildResult(id, transportResult);
+            }
+            catch (TaskCanceledException ex)
+            {
+                Debug.LogWarning($"[UnityAgenticTools] Dispatch was canceled (likely bridge restart): {ex.Message}");
+                return JsonRpcParser.BuildError(
+                    id ?? "0",
+                    -32000,
+                    method == "editor.invoke"
+                        ? "Editor invoke was interrupted by a server transition before its response could be delivered."
+                        : "Bridge request was canceled by server transition. Retry the request.");
+            }
+            catch (TimeoutException ex)
+            {
+                Debug.LogWarning($"[UnityAgenticTools] Dispatch timed out: {ex.Message}");
+                return JsonRpcParser.BuildError(
+                    id ?? "0",
+                    -32000,
+                    method == "editor.invoke"
+                        ? "Editor invoke timed out while waiting for a stable main-thread response."
+                        : "Bridge request timed out while waiting for main thread work.");
             }
             catch (Exception ex)
             {
@@ -89,6 +121,36 @@ namespace UnityAgenticTools.Server
                 }
             }
             return null;
+        }
+
+        private static int ResolveRequestTimeoutMs(Dictionary<string, object> parameters)
+        {
+            if (parameters == null || !parameters.TryGetValue("_timeout", out var timeoutObj))
+            {
+                return 30000;
+            }
+
+            if (timeoutObj is int timeoutInt)
+            {
+                return Math.Max(1, timeoutInt);
+            }
+
+            if (timeoutObj is long timeoutLong)
+            {
+                return (int)Math.Max(1L, Math.Min(timeoutLong, int.MaxValue));
+            }
+
+            if (timeoutObj is double timeoutDouble)
+            {
+                return (int)Math.Max(1d, Math.Min(timeoutDouble, int.MaxValue));
+            }
+
+            if (timeoutObj is string timeoutString && int.TryParse(timeoutString, out var parsedTimeout))
+            {
+                return Math.Max(1, parsedTimeout);
+            }
+
+            return 30000;
         }
 
         public static void Reset()
@@ -151,7 +213,7 @@ namespace UnityAgenticTools.Server
 
         public static string BuildNotification(string method, object data)
         {
-            var paramsJson = SerializeValue(data);
+            var paramsJson = SerializeValue(NormalizeValueForTransport(data));
             return $"{{\"jsonrpc\":\"2.0\",\"method\":\"{EscapeString(method)}\",\"params\":{paramsJson}}}";
         }
 
@@ -320,6 +382,7 @@ namespace UnityAgenticTools.Server
             if (value is long l) return l.ToString();
             if (value is float f) return f.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (value is double d) return d.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (value is UnityEngine.Object unityObject) return SerializeUnityObject(unityObject);
             if (value is Dictionary<string, object> dict)
             {
                 var entries = dict.Select(kvp => $"\"{EscapeString(kvp.Key)}\":{SerializeValue(kvp.Value)}");
@@ -343,32 +406,300 @@ namespace UnityAgenticTools.Server
             return SerializeObject(value);
         }
 
+        public static object NormalizeValueForTransport(object value)
+        {
+            return NormalizeValueForTransport(value, 0);
+        }
+
+        public static bool IsTransportSafeValue(object value)
+        {
+            return IsTransportSafeValue(value, 0);
+        }
+
+        private static object NormalizeValueForTransport(object value, int depth)
+        {
+            if (depth > 8)
+            {
+                return value == null ? null : value.ToString();
+            }
+
+            if (value == null ||
+                value is string ||
+                value is bool ||
+                value is int ||
+                value is long ||
+                value is float ||
+                value is double)
+            {
+                return value;
+            }
+
+            if (value is Enum enumValue)
+            {
+                return enumValue.ToString();
+            }
+
+            if (value is UnityEngine.Object unityObject)
+            {
+                return BuildUnityObjectPayload(unityObject);
+            }
+
+            if (value is Dictionary<string, object> typedDict)
+            {
+                var normalized = new Dictionary<string, object>();
+                foreach (var kvp in typedDict)
+                {
+                    normalized[kvp.Key] = NormalizeValueForTransport(kvp.Value, depth + 1);
+                }
+                return normalized;
+            }
+
+            if (value is IDictionary dictionary)
+            {
+                var normalized = new Dictionary<string, object>();
+                foreach (DictionaryEntry entry in dictionary)
+                {
+                    var key = entry.Key == null ? "null" : entry.Key.ToString();
+                    normalized[key] = NormalizeValueForTransport(entry.Value, depth + 1);
+                }
+                return normalized;
+            }
+
+            if (value is Array array)
+            {
+                var normalized = new List<object>();
+                foreach (var item in array)
+                {
+                    normalized.Add(NormalizeValueForTransport(item, depth + 1));
+                }
+                return normalized;
+            }
+
+            if (value is IEnumerable enumerable)
+            {
+                var normalized = new List<object>();
+                foreach (var item in enumerable)
+                {
+                    normalized.Add(NormalizeValueForTransport(item, depth + 1));
+                }
+                return normalized;
+            }
+
+            return NormalizeObject(value, depth);
+        }
+
+        private static bool IsTransportSafeValue(object value, int depth)
+        {
+            if (depth > 8)
+            {
+                return false;
+            }
+
+            if (value == null ||
+                value is string ||
+                value is bool ||
+                value is int ||
+                value is long ||
+                value is float ||
+                value is double)
+            {
+                return true;
+            }
+
+            if (value is UnityEngine.Object)
+            {
+                return false;
+            }
+
+            if (value is Dictionary<string, object> typedDict)
+            {
+                foreach (var kvp in typedDict)
+                {
+                    if (!IsTransportSafeValue(kvp.Value, depth + 1))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            if (value is IDictionary dictionary)
+            {
+                foreach (DictionaryEntry entry in dictionary)
+                {
+                    if (!(entry.Key is string) || !IsTransportSafeValue(entry.Value, depth + 1))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            if (value is Array array)
+            {
+                foreach (var item in array)
+                {
+                    if (!IsTransportSafeValue(item, depth + 1))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            if (value is IEnumerable enumerable)
+            {
+                foreach (var item in enumerable)
+                {
+                    if (!IsTransportSafeValue(item, depth + 1))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private static string SerializeUnityObject(UnityEngine.Object unityObject)
+        {
+            return SerializeValue(BuildUnityObjectPayload(unityObject));
+        }
+
+        private static Dictionary<string, object> BuildUnityObjectPayload(UnityEngine.Object unityObject)
+        {
+            if (unityObject == null)
+            {
+                return null;
+            }
+
+            var payload = new Dictionary<string, object>
+            {
+                { "type", GetUnityTypeName(unityObject) },
+            };
+
+            TryAddUnityProperty(payload, "name", () => unityObject.name);
+            TryAddUnityProperty(payload, "instanceId", () => UnityObjectCompat.GetObjectId(unityObject));
+
+            if (unityObject is GameObject gameObject)
+            {
+                TryAddUnityProperty(payload, "path", () => GetHierarchyPath(gameObject.transform));
+                TryAddUnityProperty(payload, "activeSelf", () => gameObject.activeSelf);
+                TryAddUnityProperty(payload, "activeInHierarchy", () => gameObject.activeInHierarchy);
+
+                if (gameObject.scene.IsValid())
+                {
+                    TryAddUnityProperty(payload, "scene", () => gameObject.scene.name);
+                    TryAddUnityProperty(payload, "scenePath", () => gameObject.scene.path);
+                }
+            }
+            else if (unityObject is Component component)
+            {
+                TryAddUnityProperty(payload, "gameObjectName", () => component.gameObject.name);
+                TryAddUnityProperty(payload, "gameObjectInstanceId", () => UnityObjectCompat.GetObjectId(component.gameObject));
+                TryAddUnityProperty(payload, "path", () => GetHierarchyPath(component.transform));
+
+                if (component.gameObject.scene.IsValid())
+                {
+                    TryAddUnityProperty(payload, "scene", () => component.gameObject.scene.name);
+                    TryAddUnityProperty(payload, "scenePath", () => component.gameObject.scene.path);
+                }
+            }
+
+            TryAddUnityProperty(payload, "assetPath", () => AssetDatabase.GetAssetPath(unityObject));
+
+            return payload;
+        }
+
+        private static string GetUnityTypeName(UnityEngine.Object unityObject)
+        {
+            try
+            {
+                return unityObject == null ? "UnityEngine.Object" : unityObject.GetType().Name;
+            }
+            catch
+            {
+                return "UnityEngine.Object";
+            }
+        }
+
+        private static void TryAddUnityProperty(Dictionary<string, object> payload, string key, Func<object> supplier)
+        {
+            try
+            {
+                var value = supplier();
+                if (value != null)
+                {
+                    payload[key] = value;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static string GetHierarchyPath(Transform transform)
+        {
+            if (transform == null)
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                var names = new List<string>();
+                var current = transform;
+                while (current != null)
+                {
+                    names.Add(current.name);
+                    current = current.parent;
+                }
+
+                names.Reverse();
+                return string.Join("/", names);
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
         private static string SerializeObject(object obj)
+        {
+            return SerializeValue(NormalizeObject(obj, 0));
+        }
+
+        private static Dictionary<string, object> NormalizeObject(object obj, int depth)
         {
             var type = obj.GetType();
             var fields = type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
             var props = type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
 
-            var entries = new List<string>();
+            var normalized = new Dictionary<string, object>();
 
             foreach (var field in fields)
             {
                 var val = field.GetValue(obj);
-                entries.Add($"\"{EscapeString(field.Name)}\":{SerializeValue(val)}");
+                normalized[field.Name] = NormalizeValueForTransport(val, depth + 1);
             }
 
             foreach (var prop in props)
             {
-                if (!prop.CanRead) continue;
+                if (!prop.CanRead || prop.GetIndexParameters().Length > 0) continue;
                 try
                 {
                     var val = prop.GetValue(obj);
-                    entries.Add($"\"{EscapeString(prop.Name)}\":{SerializeValue(val)}");
+                    normalized[prop.Name] = NormalizeValueForTransport(val, depth + 1);
                 }
                 catch { }
             }
 
-            return "{" + string.Join(",", entries) + "}";
+            return normalized;
         }
 
         private static string EscapeString(string s)

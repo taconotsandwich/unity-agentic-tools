@@ -29,8 +29,8 @@ unity-agentic-tools update transform MyScene.unity "Main Camera" -p 0,5,-10
 ### Delete (6)
 `delete gameobject` | `delete component` | `delete build` | `delete prefab` | `delete asset` | `delete package`
 
-### Editor (49) -- Live Unity Bridge
-`editor status` | `editor play` | `editor stop` | `editor pause` | `editor step` | `editor play-state` | `editor save` | `editor scene-open` | `editor active-scene` | `editor refresh` | `editor compiling` | `editor selection-get` | `editor selection-set` | `editor selection-clear` | `editor console-logs` | `editor console-clear` | `editor console-follow` | `editor menu` | `editor screenshot` | `editor tests-run` | `editor install` | `editor uninstall` | `editor hierarchy-snapshot` | `editor ui-snapshot` | `editor input-map` | `editor get text` | `editor get value` | `editor get active` | `editor get position` | `editor get component` | `editor ui-click` | `editor ui-fill` | `editor ui-type` | `editor ui-toggle` | `editor ui-slider` | `editor ui-select` | `editor ui-scroll` | `editor ui-focus` | `editor input-key` | `editor input-mouse` | `editor input-touch` | `editor input-action` | `editor wait`
+### Editor (6) -- Live Unity Bridge
+`editor status` | `editor invoke` | `editor console-follow` | `editor list` | `editor install` | `editor uninstall`
 
 ### Utilities (8)
 `search` | `grep` | `clone` | `version` | `docs` | `setup` | `cleanup` | `status`

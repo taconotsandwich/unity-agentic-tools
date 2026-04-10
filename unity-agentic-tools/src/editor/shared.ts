@@ -1,6 +1,6 @@
-import { readFileSync, existsSync, readdirSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import * as path from 'path';
-import { load_guid_cache, load_guid_cache_for_file } from '../guid-cache';
+import { load_guid_cache_for_file } from '../guid-cache';
 import { normalize_property_path, find_unity_project_root } from '../utils';
 import type { UnityDocument } from './unity-document';
 import type { UnityBlock } from './unity-block';
@@ -697,12 +697,165 @@ export function resolve_source_prefab(
  * Look up a script GUID by name, path, or raw GUID.
  * Returns { guid, path } or null if not found.
  */
+interface TypeRegistryEntry {
+  name: string;
+  kind: string;
+  namespace: string | null;
+  filePath: string;
+  guid: string | null;
+}
+
+type ScriptGuidResolution = { guid: string; path: string | null };
+
+function load_type_registry(projectPath: string): TypeRegistryEntry[] | null {
+  const registryPath = path.join(projectPath, '.unity-agentic', 'type-registry.json');
+  if (!existsSync(registryPath)) return null;
+
+  try {
+    return JSON.parse(readFileSync(registryPath, 'utf-8')) as TypeRegistryEntry[];
+  } catch {
+    return null;
+  }
+}
+
+function parse_type_query(script: string): { targetName: string; targetNamespace: string | null } {
+  const dotIndex = script.lastIndexOf('.');
+  if (dotIndex > 0) {
+    return {
+      targetNamespace: script.substring(0, dotIndex),
+      targetName: script.substring(dotIndex + 1),
+    };
+  }
+
+  return { targetName: script, targetNamespace: null };
+}
+
+function format_qualified_type(entry: Pick<TypeRegistryEntry, 'name' | 'namespace'>): string {
+  return entry.namespace ? `${entry.namespace}.${entry.name}` : entry.name;
+}
+
+function resolve_registry_entry_guid(
+  match: TypeRegistryEntry,
+  projectPath: string,
+): string | null {
+  if (match.guid) {
+    return match.guid;
+  }
+
+  if (!match.filePath) return null;
+
+  const fullFilePath = path.isAbsolute(match.filePath)
+    ? match.filePath
+    : path.join(projectPath, match.filePath);
+  const metaPath = fullFilePath + '.meta';
+  if (existsSync(metaPath)) {
+    const guid = extractGuidFromMeta(metaPath);
+    if (guid) return guid;
+  }
+
+  return null;
+}
+
+function materialize_registry_match(
+  match: TypeRegistryEntry,
+  guid: string,
+): ScriptGuidResolution {
+  return { guid, path: match.filePath };
+}
+
+function dedupe_script_resolutions(resolutions: ScriptGuidResolution[]): ScriptGuidResolution[] {
+  const unique = new Map<string, ScriptGuidResolution>();
+  for (const resolution of resolutions) {
+    unique.set(`${resolution.guid}|${resolution.path ?? ''}`, resolution);
+  }
+  return [...unique.values()];
+}
+
+function resolve_script_guid_from_registry(
+  script: string,
+  projectPath: string,
+  registry: TypeRegistryEntry[],
+): ScriptGuidResolution | null {
+  const { targetName, targetNamespace } = parse_type_query(script);
+  const targetNameLower = targetName.toLowerCase();
+  const matchingEntries = registry.filter(entry => {
+    if (entry.name.toLowerCase() !== targetNameLower) return false;
+    if (targetNamespace && entry.namespace?.toLowerCase() !== targetNamespace.toLowerCase()) return false;
+    return true;
+  });
+
+  if (matchingEntries.length === 0) {
+    return null;
+  }
+
+  const qualifiedMatches = [...new Set(matchingEntries.map(format_qualified_type))];
+  if (!targetNamespace && qualifiedMatches.length > 1) {
+    throw new Error(
+      `Ambiguous type "${script}": found multiple qualified matches (${qualifiedMatches.join(', ')}). ` +
+      `Specify which ${targetName} to use by qualified name (for example, "${qualifiedMatches[0]}") or provide the full script path.`
+    );
+  }
+
+  const resolvedEntries = matchingEntries.map(entry => ({
+    entry,
+    guid: resolve_registry_entry_guid(entry, projectPath),
+  }));
+
+  const sourceGuidCandidates = [...new Set(
+    resolvedEntries
+      .filter(({ entry, guid }) => entry.filePath && !entry.filePath.endsWith('.dll') && guid)
+      .map(({ guid }) => guid!)
+  )];
+
+  const dllMaterializedMatches = dedupe_script_resolutions(
+    resolvedEntries
+      .filter(({ entry }) => entry.filePath?.endsWith('.dll'))
+      .flatMap(({ entry, guid }) => {
+        if (guid) {
+          return [materialize_registry_match(entry, guid)];
+        }
+        return sourceGuidCandidates.map(sourceGuid => materialize_registry_match(entry, sourceGuid));
+      })
+  );
+
+  if (dllMaterializedMatches.length === 1) {
+    return dllMaterializedMatches[0];
+  }
+
+  if (dllMaterializedMatches.length > 1) {
+    const paths = dllMaterializedMatches.map(match => match.path ?? match.guid).join(', ');
+    throw new Error(
+      `Ambiguous type "${script}": found ${dllMaterializedMatches.length} matches (${paths}). ` +
+      `Use a qualified name (e.g., "Namespace.${targetName}") or provide the full path.`
+    );
+  }
+
+  const materializedMatches = dedupe_script_resolutions(
+    resolvedEntries
+      .filter(({ entry, guid }) => !entry.filePath?.endsWith('.dll') && guid)
+      .map(({ entry, guid }) => materialize_registry_match(entry, guid!))
+  );
+
+  if (materializedMatches.length === 1) {
+    return materializedMatches[0];
+  }
+
+  if (materializedMatches.length > 1) {
+    const paths = materializedMatches.map(match => match.path ?? match.guid).join(', ');
+    throw new Error(
+      `Ambiguous type "${script}": found ${materializedMatches.length} matches (${paths}). ` +
+      `Use a qualified name (e.g., "Namespace.${targetName}") or provide the full path.`
+    );
+  }
+
+  return null;
+}
+
 export function resolveScriptGuid(
   script: string,
   projectPath?: string,
-  options?: { strict_exact_name?: boolean }
+  _options?: { strict_exact_name?: boolean }
 ): { guid: string; path: string | null } | null {
-  const strictExactName = options?.strict_exact_name === true;
   // Check if it's already a valid GUID (32 hex chars)
   if (/^[a-f0-9]{32}$/i.test(script)) {
     if (/^0{32}$/i.test(script)) {
@@ -733,263 +886,15 @@ export function resolveScriptGuid(
     }
   }
 
-  // Try to find in GUID cache by name
+  // Use the type registry as the source of truth when available.
   if (projectPath) {
-    const guidCache = load_guid_cache(projectPath);
-    if (guidCache) {
-      if (strictExactName) {
-        const exactMatches = guidCache.find_all_by_name_exact(script, '.cs');
-        if (exactMatches.length === 1) {
-          return exactMatches[0];
-        }
-        if (exactMatches.length > 1) {
-          const paths = exactMatches.map(m => m.path).join(', ');
-          throw new Error(
-            `Ambiguous type "${script}": found ${exactMatches.length} exact script name matches (${paths}). ` +
-            'Use a qualified name (e.g., "Namespace.TypeName") or provide the full script path.'
-          );
-        }
-      } else {
-        const result = guidCache.find_by_name(script, '.cs');
-        if (result) return result;
+    const registry = load_type_registry(projectPath);
+    if (registry) {
+      const resolvedFromRegistry = resolve_script_guid_from_registry(script, projectPath, registry);
+      if (resolvedFromRegistry) {
+        return resolvedFromRegistry;
       }
-    }
-
-    // Strategy 4: Type registry lookup by class name
-    const registryPath = path.join(projectPath, '.unity-agentic', 'type-registry.json');
-    if (existsSync(registryPath)) {
-      try {
-        const registry = JSON.parse(readFileSync(registryPath, 'utf-8')) as Array<{
-          name: string;
-          kind: string;
-          namespace: string | null;
-          filePath: string;
-          guid: string | null;
-        }>;
-
-        // Support qualified names like "TMPro.TextMeshProUGUI"
-        let targetName = script;
-        let targetNamespace: string | null = null;
-        const dotIndex = script.lastIndexOf('.');
-        if (dotIndex > 0) {
-          targetNamespace = script.substring(0, dotIndex);
-          targetName = script.substring(dotIndex + 1);
-        }
-
-        const targetNameLower = targetName.toLowerCase();
-        const matches = registry.filter(t => {
-          if (t.name.toLowerCase() !== targetNameLower) return false;
-          if (targetNamespace && t.namespace?.toLowerCase() !== targetNamespace.toLowerCase()) return false;
-          return true;
-        });
-
-        if (matches.length === 1) {
-          if (matches[0].guid) {
-            return { guid: matches[0].guid, path: matches[0].filePath };
-          }
-          // GUID is null — try to resolve from adjacent .meta file
-          if (matches[0].filePath && projectPath) {
-            const fullFilePath = path.isAbsolute(matches[0].filePath)
-              ? matches[0].filePath
-              : path.join(projectPath, matches[0].filePath);
-            const metaPath = fullFilePath + '.meta';
-            if (existsSync(metaPath)) {
-              const guid = extractGuidFromMeta(metaPath);
-              if (guid) return { guid, path: matches[0].filePath };
-            }
-            // Fallback: try Packages/ relative path through project root
-            if (matches[0].filePath.startsWith('Packages/')) {
-              const pkgPath = path.join(projectPath, matches[0].filePath);
-              const pkgMetaPath = pkgPath + '.meta';
-              if (existsSync(pkgMetaPath)) {
-                const guid = extractGuidFromMeta(pkgMetaPath);
-                if (guid) return { guid, path: matches[0].filePath };
-              }
-            }
-            // Fallback: DLL-backed type — find the source .cs by class name in package caches
-            // Unity references scripts by the .cs file's GUID even when compiled into a DLL
-            if (matches[0].filePath?.endsWith('.dll')) {
-              const classNameLower = targetName.toLowerCase();
-              const dllBasename = path.basename(matches[0].filePath).toLowerCase();
-              for (const cacheName of ['package-cache.json', 'local-package-cache.json']) {
-                const cachePath = path.join(projectPath, '.unity-agentic', cacheName);
-                if (!existsSync(cachePath)) continue;
-                try {
-                  const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
-                  // First: find .cs source file matching the class name
-                  for (const [guid, assetPath] of Object.entries(cache)) {
-                    if (assetPath.endsWith('.cs') &&
-                        path.basename(assetPath, '.cs').toLowerCase() === classNameLower) {
-                      return { guid, path: assetPath };
-                    }
-                  }
-                  // Second: find the DLL itself (for DLL-only references)
-                  for (const [guid, assetPath] of Object.entries(cache)) {
-                    if (assetPath.toLowerCase().endsWith('.dll') &&
-                        path.basename(assetPath).toLowerCase() === dllBasename) {
-                      return { guid, path: assetPath };
-                    }
-                  }
-                } catch { /* ignore corrupt cache */ }
-              }
-            }
-          }
-        }
-        if (matches.length > 1) {
-          // Multiple matches: prefer the one with a GUID
-          const withGuid = matches.filter(m => m.guid);
-          if (withGuid.length === 1) {
-            return { guid: withGuid[0].guid!, path: withGuid[0].filePath };
-          }
-          // Also try .meta fallback for entries with null GUIDs
-          const resolvedFromMeta = matches
-            .filter(m => !m.guid && m.filePath)
-            .map(m => {
-              const fullPath = path.isAbsolute(m.filePath)
-                ? m.filePath
-                : path.join(projectPath, m.filePath);
-              let guid = existsSync(fullPath + '.meta')
-                ? extractGuidFromMeta(fullPath + '.meta')
-                : null;
-              // Fallback: try Packages/ relative path through project root
-              if (!guid && m.filePath.startsWith('Packages/')) {
-                const pkgPath = path.join(projectPath, m.filePath);
-                if (existsSync(pkgPath + '.meta')) {
-                  guid = extractGuidFromMeta(pkgPath + '.meta');
-                }
-              }
-              // Fallback: DLL-backed type — find source .cs by class name in package cache
-              if (!guid && m.filePath?.endsWith('.dll')) {
-                const clsLower = (m.name ?? targetName).toLowerCase();
-                const dllBase = path.basename(m.filePath).toLowerCase();
-                for (const cn of ['package-cache.json', 'local-package-cache.json']) {
-                  const cp = path.join(projectPath, '.unity-agentic', cn);
-                  if (!existsSync(cp)) continue;
-                  try {
-                    const c = JSON.parse(readFileSync(cp, 'utf-8')) as Record<string, string>;
-                    // First: find .cs source matching class name
-                    for (const [g, p] of Object.entries(c)) {
-                      if (p.endsWith('.cs') && path.basename(p, '.cs').toLowerCase() === clsLower) {
-                        guid = g; break;
-                      }
-                    }
-                    // Second: find the DLL itself
-                    if (!guid) {
-                      for (const [g, p] of Object.entries(c)) {
-                        if (p.toLowerCase().endsWith('.dll') && path.basename(p).toLowerCase() === dllBase) {
-                          guid = g; break;
-                        }
-                      }
-                    }
-                  } catch {}
-                  if (guid) break;
-                }
-              }
-              return guid ? { guid, path: m.filePath } : null;
-            })
-            .filter((r): r is { guid: string; path: string } => r !== null);
-          const allResolved = [...withGuid.map(m => ({ guid: m.guid!, path: m.filePath })), ...resolvedFromMeta];
-          if (allResolved.length === 1) {
-            return allResolved[0];
-          }
-          if (allResolved.length > 1) {
-            // Try package caches as tiebreaker
-            const pkgCachePaths = [
-              path.join(projectPath, '.unity-agentic', 'package-cache.json'),
-              path.join(projectPath, '.unity-agentic', 'local-package-cache.json'),
-            ];
-            for (const cachePath of pkgCachePaths) {
-              if (!existsSync(cachePath)) continue;
-              try {
-                const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
-                const inCache = allResolved.filter(r => r.guid in cache);
-                if (inCache.length === 1) return inCache[0];
-              } catch { /* ignore */ }
-            }
-            const paths = allResolved.map(m => m.path).join(', ');
-            throw new Error(
-              `Ambiguous type "${script}": found ${allResolved.length} matches (${paths}). ` +
-              `Use a qualified name (e.g., "Namespace.${targetName}") or provide the full path.`
-            );
-          }
-        }
-      } catch (err) {
-        // Re-throw intentional resolution errors (ambiguity, etc.)
-        if (err instanceof Error && err.message.startsWith('Ambiguous type')) {
-          throw err;
-        }
-        // Registry read/parse failed -- continue to fallback strategies
-      }
-    }
-
-    // Strategy 5: Package cache fallback
-    // Strategy 6: Local package cache fallback (Packages/ directory)
-    // Both support FQN input: "MyNamespace.MyClass" matches basename "MyClass"
-    const scriptNameLower = script.toLowerCase().replace(/\.cs$/, '');
-    const dotIdx = scriptNameLower.lastIndexOf('.');
-    const classNameOnly = dotIdx > 0 ? scriptNameLower.substring(dotIdx + 1) : null;
-
-    const cachePaths = [
-      path.join(projectPath, '.unity-agentic', 'package-cache.json'),
-      path.join(projectPath, '.unity-agentic', 'local-package-cache.json'),
-    ];
-
-    for (const cachePath of cachePaths) {
-      if (!existsSync(cachePath)) continue;
-      try {
-        const cache = JSON.parse(readFileSync(cachePath, 'utf-8')) as Record<string, string>;
-
-        const exactMatches: Array<{ guid: string; path: string }> = [];
-        for (const [guid, assetPath] of Object.entries(cache)) {
-          if (!assetPath.endsWith('.cs')) continue;
-          const fileName = path.basename(assetPath, '.cs').toLowerCase();
-          if (fileName === scriptNameLower || (classNameOnly && fileName === classNameOnly)) {
-            exactMatches.push({ guid, path: assetPath });
-          }
-        }
-
-        if (exactMatches.length === 1) {
-          return exactMatches[0];
-        }
-        if (exactMatches.length > 1) {
-          const paths = exactMatches.map(m => m.path).join(', ');
-          throw new Error(
-            `Ambiguous type "${script}": found ${exactMatches.length} exact script name matches (${paths}). ` +
-            'Use a qualified name (e.g., "Namespace.TypeName") or provide the full script path.'
-          );
-        }
-      } catch (err) {
-        if (err instanceof Error && err.message.startsWith('Ambiguous type')) {
-          throw err;
-        }
-        // Cache read failed
-      }
-    }
-
-    if (strictExactName) {
       return null;
-    }
-
-    // Strategy 7: Filesystem fallback via readdirSync (recursive)
-    // Only used when registry/cache lookup fails
-    try {
-      const assetsDir = path.join(projectPath, 'Assets');
-      if (existsSync(assetsDir)) {
-        const entries = readdirSync(assetsDir, { recursive: true, withFileTypes: false }) as string[];
-        for (const entry of entries) {
-          if (!entry.endsWith('.cs')) continue;
-          const fileName = path.basename(entry, '.cs').toLowerCase();
-          if (fileName === scriptNameLower || (classNameOnly && fileName === classNameOnly)) {
-            const fullPath = path.join(assetsDir, entry);
-            const guid = extractGuidFromMeta(fullPath + '.meta');
-            if (guid) {
-              return { guid, path: path.join('Assets', entry) };
-            }
-          }
-        }
-      }
-    } catch {
-      // Filesystem scan failed
     }
   }
 

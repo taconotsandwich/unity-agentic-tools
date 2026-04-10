@@ -8,38 +8,15 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using UnityAgenticTools.Refs;
 
-namespace UnityAgenticTools.Server
+namespace UnityAgenticTools.API
 {
-    public class UIHandler : IRequestHandler
+    public static class UIAPI
     {
-        public string MethodPrefix => "editor.ui.";
-
-        public async Task<object> HandleAsync(string method, Dictionary<string, object> parameters)
-        {
-            var action = method.Substring(MethodPrefix.Length);
-
-            switch (action)
-            {
-                case "snapshot":
-                    return await TakeSnapshot(parameters);
-                case "interact":
-                    return await Interact(parameters);
-                case "query":
-                    return await Query(parameters);
-                case "wait":
-                    return await Wait(parameters);
-                default:
-                    throw new InvalidOperationException($"Unknown UI action: {action}");
-            }
-        }
 
         // --- Snapshot ---
 
-        private async Task<object> TakeSnapshot(Dictionary<string, object> parameters)
+        public static object Snapshot()
         {
-            return await EditorWebSocketServer.RunOnMainThread(() =>
-            {
-                RefManager.ClearUI();
 
                 var elements = new List<UIElementInfo>();
 
@@ -93,21 +70,14 @@ namespace UnityAgenticTools.Server
                     { "refCount", RefManager.GetUIRefCount() },
                     { "elements", items.ToArray() }
                 };
-            });
         }
 
         // --- Interact ---
 
-        private async Task<object> Interact(Dictionary<string, object> parameters)
+        public static object Interact(string refStr, string action, string text = null, float value = 0f, string option = null, bool byIndex = false, string direction = "down", float amount = 0.1f)
         {
-            if (!parameters.TryGetValue("ref", out var refObj) || !(refObj is string refStr))
-                throw new ArgumentException("Missing required parameter: ref");
+            var interactAction = action;
 
-            if (!parameters.TryGetValue("action", out var actionObj) || !(actionObj is string interactAction))
-                throw new ArgumentException("Missing required parameter: action");
-
-            return await EditorWebSocketServer.RunOnMainThread(() =>
-            {
                 if (!RefManager.TryResolve(refStr, out var entry, out var kind))
                     throw new ArgumentException($"Stale or invalid ref '{refStr}'. Run ui-snapshot to refresh refs.");
 
@@ -117,7 +87,7 @@ namespace UnityAgenticTools.Server
                 // UI Toolkit path
                 if (entry.InstanceId == 0 && !string.IsNullOrEmpty(entry.TreePath))
                 {
-                    return InteractUIToolkit(entry.TreePath, interactAction, parameters, refStr);
+                    return InteractUIToolkit(entry.TreePath, interactAction, refStr, text, value, option, byIndex, direction, amount);
                 }
 
                 // uGUI path
@@ -129,11 +99,10 @@ namespace UnityAgenticTools.Server
                 if (component == null)
                     throw new ArgumentException($"Ref '{refStr}' resolved to {obj.GetType().Name}, not a UI component.");
 
-                return InteractUGUI(component, interactAction, parameters, refStr);
-            });
+                return InteractUGUI(component, interactAction, refStr, text, value, option, byIndex, direction, amount);
         }
 
-        private static object InteractUGUI(Component component, string action, Dictionary<string, object> parameters, string refStr)
+        private static object InteractUGUI(Component component, string action, string refStr, string text, float value, string option, bool byIndex, string direction, float amount)
         {
             switch (action)
             {
@@ -164,7 +133,7 @@ namespace UnityAgenticTools.Server
 
                 case "fill":
                 {
-                    if (!parameters.TryGetValue("text", out var textObj) || !(textObj is string text))
+                    if (text == null)
                         throw new ArgumentException("Missing required parameter: text");
 
                     if (component is InputField inputField)
@@ -189,7 +158,7 @@ namespace UnityAgenticTools.Server
 
                 case "type":
                 {
-                    if (!parameters.TryGetValue("text", out var textObj) || !(textObj is string text))
+                    if (text == null)
                         throw new ArgumentException("Missing required parameter: text");
 
                     if (component is InputField inputField)
@@ -230,11 +199,6 @@ namespace UnityAgenticTools.Server
 
                 case "slider":
                 {
-                    if (!parameters.TryGetValue("value", out var valObj))
-                        throw new ArgumentException("Missing required parameter: value");
-
-                    float value = Convert.ToSingle(valObj);
-
                     if (!(component is Slider) && component.GetComponent<Slider>() == null)
                         throw new ArgumentException($"Ref '{refStr}' is not a Slider.");
 
@@ -252,12 +216,8 @@ namespace UnityAgenticTools.Server
 
                 case "select":
                 {
-                    if (!parameters.TryGetValue("option", out var optObj) || !(optObj is string option))
+                    if (option == null)
                         throw new ArgumentException("Missing required parameter: option");
-
-                    bool byIndex = false;
-                    if (parameters.TryGetValue("byIndex", out var biObj) && biObj is bool bi)
-                        byIndex = bi;
 
                     return SelectDropdown(component, option, byIndex, refStr);
                 }
@@ -267,14 +227,6 @@ namespace UnityAgenticTools.Server
                     var scrollRect = component as ScrollRect ?? component.GetComponent<ScrollRect>();
                     if (scrollRect == null)
                         throw new ArgumentException($"Ref '{refStr}' is not a ScrollRect.");
-
-                    string direction = "down";
-                    if (parameters.TryGetValue("direction", out var dirObj) && dirObj is string dir)
-                        direction = dir;
-
-                    float amount = 0.1f;
-                    if (parameters.TryGetValue("amount", out var amtObj))
-                        amount = Convert.ToSingle(amtObj);
 
                     var pos = scrollRect.normalizedPosition;
                     switch (direction.ToLowerInvariant())
@@ -417,7 +369,7 @@ namespace UnityAgenticTools.Server
 
         // --- UI Toolkit Interaction ---
 
-        private static object InteractUIToolkit(string treePath, string action, Dictionary<string, object> parameters, string refStr)
+        private static object InteractUIToolkit(string treePath, string action, string refStr, string text, float value, string option, bool byIndex, string direction, float amount)
         {
             var element = ResolveUIToolkitElement(treePath);
             if (element == null)
@@ -468,7 +420,7 @@ namespace UnityAgenticTools.Server
                 case "fill":
                 case "type":
                 {
-                    if (!parameters.TryGetValue("text", out var textObj) || !(textObj is string text))
+                    if (text == null)
                         throw new ArgumentException("Missing required parameter: text");
 
                     var valueProp = type.GetProperty("value", BindingFlags.Public | BindingFlags.Instance);
@@ -516,17 +468,14 @@ namespace UnityAgenticTools.Server
 
                 case "slider":
                 {
-                    if (!parameters.TryGetValue("value", out var valObj))
-                        throw new ArgumentException("Missing required parameter: value");
-
                     var valueProp = type.GetProperty("value", BindingFlags.Public | BindingFlags.Instance);
                     if (valueProp == null)
                         throw new ArgumentException($"Ref '{refStr}' is not a slider.");
 
                     if (valueProp.PropertyType == typeof(int))
-                        valueProp.SetValue(element, Convert.ToInt32(valObj));
+                        valueProp.SetValue(element, Convert.ToInt32(value));
                     else
-                        valueProp.SetValue(element, Convert.ToSingle(valObj));
+                        valueProp.SetValue(element, value);
 
                     return new Dictionary<string, object>
                     {
@@ -540,7 +489,7 @@ namespace UnityAgenticTools.Server
 
                 case "select":
                 {
-                    if (!parameters.TryGetValue("option", out var optObj) || !(optObj is string option))
+                    if (option == null)
                         throw new ArgumentException("Missing required parameter: option");
 
                     var valueProp = type.GetProperty("value", BindingFlags.Public | BindingFlags.Instance);
@@ -574,14 +523,6 @@ namespace UnityAgenticTools.Server
 
                 case "scroll":
                 {
-                    string direction = "down";
-                    if (parameters.TryGetValue("direction", out var dirObj) && dirObj is string dir)
-                        direction = dir;
-
-                    float amount = 100f;
-                    if (parameters.TryGetValue("amount", out var amtObj))
-                        amount = Convert.ToSingle(amtObj);
-
                     var scrollOffsetProp = type.GetProperty("scrollOffset", BindingFlags.Public | BindingFlags.Instance);
                     if (scrollOffsetProp != null)
                     {
@@ -712,16 +653,8 @@ namespace UnityAgenticTools.Server
 
         // --- Query ---
 
-        private async Task<object> Query(Dictionary<string, object> parameters)
+        public static object Query(string refStr, string query)
         {
-            if (!parameters.TryGetValue("ref", out var refObj) || !(refObj is string refStr))
-                throw new ArgumentException("Missing required parameter: ref");
-
-            if (!parameters.TryGetValue("query", out var queryObj) || !(queryObj is string query))
-                throw new ArgumentException("Missing required parameter: query");
-
-            return await EditorWebSocketServer.RunOnMainThread(() =>
-            {
                 if (!RefManager.TryResolve(refStr, out var entry, out var kind))
                     throw new ArgumentException($"Stale or invalid ref '{refStr}'. Run ui-snapshot to refresh refs.");
 
@@ -761,10 +694,9 @@ namespace UnityAgenticTools.Server
                         return GetUGUIValue(component, refStr);
                     }
 
-                    default:
-                        throw new ArgumentException($"Unknown UI query: {query}. Use: text, value");
+                default:
+                    throw new ArgumentException($"Unknown UI query: {query}. Use: text, value");
                 }
-            });
         }
 
         private static object GetUGUIValue(Component component, string refStr)
@@ -827,78 +759,43 @@ namespace UnityAgenticTools.Server
 
         // --- Wait ---
 
-        private async Task<object> Wait(Dictionary<string, object> parameters)
+        public static async Task<object> Wait(string condition, string refStr = null, string name = null, string text = null, int timeout = 10000, int ms = 1000)
         {
-            if (!parameters.TryGetValue("condition", out var condObj) || !(condObj is string condition))
-                throw new ArgumentException("Missing required parameter: condition");
-
-            int timeoutMs = 10000;
-            if (parameters.TryGetValue("timeout", out var toObj))
-                timeoutMs = Convert.ToInt32(toObj);
-
             switch (condition)
             {
                 case "ui":
                 {
-                    if (!parameters.TryGetValue("ref", out var refObj) || !(refObj is string refStr))
-                        throw new ArgumentException("Missing required parameter: ref");
-
-                    return await WaitConditionRunner.WaitForCondition(
-                        () => IsUIElementActive(refStr),
-                        timeoutMs,
-                        $"UI element {refStr} to become active");
+                    if (refStr == null) throw new ArgumentException("Missing required parameter: refStr");
+                    return await WaitConditionRunner.WaitForCondition(() => IsUIElementActive(refStr), timeout, $"UI element {refStr} to become active");
                 }
 
                 case "ui-gone":
                 {
-                    if (!parameters.TryGetValue("ref", out var refObj) || !(refObj is string refStr))
-                        throw new ArgumentException("Missing required parameter: ref");
-
-                    return await WaitConditionRunner.WaitForCondition(
-                        () => !IsUIElementActive(refStr),
-                        timeoutMs,
-                        $"UI element {refStr} to deactivate");
+                    if (refStr == null) throw new ArgumentException("Missing required parameter: refStr");
+                    return await WaitConditionRunner.WaitForCondition(() => !IsUIElementActive(refStr), timeout, $"UI element {refStr} to deactivate");
                 }
 
                 case "scene":
                 {
-                    if (!parameters.TryGetValue("name", out var nameObj) || !(nameObj is string sceneName))
-                        throw new ArgumentException("Missing required parameter: name");
-
-                    return await WaitConditionRunner.WaitForCondition(
-                        () => UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == sceneName,
-                        timeoutMs,
-                        $"scene '{sceneName}' to load");
+                    if (name == null) throw new ArgumentException("Missing required parameter: name");
+                    return await WaitConditionRunner.WaitForCondition(() => UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == name, timeout, $"scene '{name}' to load");
                 }
 
                 case "log":
                 {
-                    if (!parameters.TryGetValue("text", out var textObj) || !(textObj is string text))
-                        throw new ArgumentException("Missing required parameter: text");
-
-                    return await WaitConditionRunner.WaitForLog(text, timeoutMs);
+                    if (text == null) throw new ArgumentException("Missing required parameter: text");
+                    return await WaitConditionRunner.WaitForLog(text, timeout);
                 }
 
                 case "compile":
                 {
-                    return await WaitConditionRunner.WaitForCondition(
-                        () => !EditorApplication.isCompiling,
-                        timeoutMs,
-                        "compilation to finish");
+                    return await WaitConditionRunner.WaitForCondition(() => !EditorApplication.isCompiling, timeout, "compilation to finish");
                 }
 
                 case "delay":
                 {
-                    int delayMs = 1000;
-                    if (parameters.TryGetValue("ms", out var msObj))
-                        delayMs = Convert.ToInt32(msObj);
-
-                    await Task.Delay(delayMs);
-                    return new Dictionary<string, object>
-                    {
-                        { "success", true },
-                        { "waited", delayMs }
-                    };
+                    await Task.Delay(ms);
+                    return new Dictionary<string, object> { { "success", true }, { "waited", ms } };
                 }
 
                 default:

@@ -224,6 +224,81 @@ export const UNITY_CLASS_NAMES: Record<string, number> = Object.fromEntries(
 );
 
 /**
+ * Class IDs that can legally appear in a GameObject's m_Component list.
+ *
+ * This is intentionally narrower than UNITY_CLASS_IDS, which also includes
+ * project settings, assets, and other serialized Unity object types such as
+ * AudioManager and GameManager.
+ */
+const UNITY_COMPONENT_CLASS_IDS = new Set<number>([
+    4, 8, 20, 23, 25, 33, 50, 53, 54, 56, 57, 58, 59, 60, 61, 64, 65, 66, 68, 70,
+    75, 81, 82, 95, 96, 102, 108, 111, 114, 119, 120, 124, 135, 136, 137, 138, 143,
+    144, 145, 146, 153, 154, 164, 165, 166, 167, 168, 169, 170, 180, 181, 182, 183,
+    191, 192, 193, 195, 198, 199, 205, 208, 210, 212, 215, 220, 222, 223, 224, 225,
+    229, 230, 231, 232, 233, 234, 235, 247, 248, 249, 250, 251, 252, 253, 254, 255,
+    256, 257, 259, 300, 320, 328, 330, 331, 156049354, 1742807556, 1839735485,
+    19719996, 483693784, 1839735486, 1839735487,
+]);
+
+/**
+ * Built-in component class IDs that users can explicitly add with
+ * create component. Excludes non-addable base/internal types such as
+ * Transform, RectTransform, MonoBehaviour, Collider, Joint, etc.
+ */
+const UNITY_ADDABLE_COMPONENT_CLASS_IDS = new Set<number>([
+    20, 23, 33, 50, 54, 58, 59, 60, 61, 64, 65, 66, 68, 70, 75, 81, 82, 95, 96, 102,
+    108, 111, 119, 120, 124, 135, 136, 137, 138, 143, 144, 145, 146, 153, 154, 164,
+    165, 166, 167, 168, 169, 170, 182, 183, 191, 192, 193, 195, 198, 199, 205, 208,
+    210, 212, 215, 220, 222, 223, 225, 231, 232, 233, 234, 235, 247, 249, 250, 251,
+    252, 253, 254, 255, 256, 257, 259, 300, 320, 328, 330, 331, 156049354, 1742807556,
+    1839735485, 19719996, 483693784,
+]);
+
+const UNITY_BUILTIN_NAMESPACE_PREFIXES = ['UnityEngine', 'UnityEditor'];
+
+function find_namespaced_class_id(component_name: string, allowed_class_ids?: Set<number>): number | null {
+    const dot_index = component_name.lastIndexOf('.');
+    if (dot_index <= 0) return null;
+
+    const namespace_name = component_name.slice(0, dot_index);
+    const short_name = component_name.slice(dot_index + 1);
+    const is_unity_namespace = UNITY_BUILTIN_NAMESPACE_PREFIXES.some(prefix =>
+        namespace_name === prefix || namespace_name.startsWith(`${prefix}.`)
+    );
+
+    if (!is_unity_namespace || short_name.length === 0) {
+        return null;
+    }
+
+    return find_class_id(short_name, allowed_class_ids);
+}
+
+function find_class_id(component_name: string, allowed_class_ids?: Set<number>): number | null {
+    const matches_allowed = (class_id: number): boolean => {
+        return allowed_class_ids ? allowed_class_ids.has(class_id) : true;
+    };
+
+    if (UNITY_CLASS_NAMES[component_name] !== undefined) {
+        const class_id = UNITY_CLASS_NAMES[component_name];
+        return matches_allowed(class_id) ? class_id : null;
+    }
+
+    const lowerName = component_name.toLowerCase();
+    for (const [name, id] of Object.entries(UNITY_CLASS_NAMES)) {
+        if (name.toLowerCase() === lowerName) {
+            return matches_allowed(id) ? id : null;
+        }
+    }
+
+    const namespaced_match = find_namespaced_class_id(component_name, allowed_class_ids);
+    if (namespaced_match !== null) {
+        return namespaced_match;
+    }
+
+    return null;
+}
+
+/**
  * Get component name from class ID.
  */
 export function get_class_id_name(class_id: number): string {
@@ -234,23 +309,26 @@ export function get_class_id_name(class_id: number): string {
  * Get class ID from component name (case-insensitive).
  */
 export function get_class_id(component_name: string): number | null {
-    // Direct lookup first
-    if (UNITY_CLASS_NAMES[component_name] !== undefined) {
-        return UNITY_CLASS_NAMES[component_name];
-    }
-    // Case-insensitive search
-    const lowerName = component_name.toLowerCase();
-    for (const [name, id] of Object.entries(UNITY_CLASS_NAMES)) {
-        if (name.toLowerCase() === lowerName) {
-            return id;
-        }
-    }
-    return null;
+    return find_class_id(component_name);
+}
+
+/**
+ * Get the class ID for a Unity type that can appear on a GameObject.
+ */
+export function get_component_class_id(component_name: string): number | null {
+    return find_class_id(component_name, UNITY_COMPONENT_CLASS_IDS);
+}
+
+/**
+ * Get the class ID for a built-in component that can be added to a GameObject.
+ */
+export function get_addable_component_class_id(component_name: string): number | null {
+    return find_class_id(component_name, UNITY_ADDABLE_COMPONENT_CLASS_IDS);
 }
 
 /**
  * Check if a component name is a known Unity built-in type.
  */
 export function is_builtin_component(component_name: string): boolean {
-    return get_class_id(component_name) !== null;
+    return get_component_class_id(component_name) !== null;
 }

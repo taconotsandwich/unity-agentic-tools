@@ -42,23 +42,23 @@ If the prefab is open in Prefab Mode and editor bridge is connected, pass `--byp
 End-to-end workflow for testing a running Unity application.
 
 1. `editor status` -- confirm bridge is connected
-2. `editor play` -- enter play mode
-3. `editor wait --scene <name>` -- wait for target scene to load
-4. `editor hierarchy-snapshot` -- get `@hN` refs for scene objects
-5. `editor ui-snapshot` -- get `@uN` refs for interactive UI elements
-6. `editor screenshot --annotate` -- capture annotated game view for visual reference
+2. `editor invoke UnityAgenticTools.API.PlayModeAPI Enter` -- enter play mode
+3. `editor invoke UnityAgenticTools.API.UIAPI Wait "[\"scene\",null,\"<name>\",null,10000,0]"` -- wait for target scene to load
+4. `editor invoke UnityAgenticTools.API.HierarchyAPI Snapshot "[2,false]"` -- get `@hN` refs for scene objects
+5. `editor invoke UnityAgenticTools.API.UIAPI Snapshot` -- get `@uN` refs for interactive UI elements
+6. `editor invoke UnityAgenticTools.API.ScreenshotAPI Annotated "[\"Temp/annotated.png\"]"` -- capture annotated game view
 7. Interact with UI:
-   - `editor ui-click @uN` -- click buttons
-   - `editor ui-fill @uN "text"` -- fill input fields
-   - `editor ui-toggle @uN` -- toggle checkboxes
-   - `editor ui-slider @uN 0.5` -- set slider values
-   - `editor ui-select @uN "Option"` -- select dropdown options
-8. `editor wait --ui @uN` or `editor wait --log "text"` -- wait for result
-9. `editor screenshot` -- capture result state
-10. `editor console-logs` -- check for errors
-11. `editor stop` -- exit play mode
+   - `editor invoke UnityAgenticTools.API.UIAPI Interact "[\"@uN\",\"click\"]"` -- click buttons
+   - `editor invoke UnityAgenticTools.API.UIAPI Interact "[\"@uN\",\"fill\",\"text\"]"` -- fill input fields
+   - `editor invoke UnityAgenticTools.API.UIAPI Interact "[\"@uN\",\"toggle\"]"` -- toggle checkboxes
+   - `editor invoke UnityAgenticTools.API.UIAPI Interact "[\"@uN\",\"slider\",null,0.5]"` -- set slider values
+   - `editor invoke UnityAgenticTools.API.UIAPI Interact "[\"@uN\",\"select\",null,0,\"Option\",false]"` -- select dropdown options
+8. `editor invoke UnityAgenticTools.API.UIAPI Wait "[\"ui\",\"@uN\",null,null,10000,0]"` or `editor invoke UnityAgenticTools.API.UIAPI Wait "[\"log\",null,null,\"text\",10000,0]"`
+9. `editor invoke UnityAgenticTools.API.ScreenshotAPI Take "[\"Temp/result.png\",1]"` -- capture result state
+10. `editor console-follow --duration 2000` -- check runtime logs
+11. `editor invoke UnityAgenticTools.API.PlayModeAPI Exit` -- exit play mode
 
-Refs (`@hN`, `@uN`) invalidate on scene change, play mode transition, or domain reload. Re-snapshot to refresh.
+Refs (`@hN`, `@uN`) invalidate on scene change, play mode transition, or domain reload. Re-run `HierarchyAPI.Snapshot` / `UIAPI.Snapshot` to refresh.
 
 ## 5. Batch editing
 

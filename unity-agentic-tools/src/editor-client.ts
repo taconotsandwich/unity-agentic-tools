@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 import type {
     EditorConfig,
@@ -21,6 +21,8 @@ interface EditorActionSemantics {
     discovery_timeout_ms: number;
 }
 
+const CLIENT_DISCOVERY_UNAVAILABLE_CODE = -32010;
+
 const DEFAULT_ACTION_SEMANTICS: EditorActionSemantics = {
     kind: 'command',
     default_retries: 2,
@@ -32,6 +34,13 @@ const TRANSITION_TOLERANT_READ_SEMANTICS: EditorActionSemantics = {
     kind: 'read',
     default_retries: 6,
     retry_delays_ms: [250, 500, 1000, 1500, 1500, 1500],
+    discovery_timeout_ms: 250,
+};
+
+const TRANSITION_TOLERANT_COMMAND_SEMANTICS: EditorActionSemantics = {
+    kind: 'command',
+    default_retries: 5,
+    retry_delays_ms: [250, 500, 1000, 1500, 2000],
     discovery_timeout_ms: 250,
 };
 
@@ -127,8 +136,9 @@ export async function discover_editor_config(project_path: string, timeout_ms: n
     const normalized_project_path = normalize_project_path(project_path);
     const lockfile_result = read_editor_config(project_path);
     const preferred_ports: number[] = [];
-    const cached_config = read_cached_editor_config(project_path, normalized_project_path)
+    let cached_config = read_cached_editor_config(project_path, normalized_project_path)
         ?? LAST_KNOWN_EDITOR_CONFIGS.get(normalized_project_path);
+    let stale_cached_port: number | undefined;
 
     if (!('error' in lockfile_result)) {
         preferred_ports.push(lockfile_result.port);
@@ -158,6 +168,10 @@ export async function discover_editor_config(project_path: string, timeout_ms: n
             remember_editor_config(normalized_project_path, resolved_config);
             return resolved_config;
         }
+
+        stale_cached_port = cached_config.port;
+        forget_cached_editor_config(project_path, normalized_project_path);
+        cached_config = undefined;
     }
 
     const discovered_infos = await discover_bridge_infos(timeout_ms, preferred_ports);
@@ -177,47 +191,44 @@ export async function discover_editor_config(project_path: string, timeout_ms: n
         return resolved_config;
     }
 
-    if (cached_config) {
-        return {
-            ...cached_config,
-            project_path: normalized_project_path,
-            source: 'cached',
-        };
-    }
-
     const discovered_projects = discovered_infos.map((info) => `${info.project_name ?? '(unknown)'}:${info.project_path}@${info.port}`);
     const discovered_clause = discovered_projects.length > 0
         ? ` Reachable bridges were found for different projects: ${discovered_projects.join(', ')}.`
         : ` No reachable bridge in ports ${BRIDGE_PORT_RANGE_START}-${BRIDGE_PORT_RANGE_END} identified project ${normalized_project_path}.`;
+    const stale_cache_clause = stale_cached_port !== undefined
+        ? ` Cached bridge port ${stale_cached_port} was also unreachable.`
+        : '';
     const port_hint = ' Use --port <n> only if you need to target a specific bridge manually.';
 
     if (!('error' in lockfile_result)) {
         return {
-            error: `Editor bridge lockfile pointed to port ${lockfile_result.port}, but it was unreachable and autodiscovery could not find a matching Unity project bridge.${discovered_clause}${port_hint}`,
+            error: `Editor bridge lockfile pointed to port ${lockfile_result.port}, but it was unreachable and autodiscovery could not find a matching Unity project bridge.${stale_cache_clause}${discovered_clause}${port_hint}`,
         };
     }
 
     return {
-        error: `${lockfile_result.error} Autodiscovery could not find a matching Unity project bridge.${discovered_clause}${port_hint}`,
+        error: `${lockfile_result.error} Autodiscovery could not find a matching Unity project bridge.${stale_cache_clause}${discovered_clause}${port_hint}`,
     };
 }
 
 /** Error codes that indicate transient connection issues (server restarting after reload). */
-const RETRYABLE_CODES = new Set([-32000, -32002, -32003]);
+const READ_RETRYABLE_CODES = new Set([-32000, -32002, -32003, CLIENT_DISCOVERY_UNAVAILABLE_CODE]);
+const COMMAND_RETRYABLE_CODES = new Set([-32002, CLIENT_DISCOVERY_UNAVAILABLE_CODE]);
+const TRANSITION_TOLERANT_COMMAND_RETRYABLE_CODES = new Set([-32000, -32002, -32003, CLIENT_DISCOVERY_UNAVAILABLE_CODE]);
 
 /**
  * Send a single JSON-RPC request to the Unity Editor and return the result.
  * Automatically retries on transient connection errors (e.g., server restarting after assembly reload).
  */
 export async function call_editor(options: CallEditorOptions): Promise<RpcResponse> {
-    const semantics = get_action_semantics(options.method);
+    const semantics = get_action_semantics(options.method, 'unary', options.params);
     const maxRetries = options.retries ?? semantics.default_retries;
 
     let lastResponse: RpcResponse | undefined;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         lastResponse = await call_editor_once(options, semantics);
 
-        if (!lastResponse.error || !RETRYABLE_CODES.has(lastResponse.error.code)) {
+        if (!should_retry_response(lastResponse, semantics)) {
             return lastResponse;
         }
 
@@ -241,7 +252,7 @@ async function call_editor_once(options: CallEditorOptions, semantics: EditorAct
         return Promise.resolve({
             jsonrpc: "2.0" as const,
             id: "0",
-            error: { code: -32000, message: config.error },
+            error: { code: CLIENT_DISCOVERY_UNAVAILABLE_CODE, message: config.error },
         });
     }
 
@@ -263,7 +274,7 @@ async function call_editor_once(options: CallEditorOptions, semantics: EditorAct
 export async function stream_editor(options: StreamEditorOptions): Promise<{ close: () => void }> {
     const { method, params, timeout = 30000, on_event } = options;
 
-    const semantics = get_action_semantics(method, 'stream');
+    const semantics = get_action_semantics(method, 'stream', params);
     const config = await resolve_config(options, semantics.discovery_timeout_ms);
     if ('error' in config) {
         throw new Error(config.error);
@@ -346,13 +357,14 @@ export async function stream_editor(options: StreamEditorOptions): Promise<{ clo
  * Returns whether the bridge is reachable within the timeout.
  */
 export async function ping_editor(port: number, timeout_ms: number = 2000): Promise<{ reachable: boolean; error?: string }> {
+    const url = `ws://127.0.0.1:${port}/unity-agentic`;
     return new Promise((resolve) => {
         const timer = setTimeout(() => {
             resolve({ reachable: false, error: `Timeout after ${timeout_ms}ms` });
         }, timeout_ms);
 
         try {
-            const ws = new WebSocket(`ws://127.0.0.1:${port}/unity-agentic`);
+            const ws = new WebSocket(url);
 
             ws.onopen = () => {
                 clearTimeout(timer);
@@ -362,11 +374,11 @@ export async function ping_editor(port: number, timeout_ms: number = 2000): Prom
 
             ws.onerror = (err: Event) => {
                 clearTimeout(timer);
-                resolve({ reachable: false, error: String(err) });
+                resolve({ reachable: false, error: describe_websocket_error(err, `WebSocket connection failed to ${url}`) });
             };
         } catch (err) {
             clearTimeout(timer);
-            resolve({ reachable: false, error: String(err) });
+            resolve({ reachable: false, error: describe_websocket_error(err, `WebSocket connection failed to ${url}`) });
         }
     });
 }
@@ -379,7 +391,11 @@ async function resolve_config(options: CallEditorOptions, discovery_timeout_ms: 
     return discover_editor_config(options.project_path, discovery_timeout_ms);
 }
 
-function get_action_semantics(method: string, kind: 'unary' | 'stream' = 'unary'): EditorActionSemantics {
+function get_action_semantics(
+    method: string,
+    kind: 'unary' | 'stream' = 'unary',
+    params?: Record<string, unknown>,
+): EditorActionSemantics {
     if (kind === 'stream') {
         return {
             ...DEFAULT_ACTION_SEMANTICS,
@@ -391,7 +407,36 @@ function get_action_semantics(method: string, kind: 'unary' | 'stream' = 'unary'
         return TRANSITION_TOLERANT_READ_SEMANTICS;
     }
 
+    if (is_play_mode_transition_invoke(method, params)) {
+        return TRANSITION_TOLERANT_COMMAND_SEMANTICS;
+    }
+
     return DEFAULT_ACTION_SEMANTICS;
+}
+
+function is_play_mode_transition_invoke(method: string, params?: Record<string, unknown>): boolean {
+    if (method !== 'editor.invoke' || !params) {
+        return false;
+    }
+
+    return params.type === 'UnityEditor.EditorApplication' &&
+        params.member === 'isPlaying';
+}
+
+function should_retry_response(response: RpcResponse, semantics: EditorActionSemantics): boolean {
+    if (!response.error) {
+        return false;
+    }
+
+    if (semantics === TRANSITION_TOLERANT_COMMAND_SEMANTICS) {
+        return TRANSITION_TOLERANT_COMMAND_RETRYABLE_CODES.has(response.error.code);
+    }
+
+    if (semantics.kind === 'read' || semantics.kind === 'stream') {
+        return READ_RETRYABLE_CODES.has(response.error.code);
+    }
+
+    return COMMAND_RETRYABLE_CODES.has(response.error.code);
 }
 
 async function request_editor_at_port(options: {
@@ -537,6 +582,19 @@ function remember_editor_config(project_path: string, config: EditorConfig): voi
     write_cached_editor_config(project_path, cached_config);
 }
 
+function forget_cached_editor_config(project_path: string, normalized_project_path: string): void {
+    LAST_KNOWN_EDITOR_CONFIGS.delete(normalized_project_path);
+
+    const config_path = join(project_path, '.unity-agentic', LAST_KNOWN_CONFIG_FILE);
+    try {
+        if (existsSync(config_path)) {
+            unlinkSync(config_path);
+        }
+    } catch {
+        // Cache cleanup is best-effort. Discovery must still proceed without it.
+    }
+}
+
 function read_cached_editor_config(project_path: string, normalized_project_path: string): EditorConfig | undefined {
     const config_path = join(project_path, '.unity-agentic', LAST_KNOWN_CONFIG_FILE);
     if (!existsSync(config_path)) {
@@ -600,9 +658,40 @@ function is_pid_alive(pid: number): boolean {
     try {
         process.kill(pid, 0);
         return true;
-    } catch {
+    } catch (err) {
+        if (is_record(err) && err.code === 'EPERM') {
+            return true;
+        }
+
         return false;
     }
+}
+
+function describe_websocket_error(err: unknown, fallback: string): string {
+    if (err instanceof Error && err.message.trim().length > 0) {
+        return err.message;
+    }
+
+    if (is_record(err)) {
+        if (typeof err.message === 'string' && err.message.trim().length > 0) {
+            return err.message;
+        }
+
+        if (err.error instanceof Error && err.error.message.trim().length > 0) {
+            return err.error.message;
+        }
+
+        if (typeof err.type === 'string' && err.type.trim().length > 0) {
+            return `${fallback} (${err.type})`;
+        }
+    }
+
+    const stringified = String(err);
+    if (stringified && stringified !== '[object Event]' && stringified !== '[object ErrorEvent]') {
+        return stringified;
+    }
+
+    return fallback;
 }
 
 function generate_id(): string {

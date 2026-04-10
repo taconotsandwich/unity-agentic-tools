@@ -7,6 +7,7 @@ export interface SceneEntry {
     path: string;
     guid?: string;
     buildIndex: number;
+    exists?: boolean;
 }
 
 export interface EditorBuildSettings {
@@ -27,6 +28,7 @@ export interface BuildSettingsResult {
     editorBuildSettings: EditorBuildSettings;
     buildProfiles: BuildProfile[];
     activeBuildProfile?: string;
+    missingScenes?: string[];
 }
 
 /**
@@ -187,11 +189,29 @@ export function get_build_settings(projectPath: string): BuildSettingsResult {
     );
 
     const editorBuildSettings = parse_editor_build_settings(editorBuildSettingsPath);
-    const buildProfiles = list_build_profiles(projectPath);
+    const annotatedEditorScenes = annotate_scene_existence(projectPath, editorBuildSettings.scenes);
+    const buildProfiles = list_build_profiles(projectPath).map((profile) => ({
+        ...profile,
+        scenes: profile.scenes ? annotate_scene_existence(projectPath, profile.scenes) : undefined,
+    }));
+    const missingScenes = annotatedEditorScenes
+        .filter((scene) => scene.exists === false)
+        .map((scene) => scene.path);
 
     return {
         projectInfo,
-        editorBuildSettings,
+        editorBuildSettings: {
+            ...editorBuildSettings,
+            scenes: annotatedEditorScenes,
+        },
         buildProfiles,
+        ...(missingScenes.length > 0 ? { missingScenes } : {}),
     };
+}
+
+function annotate_scene_existence(projectPath: string, scenes: SceneEntry[]): SceneEntry[] {
+    return scenes.map((scene) => ({
+        ...scene,
+        exists: fs.existsSync(path.join(projectPath, scene.path)),
+    }));
 }

@@ -6,14 +6,14 @@ import { cleanup } from '../src/cleanup';
 
 /**
  * Create a temp Unity project with a .unity-agentic/ directory populated
- * with typical files (config.json, guid-cache.json, doc-index.json).
+ * with typical files (config.json, guid-cache.json, doc-index.json, editor.json, editor.last.json).
  */
 function create_temp_project_with_agentic(files?: string[]): { dir: string; cleanup: () => void } {
     const dir = mkdtempSync(join(tmpdir(), 'cleanup-test-'));
     const agenticDir = join(dir, '.unity-agentic');
     mkdirSync(agenticDir, { recursive: true });
 
-    const defaultFiles = files || ['config.json', 'guid-cache.json', 'doc-index.json'];
+    const defaultFiles = files || ['config.json', 'guid-cache.json', 'doc-index.json', 'editor.json', 'editor.last.json'];
     for (const file of defaultFiles) {
         writeFileSync(join(agenticDir, file), '{}');
     }
@@ -57,8 +57,12 @@ describe('cleanup', () => {
         expect(result.success).toBe(true);
         expect(result.files_removed).toContain('guid-cache.json');
         expect(result.files_removed).toContain('doc-index.json');
+        expect(result.files_removed).toContain('editor.json');
+        expect(result.files_removed).toContain('editor.last.json');
         // config.json should still exist
         expect(existsSync(join(project.dir, '.unity-agentic', 'config.json'))).toBe(true);
+        expect(existsSync(join(project.dir, '.unity-agentic', 'editor.json'))).toBe(false);
+        expect(existsSync(join(project.dir, '.unity-agentic', 'editor.last.json'))).toBe(false);
     });
 
     it('should remove entire directory on full cleanup (all: true)', () => {

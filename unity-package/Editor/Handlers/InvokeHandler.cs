@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading.Tasks;
+using UnityAgenticTools.Refs;
+using UnityEditor;
 
 namespace UnityAgenticTools.Server
 {
@@ -36,10 +39,39 @@ namespace UnityAgenticTools.Server
                 return new Dictionary<string, object> { { "queued", true } };
             }
 
-            return await EditorWebSocketServer.RunOnMainThread(() =>
+            await WaitForEditorStabilityAsync(timeoutMs);
+
+            var result = await EditorWebSocketServer.RunOnMainThread(() =>
             {
                 return ExecuteInvoke(parameters);
             }, timeoutMs);
+
+            var resolved = await ResolveTaskResultAsync(result, timeoutMs);
+            if (JsonRpcParser.IsTransportSafeValue(resolved))
+            {
+                return resolved;
+            }
+
+            return await EditorWebSocketServer.RunOnMainThread(
+                () => JsonRpcParser.NormalizeValueForTransport(resolved),
+                timeoutMs);
+        }
+
+        private static async Task<object> ResolveTaskResultAsync(object invokeResult, int timeoutMs)
+        {
+            if (!(invokeResult is Dictionary<string, object> envelope))
+                return invokeResult;
+
+            if (!envelope.TryGetValue("result", out var resultObj) || !(resultObj is Task taskResult))
+                return envelope;
+
+            var completed = await Task.WhenAny(taskResult, Task.Delay(timeoutMs));
+            if (!ReferenceEquals(completed, taskResult))
+                throw new TimeoutException($"Timeout after {timeoutMs}ms waiting for async invoke result");
+
+            await taskResult;
+            envelope["result"] = UnwrapTaskResult(taskResult);
+            return envelope;
         }
 
         private static object ExecuteInvoke(Dictionary<string, object> parameters)
@@ -48,6 +80,8 @@ namespace UnityAgenticTools.Server
                 throw new ArgumentException("Missing required parameter: type");
             if (!parameters.TryGetValue("member", out var memberObj) || !(memberObj is string memberName))
                 throw new ArgumentException("Missing required parameter: member");
+
+            EnsureInvocationAllowed(typeName, memberName);
 
             var type = FindType(typeName);
             if (type == null)
@@ -62,7 +96,7 @@ namespace UnityAgenticTools.Server
                 if (!prop.CanWrite)
                     throw new ArgumentException($"Property is read-only: {typeName}.{memberName}");
                 var converted = Convert.ChangeType(setValue, prop.PropertyType);
-                prop.SetValue(null, converted);
+                TryInvoke(() => prop.SetValue(null, converted));
                 return (object)new Dictionary<string, object> { { "success", true } };
             }
 
@@ -77,7 +111,7 @@ namespace UnityAgenticTools.Server
             {
                 if (!propInfo.CanRead)
                     throw new ArgumentException($"Property is write-only: {typeName}.{memberName}");
-                var value = propInfo.GetValue(null);
+                var value = TryInvoke(() => propInfo.GetValue(null));
                 return (object)new Dictionary<string, object> { { "value", value } };
             }
 
@@ -89,9 +123,13 @@ namespace UnityAgenticTools.Server
             foreach (var m in allMethods)
             {
                 if (m.Name != memberName || m.IsGenericMethodDefinition) continue;
-                var paramCount = m.GetParameters().Length;
+                var mParams = m.GetParameters();
+                var paramCount = mParams.Length;
+                int minParams = 0;
+                foreach (var p in mParams) if (!p.IsOptional) minParams++;
+
                 availableArities.Add(paramCount);
-                if (paramCount == argsArr.Length)
+                if (argsArr.Length >= minParams && argsArr.Length <= paramCount)
                 {
                     methodInfo = m;
                     matchCount++;
@@ -120,16 +158,22 @@ namespace UnityAgenticTools.Server
                 }
                 else
                 {
-                    int count = Math.Min(argsArr.Length, methodParams.Length);
-                    invokeArgs = new object[count];
-                    for (int i = 0; i < count; i++)
+                    invokeArgs = new object[methodParams.Length];
+                    for (int i = 0; i < methodParams.Length; i++)
                     {
-                        invokeArgs[i] = methodParams[i].ParameterType == typeof(string)
-                            ? argsArr[i]
-                            : Convert.ChangeType(argsArr[i], methodParams[i].ParameterType);
+                        if (i < argsArr.Length)
+                        {
+                            invokeArgs[i] = methodParams[i].ParameterType == typeof(string)
+                                ? argsArr[i]
+                                : Convert.ChangeType(argsArr[i], methodParams[i].ParameterType);
+                        }
+                        else
+                        {
+                            invokeArgs[i] = methodParams[i].HasDefaultValue ? methodParams[i].DefaultValue : Type.Missing;
+                        }
                     }
                 }
-                var result = methodInfo.Invoke(null, invokeArgs);
+                var result = TryInvoke(() => methodInfo.Invoke(null, invokeArgs));
                 return (object)new Dictionary<string, object>
                 {
                     { "success", true },
@@ -138,6 +182,95 @@ namespace UnityAgenticTools.Server
             }
 
             throw new ArgumentException($"No public static property or method '{memberName}' found on {typeName}");
+        }
+
+        private static async Task WaitForEditorStabilityAsync(int timeoutMs)
+        {
+            var effectiveTimeoutMs = Math.Max(1, timeoutMs);
+            var isAlreadyStable = await EditorWebSocketServer.RunOnMainThread(
+                () => EditorWebSocketServer.IsEditorStable,
+                effectiveTimeoutMs);
+            if (isAlreadyStable)
+            {
+                return;
+            }
+
+            var waitResult = await WaitConditionRunner.WaitForCondition(
+                () => EditorWebSocketServer.IsEditorStable,
+                effectiveTimeoutMs,
+                "editor stability");
+
+            if (waitResult is Dictionary<string, object> result &&
+                result.TryGetValue("success", out var successObj) &&
+                successObj is bool success &&
+                success)
+            {
+                return;
+            }
+
+            if (waitResult is Dictionary<string, object> failure &&
+                failure.TryGetValue("error", out var errorObj) &&
+                errorObj is string errorMessage &&
+                !string.IsNullOrWhiteSpace(errorMessage))
+            {
+                throw new InvalidOperationException(errorMessage);
+            }
+
+            throw new InvalidOperationException("Timed out waiting for the editor to stabilize.");
+        }
+
+        private static void EnsureInvocationAllowed(string typeName, string memberName)
+        {
+            if (typeName == "UnityEditor.SceneManagement.EditorSceneManager" &&
+                memberName == "OpenScene" &&
+                EditorApplication.isPlayingOrWillChangePlaymode)
+            {
+                throw new InvalidOperationException(
+                    "UnityEditor.SceneManagement.EditorSceneManager.OpenScene is unavailable during play mode or a play-mode transition. Exit play mode before calling it.");
+            }
+        }
+
+        private static object UnwrapTaskResult(object value)
+        {
+            if (!(value is Task task))
+                return value;
+
+            task.GetAwaiter().GetResult();
+
+            var taskType = task.GetType();
+            if (taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>))
+            {
+                var resultProp = taskType.GetProperty("Result", BindingFlags.Public | BindingFlags.Instance);
+                return resultProp != null ? resultProp.GetValue(task) : null;
+            }
+
+            return null;
+        }
+
+        private static T TryInvoke<T>(Func<T> invoker)
+        {
+            try
+            {
+                return invoker();
+            }
+            catch (TargetInvocationException ex) when (ex.InnerException != null)
+            {
+                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                throw;
+            }
+        }
+
+        private static void TryInvoke(Action invoker)
+        {
+            try
+            {
+                invoker();
+            }
+            catch (TargetInvocationException ex) when (ex.InnerException != null)
+            {
+                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                throw;
+            }
         }
 
         private static Type FindType(string fullName)
