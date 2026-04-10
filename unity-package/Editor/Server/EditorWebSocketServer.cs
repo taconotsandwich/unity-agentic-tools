@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
+using UnityEditor.Callbacks;
 using UnityEngine;
 
 namespace UnityAgenticTools.Server
@@ -27,7 +28,11 @@ namespace UnityAgenticTools.Server
         private static readonly object _connectionsLock = new object();
 
         private const string CachedAutoStartKey = "UnityAgenticTools.CachedAutoStart";
+        private const string RestartAfterReloadKey = "UnityAgenticTools.RestartAfterReload";
+        private const string ManualStopKey = "UnityAgenticTools.ManualStop";
+        private const double HealthCheckIntervalSeconds = 1.0d;
 
+        private static double _nextHealthCheckAt;
         public static int Port => _port;
         public static bool IsRunning => _running;
         public static IReadOnlyList<WebSocketConnection> Connections
@@ -44,6 +49,7 @@ namespace UnityAgenticTools.Server
         static EditorWebSocketServer()
         {
             EditorApplication.update += PumpMainThreadQueue;
+            EditorApplication.update += MaintainServerHealth;
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
             AssemblyReloadEvents.afterAssemblyReload += OnAfterAssemblyReload;
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
@@ -52,12 +58,11 @@ namespace UnityAgenticTools.Server
             // during InitializeOnLoad (causes timeouts on heavy projects in Unity 6.4+)
             EditorApplication.delayCall += () =>
             {
-                if (_running) return;
                 var autoStart = EditorServerSettings.instance.autoStart;
-                EditorPrefs.SetBool(CachedAutoStartKey, autoStart);
+                SessionState.SetBool(CachedAutoStartKey, autoStart);
                 if (autoStart)
                 {
-                    Start();
+                    RequestServerRecovery();
                 }
             };
         }
@@ -67,8 +72,9 @@ namespace UnityAgenticTools.Server
             if (_running) return;
 
             _cts = new CancellationTokenSource();
+            SessionState.EraseBool(ManualStopKey);
 
-            for (int port = PortRangeStart; port <= PortRangeEnd; port++)
+            foreach (var port in GetCandidatePorts())
             {
                 try
                 {
@@ -92,6 +98,7 @@ namespace UnityAgenticTools.Server
             }
 
             LockfileManager.Write(_port, System.Diagnostics.Process.GetCurrentProcess().Id);
+            MessageDispatcher.Reset();
 
             _listenThread = new Thread(ListenLoop)
             {
@@ -100,12 +107,36 @@ namespace UnityAgenticTools.Server
             };
             _listenThread.Start();
 
+            _nextHealthCheckAt = 0;
+            SessionState.EraseBool(RestartAfterReloadKey);
+
             Debug.Log($"[UnityAgenticTools] WebSocket server started on port {_port}");
         }
 
         public static void Stop()
         {
-            if (!_running) return;
+            SessionState.SetBool(ManualStopKey, true);
+            StopInternal(clearRestartIntent: true, removeLockfile: true);
+        }
+
+        private static void StopForReload()
+        {
+            SessionState.EraseBool(ManualStopKey);
+            SessionState.SetBool(RestartAfterReloadKey, _running);
+            StopInternal(clearRestartIntent: false, removeLockfile: false);
+        }
+
+        private static void StopInternal(bool clearRestartIntent, bool removeLockfile)
+        {
+            if (!_running)
+            {
+                if (clearRestartIntent)
+                {
+                    SessionState.EraseBool(RestartAfterReloadKey);
+                }
+                return;
+            }
+
             _running = false;
 
             _cts?.Cancel();
@@ -121,7 +152,20 @@ namespace UnityAgenticTools.Server
                 _connections.Clear();
             }
 
-            LockfileManager.Remove();
+            if (removeLockfile)
+            {
+                LockfileManager.Remove();
+            }
+            _port = 0;
+            _listener = null;
+            _listenThread = null;
+            _cts?.Dispose();
+            _cts = null;
+
+            if (clearRestartIntent)
+            {
+                SessionState.EraseBool(RestartAfterReloadKey);
+            }
 
             Debug.Log("[UnityAgenticTools] WebSocket server stopped");
         }
@@ -343,8 +387,8 @@ namespace UnityAgenticTools.Server
         private static void OnBeforeAssemblyReload()
         {
             // Cache settings before reload while ScriptableSingleton is accessible
-            try { EditorPrefs.SetBool(CachedAutoStartKey, EditorServerSettings.instance.autoStart); } catch { }
-            Stop();
+            try { SessionState.SetBool(CachedAutoStartKey, EditorServerSettings.instance.autoStart); } catch { }
+            StopForReload();
         }
 
         private static void OnAfterAssemblyReload()
@@ -356,21 +400,126 @@ namespace UnityAgenticTools.Server
             EditorApplication.update += PumpMainThreadQueue;
             Debug.Log("[UnityAgenticTools] Re-registered main thread pump after assembly reload");
 
-            // Use cached autoStart value to avoid ScriptableSingleton asset load stall
-            // during assembly reload (causes timeouts on heavy projects in Unity 6.4+)
-            if (EditorPrefs.GetBool(CachedAutoStartKey, true))
-            {
-                EditorApplication.delayCall += Start;
-            }
+            MessageDispatcher.Reset();
+            RequestServerRecovery();
         }
 
         private static void OnPlayModeChanged(PlayModeStateChange state)
         {
-            if (state == PlayModeStateChange.EnteredPlayMode)
+            if (state == PlayModeStateChange.EnteredPlayMode ||
+                state == PlayModeStateChange.EnteredEditMode)
             {
                 EditorApplication.update -= PumpMainThreadQueue;
                 EditorApplication.update += PumpMainThreadQueue;
-                Debug.Log("[UnityAgenticTools] Re-registered main thread pump after entering play mode");
+                Debug.Log($"[UnityAgenticTools] Re-registered main thread pump after {state}");
+                RequestServerRecovery();
+            }
+        }
+
+        [DidReloadScripts]
+        private static void OnScriptsReloaded()
+        {
+            RequestServerRecovery();
+        }
+
+        private static void MaintainServerHealth()
+        {
+            if (!NeedsServerMaintenance())
+            {
+                return;
+            }
+
+            if (EditorApplication.timeSinceStartup < _nextHealthCheckAt)
+            {
+                return;
+            }
+
+            _nextHealthCheckAt = EditorApplication.timeSinceStartup + HealthCheckIntervalSeconds;
+            EnsureServerState();
+        }
+
+        private static void RequestServerRecovery()
+        {
+            _nextHealthCheckAt = 0;
+            EditorApplication.delayCall += EnsureServerState;
+        }
+
+        private static bool NeedsServerMaintenance()
+        {
+            if (_running)
+            {
+                return true;
+            }
+
+            if (SessionState.GetBool(RestartAfterReloadKey, false))
+            {
+                return true;
+            }
+
+            if (!SessionState.GetBool(CachedAutoStartKey, false))
+            {
+                return false;
+            }
+
+            return !SessionState.GetBool(ManualStopKey, false);
+        }
+
+        private static void EnsureServerState()
+        {
+            if (_running)
+            {
+                if (!LockfileManager.Exists())
+                {
+                    LockfileManager.Write(_port, System.Diagnostics.Process.GetCurrentProcess().Id);
+                    Debug.Log("[UnityAgenticTools] Rewrote missing editor lockfile");
+                }
+
+                return;
+            }
+
+            if (!NeedsServerMaintenance())
+            {
+                return;
+            }
+
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+            {
+                return;
+            }
+
+            Start();
+            if (_running)
+            {
+                return;
+            }
+        }
+
+        private static IEnumerable<int> GetCandidatePorts()
+        {
+            var preferredPort = GetPreferredPort();
+            if (preferredPort >= PortRangeStart && preferredPort <= PortRangeEnd)
+            {
+                yield return preferredPort;
+            }
+
+            for (int port = PortRangeStart; port <= PortRangeEnd; port++)
+            {
+                if (port != preferredPort)
+                {
+                    yield return port;
+                }
+            }
+        }
+
+        private static int GetPreferredPort()
+        {
+            try
+            {
+                return EditorServerSettings.instance.preferredPort;
+            }
+            catch
+            {
+                return PortRangeStart;
             }
         }
     }

@@ -91,7 +91,7 @@ namespace UnityAgenticTools.API
                 }
 
                 // uGUI path
-                var obj = EditorUtility.InstanceIDToObject(entry.InstanceId);
+                var obj = UnityObjectCompat.ResolveObject(entry.InstanceId);
                 if (obj == null)
                     throw new ArgumentException($"Ref '{refStr}' points to a destroyed element. Run ui-snapshot to refresh.");
 
@@ -563,7 +563,7 @@ namespace UnityAgenticTools.API
             var uiDocumentType = FindType("UnityEngine.UIElements.UIDocument");
             if (uiDocumentType == null) return null;
 
-            var documents = UnityEngine.Object.FindObjectsByType(uiDocumentType, FindObjectsSortMode.None);
+            var documents = UnityObjectCompat.FindObjects(uiDocumentType);
             foreach (var doc in documents)
             {
                 var comp = doc as Component;
@@ -669,7 +669,7 @@ namespace UnityAgenticTools.API
                 }
 
                 // For uGUI
-                var obj = EditorUtility.InstanceIDToObject(entry.InstanceId);
+                var obj = UnityObjectCompat.ResolveObject(entry.InstanceId);
                 if (obj == null)
                     throw new ArgumentException($"Ref '{refStr}' points to a destroyed element. Run ui-snapshot to refresh.");
 
@@ -810,7 +810,7 @@ namespace UnityAgenticTools.API
 
             if (entry.InstanceId == 0) return false; // UI Toolkit resolution would need re-walk
 
-            var obj = EditorUtility.InstanceIDToObject(entry.InstanceId);
+            var obj = UnityObjectCompat.ResolveObject(entry.InstanceId);
             if (obj == null) return false;
 
             if (obj is Component comp) return comp.gameObject.activeInHierarchy;

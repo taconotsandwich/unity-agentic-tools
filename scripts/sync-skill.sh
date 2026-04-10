@@ -1,19 +1,48 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SKILL_SRC="$(cd "$(dirname "$0")/.." && pwd)/skills/unity-agentic-tools"
-SKILL_DST="$HOME/.claude/skills/unity-agentic-tools"
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SKILLS_ROOT="$ROOT_DIR/skills"
+DEST_ROOT="$HOME/.claude/skills"
 
-if [ ! -d "$SKILL_SRC" ]; then
-    echo "Error: Source skill directory not found at $SKILL_SRC"
-    exit 1
-fi
+SKILLS=(
+    "unity-agentic-tools"
+    "unity-agentic-create"
+    "unity-agentic-update"
+    "unity-agentic-delete"
+    "unity-agentic-editor"
+)
 
-mkdir -p "$SKILL_DST/reference" "$SKILL_DST/scripts"
+for skill in "${SKILLS[@]}"; do
+    src="$SKILLS_ROOT/$skill"
+    dst="$DEST_ROOT/$skill"
 
-cp "$SKILL_SRC/SKILL.md" "$SKILL_DST/SKILL.md"
-cp "$SKILL_SRC"/reference/*.md "$SKILL_DST/reference/"
-cp "$SKILL_SRC"/scripts/*.mjs "$SKILL_DST/scripts/"
+    if [ ! -d "$src" ]; then
+        echo "Error: Source skill directory not found at $src"
+        exit 1
+    fi
 
-echo "Synced skill to $SKILL_DST"
-echo "  SKILL.md + $(ls "$SKILL_DST/reference/" | wc -l | tr -d ' ') reference files + $(ls "$SKILL_DST/scripts/" | wc -l | tr -d ' ') scripts"
+    mkdir -p "$dst" "$dst/reference" "$dst/scripts"
+
+    cp "$src/SKILL.md" "$dst/SKILL.md"
+
+    if [ -d "$src/reference" ]; then
+        cp "$src"/reference/*.md "$dst/reference/"
+    fi
+
+    if [ -d "$src/scripts" ]; then
+        cp "$src"/scripts/*.mjs "$dst/scripts/"
+    fi
+
+    ref_count=0
+    script_count=0
+    if [ -d "$dst/reference" ]; then
+        ref_count=$(ls "$dst/reference" | wc -l | tr -d ' ')
+    fi
+    if [ -d "$dst/scripts" ]; then
+        script_count=$(ls "$dst/scripts" | wc -l | tr -d ' ')
+    fi
+
+    echo "Synced $skill to $dst"
+    echo "  SKILL.md + ${ref_count} reference files + ${script_count} scripts"
+done

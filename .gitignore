@@ -53,6 +53,7 @@ firebase-debug.log
 *.orig
 *.rej
 *.test_orig
+unity-agentic-tools/.tmp/
 
 # Test samples
 test-samples/

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using UnityEditor;
 using UnityEngine;
+using UnityAgenticTools.Refs;
 
 namespace UnityAgenticTools.API
 {
@@ -112,7 +113,7 @@ namespace UnityAgenticTools.API
                 };
             }
 
-            var playerInputs = UnityEngine.Object.FindObjectsByType(playerInputType, FindObjectsSortMode.None);
+            var playerInputs = UnityObjectCompat.FindObjects(playerInputType);
             if (playerInputs.Length == 0)
             {
                 return new Dictionary<string, object>
@@ -227,7 +228,7 @@ namespace UnityAgenticTools.API
             var playerInputType = FindType("UnityEngine.InputSystem.PlayerInput");
             if (playerInputType == null) return actions;
 
-            var playerInputs = UnityEngine.Object.FindObjectsByType(playerInputType, FindObjectsSortMode.None);
+            var playerInputs = UnityObjectCompat.FindObjects(playerInputType);
             foreach (var pi in playerInputs)
             {
                 var actionsProperty = playerInputType.GetProperty("actions", BindingFlags.Public | BindingFlags.Instance);

@@ -28,7 +28,7 @@ namespace UnityAgenticTools.Refs
         {
             var results = new List<UIElementInfo>();
 
-            var eventSystem = UnityEngine.Object.FindFirstObjectByType<EventSystem>();
+            var eventSystem = UnityObjectCompat.FindAnyObject<EventSystem>();
             if (eventSystem == null)
             {
                 throw new InvalidOperationException(
@@ -36,7 +36,7 @@ namespace UnityAgenticTools.Refs
                     "Add one via GameObject > UI > EventSystem.");
             }
 
-            var canvases = UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None);
+            var canvases = UnityObjectCompat.FindObjects<Canvas>();
             foreach (var canvas in canvases)
             {
                 if (!canvas.gameObject.activeInHierarchy) continue;
@@ -67,7 +67,7 @@ namespace UnityAgenticTools.Refs
                     string type = GetSelectableType(selectable);
                     string label = GetSelectableLabel(selectable);
 
-                    currentRef = RefManager.RegisterUI(selectable.GetInstanceID());
+                    currentRef = RefManager.RegisterUI(UnityObjectCompat.GetObjectId(selectable));
                     results.Add(new UIElementInfo
                     {
                         Ref = currentRef,
@@ -85,7 +85,7 @@ namespace UnityAgenticTools.Refs
                 var scrollRect = child.GetComponent<ScrollRect>();
                 if (scrollRect != null && selectable == null)
                 {
-                    currentRef = RefManager.RegisterUI(scrollRect.GetInstanceID());
+                    currentRef = RefManager.RegisterUI(UnityObjectCompat.GetObjectId(scrollRect));
                     results.Add(new UIElementInfo
                     {
                         Ref = currentRef,
@@ -277,7 +277,7 @@ namespace UnityAgenticTools.Refs
             var uiDocumentType = FindType("UnityEngine.UIElements.UIDocument");
             if (uiDocumentType == null) return results;
 
-            var documents = UnityEngine.Object.FindObjectsByType(uiDocumentType, FindObjectsSortMode.None);
+            var documents = UnityObjectCompat.FindObjects(uiDocumentType);
             foreach (var doc in documents)
             {
                 var comp = doc as Component;
@@ -289,7 +289,7 @@ namespace UnityAgenticTools.Refs
                 var root = rootProp.GetValue(doc);
                 if (root == null) continue;
 
-                int docInstanceId = comp.GetInstanceID();
+                int docInstanceId = UnityObjectCompat.GetObjectId(comp);
                 WalkVisualElement(root, results, 0, null, docInstanceId, "");
             }
 

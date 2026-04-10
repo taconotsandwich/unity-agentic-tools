@@ -119,7 +119,7 @@ namespace UnityAgenticTools.Refs
             if (entry.InstanceId == 0)
                 throw new ArgumentException($"Ref '{refStr}' is a UI Toolkit element (no GameObject). Use ui-* commands instead.");
 
-            var obj = EditorUtility.InstanceIDToObject(entry.InstanceId);
+            var obj = UnityObjectCompat.ResolveObject(entry.InstanceId);
             if (obj == null)
                 throw new ArgumentException($"Ref '{refStr}' points to a destroyed object. Run hierarchy-snapshot or ui-snapshot to refresh refs.");
 

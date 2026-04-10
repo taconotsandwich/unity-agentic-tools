@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { resolve } from 'path';
-import { call_editor, stream_editor, read_editor_config, ping_editor } from './editor-client';
+import { call_editor, stream_editor, ping_editor, discover_editor_config } from './editor-client';
 import { add_package, remove_package } from './packages';
 import type { CallEditorOptions, RpcResponse } from './types';
 
@@ -164,7 +164,7 @@ export function build_editor_command(): Command {
         .description('Live Unity Editor bridge (play mode, console, assets, tests, UI, input)')
         .option('-p, --project <path>', 'Path to Unity project (defaults to cwd)')
         .option('--timeout <ms>', 'WebSocket timeout in ms', '10000')
-        .option('--port <n>', 'Override port (skip lockfile discovery)');
+        .option('--port <n>', 'Connect to a specific bridge port when autodiscovery cannot resolve the right editor');
 
     // ==================== Existing Commands (1-22) ====================
 
@@ -179,7 +179,7 @@ export function build_editor_command(): Command {
                 return;
             }
 
-            const config = read_editor_config(project_path);
+            const config = await discover_editor_config(project_path);
             if ('error' in config) {
                 console.log(JSON.stringify({ success: false, error: config.error }, null, 2));
                 process.exitCode = 1;
@@ -192,6 +192,7 @@ export function build_editor_command(): Command {
                 port: config.port,
                 pid: config.pid,
                 version: config.version,
+                source: config.source ?? (config.pid === 0 ? 'discovered' : 'lockfile'),
                 project_path,
                 bridge_reachable: ping.reachable,
                 ...(ping.reachable ? {} : { bridge_error: ping.error }),
