@@ -524,19 +524,342 @@ describeIfNative('CLI', () => {
             }
         });
 
-        it('should return ambiguity error for exact script-name collisions', () => {
+        it('should add a script by name from the type registry', () => {
             const temp_fixture = create_temp_fixture(
                 resolve(fixtures_dir, 'SampleScene.unity')
             );
-            const projectDir = mkdtempSync(join(tmpdir(), 'uat-strict-ambiguity-'));
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-registry-script-'));
+            const cacheDir = join(projectDir, '.unity-agentic');
+            const registryPath = join(cacheDir, 'type-registry.json');
+            const playerControllerGuid = 'cafebabe12345678cafebabe12345678';
+
+            mkdirSync(cacheDir, { recursive: true });
+            writeFileSync(registryPath, JSON.stringify([
+                {
+                    name: 'PlayerController',
+                    kind: 'class',
+                    namespace: null,
+                    filePath: 'Assets/Scripts/PlayerController.cs',
+                    guid: playerControllerGuid
+                }
+            ]), 'utf-8');
+
+            try {
+                const result = run_cli([
+                    'create', 'component',
+                    temp_fixture.temp_path,
+                    'Player',
+                    'PlayerController',
+                    '--project', projectDir,
+                    '--json'
+                ]);
+
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+                expect(json.script_guid).toBe(playerControllerGuid);
+                expect(json.script_path).toBe('Assets/Scripts/PlayerController.cs');
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should prefer a custom script when its short name collides with a non-component Unity type', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-audiomanager-script-'));
+            const cacheDir = join(projectDir, '.unity-agentic');
+            const registryPath = join(cacheDir, 'type-registry.json');
+            const audioManagerGuid = '22222222222222222222222222222222';
+
+            mkdirSync(cacheDir, { recursive: true });
+            writeFileSync(registryPath, JSON.stringify([
+                {
+                    name: 'AudioManager',
+                    kind: 'class',
+                    namespace: null,
+                    filePath: 'Assets/Scripts/AudioManager.cs',
+                    guid: audioManagerGuid
+                }
+            ]), 'utf-8');
+
+            try {
+                const result = run_cli([
+                    'create', 'component',
+                    temp_fixture.temp_path,
+                    'Player',
+                    'AudioManager',
+                    '--project', projectDir,
+                    '--json'
+                ]);
+
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+                expect(json.script_guid).toBe(audioManagerGuid);
+                expect(json.script_path).toBe('Assets/Scripts/AudioManager.cs');
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should not fall back to GUID cache when a type registry entry cannot be materialized', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-registry-primary-'));
+            const cacheDir = join(projectDir, '.unity-agentic');
+            const cachePath = join(cacheDir, 'guid-cache.json');
+            const registryPath = join(cacheDir, 'type-registry.json');
+            const staleGuid = '88888888888888888888888888888888';
+
+            mkdirSync(cacheDir, { recursive: true });
+            writeFileSync(cachePath, JSON.stringify({
+                [staleGuid]: 'Assets/Scripts/GameplayManagerRenamed.cs'
+            }), 'utf-8');
+            writeFileSync(registryPath, JSON.stringify([
+                {
+                    name: 'GameManager',
+                    kind: 'class',
+                    namespace: 'Gameplay',
+                    filePath: 'Assets/Scripts/GameplayManagerRenamed.cs',
+                    guid: null
+                }
+            ]), 'utf-8');
+
+            try {
+                try {
+                    run_cli([
+                        'create', 'component',
+                        temp_fixture.temp_path,
+                        'Player',
+                        'GameManager',
+                        '--project', projectDir,
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('Component or script not found: "GameManager"');
+                }
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should prefer the DLL registry entry when a matching source GUID exists', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-dll-registry-entry-'));
+            const cacheDir = join(projectDir, '.unity-agentic');
+            const registryPath = join(cacheDir, 'type-registry.json');
+            const scriptGuid = '12121212121212121212121212121212';
+            const dllPath = 'Library/ScriptAssemblies/UnityEngine.UIElementsModule.dll';
+
+            mkdirSync(cacheDir, { recursive: true });
+            writeFileSync(registryPath, JSON.stringify([
+                {
+                    name: 'UIDocument',
+                    kind: 'class',
+                    namespace: 'UnityEngine.UIElements',
+                    filePath: 'Packages/com.unity.ui/Runtime/UIElements/UIDocument.cs',
+                    guid: scriptGuid
+                },
+                {
+                    name: 'UIDocument',
+                    kind: 'class',
+                    namespace: 'UnityEngine.UIElements',
+                    filePath: dllPath,
+                    guid: null
+                }
+            ]), 'utf-8');
+
+            try {
+                const result = run_cli([
+                    'create', 'component',
+                    temp_fixture.temp_path,
+                    'Player',
+                    'UnityEngine.UIElements.UIDocument',
+                    '--project', projectDir,
+                    '--json'
+                ]);
+
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+                expect(json.script_guid).toBe(scriptGuid);
+                expect(json.script_path).toBe(dllPath);
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should not resolve script names from GUID cache when the type registry is missing', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-missing-registry-'));
             const cacheDir = join(projectDir, '.unity-agentic');
             const cachePath = join(cacheDir, 'guid-cache.json');
 
             mkdirSync(cacheDir, { recursive: true });
             writeFileSync(cachePath, JSON.stringify({
-                ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']: 'Assets/Scripts/Foo.cs',
-                ['bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb']: 'Packages/com.test/Foo.cs'
+                ['aaaa000000000000000000000000aaaa']: 'Assets/Scripts/ArenaCampStateMgr.cs',
+                ['bbbb000000000000000000000000bbbb']: 'Assets/Scripts/CampStateMgr.cs'
             }), 'utf-8');
+
+            try {
+                try {
+                    run_cli([
+                        'create', 'component',
+                        temp_fixture.temp_path,
+                        'Player',
+                        'CampStateMgr',
+                        '--project', projectDir,
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('Component or script not found: "CampStateMgr"');
+                    expect(json.error).toContain('Type registry not found');
+                }
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should resolve UnityEngine.Grid as the built-in component when Grid.cs exists', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-grid-namespaced-'));
+            const cacheDir = join(projectDir, '.unity-agentic');
+            const registryPath = join(cacheDir, 'type-registry.json');
+            const gridGuid = '55555555555555555555555555555555';
+
+            mkdirSync(cacheDir, { recursive: true });
+            writeFileSync(registryPath, JSON.stringify([
+                {
+                    name: 'Grid',
+                    kind: 'class',
+                    namespace: null,
+                    filePath: 'Assets/Scripts/Grid.cs',
+                    guid: gridGuid
+                }
+            ]), 'utf-8');
+
+            try {
+                const result = run_cli([
+                    'create', 'component',
+                    temp_fixture.temp_path,
+                    'Player',
+                    'UnityEngine.Grid',
+                    '--project', projectDir,
+                    '--json'
+                ]);
+
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+                expect(json.script_guid).toBeUndefined();
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should return ambiguity error for short names with multiple qualified type-registry matches', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-qualified-short-name-ambiguity-'));
+            const cacheDir = join(projectDir, '.unity-agentic');
+            const registryPath = join(cacheDir, 'type-registry.json');
+            const gameManagerGuid = '66666666666666666666666666666666';
+
+            mkdirSync(cacheDir, { recursive: true });
+            writeFileSync(registryPath, JSON.stringify([
+                {
+                    name: 'GameManager',
+                    kind: 'class',
+                    namespace: 'Unity',
+                    filePath: 'Assets/Scripts/GameManager.cs',
+                    guid: gameManagerGuid
+                },
+                {
+                    name: 'GameManager',
+                    kind: 'class',
+                    namespace: 'Alias',
+                    filePath: 'Assets/Scripts/GameManager.cs',
+                    guid: gameManagerGuid
+                }
+            ]), 'utf-8');
+
+            try {
+                try {
+                    run_cli([
+                        'create', 'component',
+                        temp_fixture.temp_path,
+                        'Player',
+                        'GameManager',
+                        '--project', projectDir,
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('Ambiguous type "GameManager"');
+                    expect(json.error).toContain('Unity.GameManager');
+                    expect(json.error).toContain('Alias.GameManager');
+                    expect(json.error).toContain('Specify which GameManager to use');
+                }
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should return ambiguity error for duplicate unqualified registry matches', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-strict-ambiguity-'));
+            const cacheDir = join(projectDir, '.unity-agentic');
+            const registryPath = join(cacheDir, 'type-registry.json');
+
+            mkdirSync(cacheDir, { recursive: true });
+            writeFileSync(registryPath, JSON.stringify([
+                {
+                    name: 'Foo',
+                    kind: 'class',
+                    namespace: null,
+                    filePath: 'Assets/Scripts/Foo.cs',
+                    guid: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+                },
+                {
+                    name: 'Foo',
+                    kind: 'class',
+                    namespace: null,
+                    filePath: 'Packages/com.test/Foo.cs',
+                    guid: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+                }
+            ]), 'utf-8');
 
             try {
                 try {
@@ -556,7 +879,9 @@ describeIfNative('CLI', () => {
                     const json = JSON.parse(execErr.stdout);
                     expect(json.success).toBe(false);
                     expect(json.error).toContain('Ambiguous type "Foo"');
-                    expect(json.error).toContain('exact script name matches');
+                    expect(json.error).toContain('found 2 matches');
+                    expect(json.error).toContain('Assets/Scripts/Foo.cs');
+                    expect(json.error).toContain('Packages/com.test/Foo.cs');
                 }
             } finally {
                 temp_fixture.cleanup_fn();
@@ -696,6 +1021,119 @@ describeIfNative('CLI', () => {
                 expect(json).toHaveProperty('success', true);
             } finally {
                 temp_fixture.cleanup_fn();
+            }
+        });
+
+        it('should remove a custom script by type name when it collides with a non-component Unity type', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-gamemanager-script-'));
+            const cacheDir = join(projectDir, '.unity-agentic');
+            const registryPath = join(cacheDir, 'type-registry.json');
+            const gameManagerGuid = '33333333333333333333333333333333';
+
+            mkdirSync(cacheDir, { recursive: true });
+            writeFileSync(registryPath, JSON.stringify([
+                {
+                    name: 'GameManager',
+                    kind: 'class',
+                    namespace: null,
+                    filePath: 'Assets/Scripts/GameManager.cs',
+                    guid: gameManagerGuid
+                }
+            ]), 'utf-8');
+
+            try {
+                const addResult = JSON.parse(run_cli([
+                    'create', 'component',
+                    temp_fixture.temp_path,
+                    'Player',
+                    'GameManager',
+                    '--project', projectDir,
+                    '--json'
+                ]));
+                expect(addResult.success).toBe(true);
+
+                const result = run_cli([
+                    'delete', 'component',
+                    temp_fixture.temp_path,
+                    'GameManager',
+                    '--on', 'Player',
+                    '--project', projectDir,
+                    '--json'
+                ]);
+                const json = JSON.parse(result);
+                expect(json).toHaveProperty('success', true);
+                expect(json.removed_file_id).toBe(String(addResult.component_id));
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should surface qualified short-name ambiguity when deleting by component type', () => {
+            const temp_fixture = create_temp_fixture(
+                resolve(fixtures_dir, 'SampleScene.unity')
+            );
+            const projectDir = mkdtempSync(join(tmpdir(), 'uat-delete-qualified-short-name-ambiguity-'));
+            const cacheDir = join(projectDir, '.unity-agentic');
+            const registryPath = join(cacheDir, 'type-registry.json');
+            const gameManagerGuid = '77777777777777777777777777777777';
+
+            mkdirSync(cacheDir, { recursive: true });
+            writeFileSync(registryPath, JSON.stringify([
+                {
+                    name: 'GameManager',
+                    kind: 'class',
+                    namespace: 'Unity',
+                    filePath: 'Assets/Scripts/GameManager.cs',
+                    guid: gameManagerGuid
+                },
+                {
+                    name: 'GameManager',
+                    kind: 'class',
+                    namespace: 'Alias',
+                    filePath: 'Assets/Scripts/GameManager.cs',
+                    guid: gameManagerGuid
+                }
+            ]), 'utf-8');
+
+            try {
+                const addResult = JSON.parse(run_cli([
+                    'create', 'component',
+                    temp_fixture.temp_path,
+                    'Player',
+                    'Unity.GameManager',
+                    '--project', projectDir,
+                    '--json'
+                ]));
+                expect(addResult.success).toBe(true);
+
+                try {
+                    run_cli([
+                        'delete', 'component',
+                        temp_fixture.temp_path,
+                        'GameManager',
+                        '--on', 'Player',
+                        '--project', projectDir,
+                        '--json'
+                    ]);
+                    throw new Error('Expected non-zero exit code');
+                } catch (err: unknown) {
+                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
+                    const execErr = err as { status: number; stdout: string };
+                    expect(execErr.status).toBe(1);
+                    const json = JSON.parse(execErr.stdout);
+                    expect(json.success).toBe(false);
+                    expect(json.error).toContain('Ambiguous type "GameManager"');
+                    expect(json.error).toContain('Unity.GameManager');
+                    expect(json.error).toContain('Alias.GameManager');
+                    expect(json.error).toContain('Specify which GameManager to use');
+                }
+            } finally {
+                temp_fixture.cleanup_fn();
+                rmSync(projectDir, { recursive: true, force: true });
             }
         });
     });

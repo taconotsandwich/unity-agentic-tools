@@ -98,11 +98,11 @@ export function setup(options: SetupOptions = {}): SetupResult {
   const nativeLocalPkgBuild = getNativeBuildLocalPackageGuidCache();
   if (nativeLocalPkgBuild) {
     try {
-      const localPkgCache = nativeLocalPkgBuild(projectPath) as GuidCache;
-      const localPkgCount = Object.keys(localPkgCache).length;
+      const localPackageCache = nativeLocalPkgBuild(projectPath) as GuidCache;
+      const localPkgCount = Object.keys(localPackageCache).length;
       if (localPkgCount > 0) {
         const localPkgCachePath = join(configPath, LOCAL_PACKAGE_CACHE_FILE);
-        writeFileSync(localPkgCachePath, JSON.stringify(localPkgCache, null, 2));
+        writeFileSync(localPkgCachePath, JSON.stringify(localPackageCache, null, 2));
       }
     } catch {
       // Local package cache is optional

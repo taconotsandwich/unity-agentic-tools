@@ -13,11 +13,17 @@ namespace UnityAgenticTools.Server
 
         public static string LockfilePath => _lockfilePath;
 
+        public static bool Exists()
+        {
+            var path = GetLockfilePath();
+            return !string.IsNullOrEmpty(path) && File.Exists(path);
+        }
+
         public static void Write(int port, int pid)
         {
             try
             {
-                var projectPath = Path.GetDirectoryName(Application.dataPath);
+                var projectPath = GetProjectPath();
                 var dirPath = Path.Combine(projectPath, DirName);
 
                 if (!Directory.Exists(dirPath))
@@ -40,9 +46,10 @@ namespace UnityAgenticTools.Server
         {
             try
             {
-                if (!string.IsNullOrEmpty(_lockfilePath) && File.Exists(_lockfilePath))
+                var path = GetLockfilePath();
+                if (!string.IsNullOrEmpty(path) && File.Exists(path))
                 {
-                    File.Delete(_lockfilePath);
+                    File.Delete(path);
                     _lockfilePath = null;
                 }
             }
@@ -50,6 +57,30 @@ namespace UnityAgenticTools.Server
             {
                 Debug.LogWarning($"[UnityAgenticTools] Failed to remove lockfile: {ex.Message}");
             }
+        }
+
+        private static string GetLockfilePath()
+        {
+            if (!string.IsNullOrEmpty(_lockfilePath))
+            {
+                return _lockfilePath;
+            }
+
+            try
+            {
+                var projectPath = GetProjectPath();
+                _lockfilePath = Path.Combine(projectPath, DirName, FileName);
+                return _lockfilePath;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string GetProjectPath()
+        {
+            return Path.GetDirectoryName(Application.dataPath);
         }
     }
 }

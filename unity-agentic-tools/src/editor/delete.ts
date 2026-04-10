@@ -10,7 +10,7 @@ import type {
 import { validate_file_path } from '../utils';
 import { UnityDocument } from './unity-document';
 import { UnityBlock } from './unity-block';
-import { get_class_id } from '../class-ids';
+import { get_component_class_id } from '../class-ids';
 import { resolveScriptGuid } from './shared';
 import { walk_project_files } from '../project-search';
 
@@ -44,32 +44,33 @@ function find_component_by_type(
 
   const candidates: UnityBlock[] = [];
 
-  // Try built-in class ID match
-  const class_id = get_class_id(type_name);
+  const explicit_class_id = type_name.includes('.') ? get_component_class_id(type_name) : null;
+  let resolved: { guid: string } | null = null;
+
+  if (explicit_class_id === null) {
+    try {
+      resolved = resolveScriptGuid(type_name, project_path, { strict_exact_name: true });
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  const class_id = resolved ? null : (explicit_class_id ?? (!type_name.includes('.') ? get_component_class_id(type_name) : null));
+
   if (class_id !== null) {
     for (const block of scope_blocks) {
       if (block.class_id === class_id) candidates.push(block);
     }
-  } else {
-    // Try MonoBehaviour script GUID match
-    let resolved: { guid: string } | null = null;
-    try {
-      resolved = resolveScriptGuid(type_name, project_path);
-    } catch { /* ambiguity errors already thrown */ }
-
-    if (resolved) {
-      for (const block of scope_blocks) {
-        if (block.class_id !== 114) continue;
-        const scriptMatch = block.raw.match(/m_Script:[ \t]*\{[^}]*guid:[ \t]*([a-f0-9]+)/);
-        if (scriptMatch && scriptMatch[1] === resolved.guid) {
-          candidates.push(block);
-        }
+  } else if (resolved) {
+    for (const block of scope_blocks) {
+      if (block.class_id !== 114) continue;
+      const scriptMatch = block.raw.match(/m_Script:[ \t]*\{[^}]*guid:[ \t]*([a-f0-9]+)/);
+      if (scriptMatch && scriptMatch[1] === resolved.guid) {
+        candidates.push(block);
       }
-    } else {
-      // Fallback: match MonoBehaviour blocks by type_name in raw YAML (for unknown scripts)
-      // This handles cases where type registry is unavailable
-      return { error: `Component type "${type_name}" not found. For MonoBehaviour scripts, ensure "unity-agentic-tools setup" has been run.` };
     }
+  } else {
+    return { error: `Component type "${type_name}" not found. For MonoBehaviour scripts, ensure the type registry has been built with "unity-agentic-tools setup".` };
   }
 
   if (candidates.length === 0) {

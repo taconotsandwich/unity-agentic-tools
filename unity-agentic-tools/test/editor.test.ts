@@ -1187,17 +1187,22 @@ describe('addComponent', () => {
         }
     });
 
-    it('should add script by name from GUID cache', () => {
-        // Create a mock Unity project with GUID cache
+    it('should add script by name from the type registry', () => {
         const projectDir = join(tmpdir(), 'test-unity-cache-project');
         const cacheDir = join(projectDir, '.unity-agentic');
-        const cachePath = join(cacheDir, 'guid-cache.json');
+        const registryPath = join(cacheDir, 'type-registry.json');
         const testGuid = 'cafebabe12345678cafebabe12345678';
 
         mkdirSync(cacheDir, { recursive: true });
-        writeFileSync(cachePath, JSON.stringify({
-            [testGuid]: 'Assets/Scripts/PlayerController.cs'
-        }));
+        writeFileSync(registryPath, JSON.stringify([
+            {
+                name: 'PlayerController',
+                kind: 'class',
+                namespace: null,
+                filePath: 'Assets/Scripts/PlayerController.cs',
+                guid: testGuid
+            }
+        ]));
 
         try {
             const result = addComponent({
@@ -1210,6 +1215,83 @@ describe('addComponent', () => {
             expect(result.success).toBe(true);
             expect(result.script_guid).toBe(testGuid);
             expect(result.script_path).toBe('Assets/Scripts/PlayerController.cs');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
+    it('should not fall back to GUID cache when a type registry entry cannot be materialized', () => {
+        const projectDir = join(tmpdir(), 'test-unity-registry-primary');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const cachePath = join(cacheDir, 'guid-cache.json');
+        const registryPath = join(cacheDir, 'type-registry.json');
+        const staleGuid = '88888888888888888888888888888888';
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(cachePath, JSON.stringify({
+            [staleGuid]: 'Assets/Scripts/GameplayManagerRenamed.cs'
+        }));
+        writeFileSync(registryPath, JSON.stringify([
+            {
+                name: 'GameManager',
+                kind: 'class',
+                namespace: 'Gameplay',
+                filePath: 'Assets/Scripts/GameplayManagerRenamed.cs',
+                guid: null
+            }
+        ]));
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'GameManager',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Component or script not found: "GameManager"');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
+    it('should prefer the DLL registry entry when a matching source GUID exists', () => {
+        const projectDir = join(tmpdir(), 'test-unity-dll-registry-entry');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const registryPath = join(cacheDir, 'type-registry.json');
+        const scriptGuid = '12121212121212121212121212121212';
+        const dllPath = 'Library/ScriptAssemblies/UnityEngine.UIElementsModule.dll';
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(registryPath, JSON.stringify([
+            {
+                name: 'UIDocument',
+                kind: 'class',
+                namespace: 'UnityEngine.UIElements',
+                filePath: 'Packages/com.unity.ui/Runtime/UIElements/UIDocument.cs',
+                guid: scriptGuid
+            },
+            {
+                name: 'UIDocument',
+                kind: 'class',
+                namespace: 'UnityEngine.UIElements',
+                filePath: dllPath,
+                guid: null
+            }
+        ]));
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'UnityEngine.UIElements.UIDocument',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.script_guid).toBe(scriptGuid);
+            expect(result.script_path).toBe(dllPath);
         } finally {
             rmSync(projectDir, { recursive: true, force: true });
         }
@@ -1246,16 +1328,181 @@ describe('addComponent', () => {
         }
     });
 
-    it('should return ambiguity error for exact script-name collisions in strict component resolver', () => {
-        const projectDir = join(tmpdir(), 'test-unity-strict-ambiguity');
+    it('should prefer a custom script when its short name collides with a non-component Unity type', () => {
+        const projectDir = join(tmpdir(), 'test-unity-audiomanager-script');
         const cacheDir = join(projectDir, '.unity-agentic');
-        const cachePath = join(cacheDir, 'guid-cache.json');
+        const registryPath = join(cacheDir, 'type-registry.json');
+        const audioManagerGuid = '22222222222222222222222222222222';
 
         mkdirSync(cacheDir, { recursive: true });
-        writeFileSync(cachePath, JSON.stringify({
-            ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']: 'Assets/Scripts/Foo.cs',
-            ['bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb']: 'Packages/com.test/Foo.cs'
-        }));
+        writeFileSync(registryPath, JSON.stringify([
+            {
+                name: 'AudioManager',
+                kind: 'class',
+                namespace: null,
+                filePath: 'Assets/Scripts/AudioManager.cs',
+                guid: audioManagerGuid
+            }
+        ]));
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'AudioManager',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.script_guid).toBe(audioManagerGuid);
+            expect(result.script_path).toBe('Assets/Scripts/AudioManager.cs');
+
+            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+            expect(content).toContain(`--- !u!114 &${result.component_id}`);
+            expect(content).toContain(`guid: ${audioManagerGuid}`);
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
+    it('should prefer an exact custom script over an unqualified built-in component name', () => {
+        const projectDir = join(tmpdir(), 'test-unity-grid-script');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const registryPath = join(cacheDir, 'type-registry.json');
+        const gridGuid = '44444444444444444444444444444444';
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(registryPath, JSON.stringify([
+            {
+                name: 'Grid',
+                kind: 'class',
+                namespace: null,
+                filePath: 'Assets/Scripts/Grid.cs',
+                guid: gridGuid
+            }
+        ]));
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'Grid',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.script_guid).toBe(gridGuid);
+            expect(result.script_path).toBe('Assets/Scripts/Grid.cs');
+
+            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+            expect(content).toContain(`--- !u!114 &${result.component_id}`);
+            expect(content).toContain(`guid: ${gridGuid}`);
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
+    it('should resolve a namespaced built-in component explicitly', () => {
+        const projectDir = join(tmpdir(), 'test-unity-grid-namespaced-built-in');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const registryPath = join(cacheDir, 'type-registry.json');
+        const gridGuid = '55555555555555555555555555555555';
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(registryPath, JSON.stringify([
+            {
+                name: 'Grid',
+                kind: 'class',
+                namespace: null,
+                filePath: 'Assets/Scripts/Grid.cs',
+                guid: gridGuid
+            }
+        ]));
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'UnityEngine.Grid',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.script_guid).toBeUndefined();
+            expect(result.script_path).toBeUndefined();
+
+            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+            expect(content).toContain(`--- !u!156049354 &${result.component_id}`);
+            expect(content).toContain('Grid:');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
+    it('should return ambiguity error for short names with multiple qualified type-registry matches', () => {
+        const projectDir = join(tmpdir(), 'test-unity-qualified-short-name-ambiguity');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const registryPath = join(cacheDir, 'type-registry.json');
+        const gameManagerGuid = '66666666666666666666666666666666';
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(registryPath, JSON.stringify([
+            {
+                name: 'GameManager',
+                kind: 'class',
+                namespace: 'Unity',
+                filePath: 'Assets/Scripts/GameManager.cs',
+                guid: gameManagerGuid
+            },
+            {
+                name: 'GameManager',
+                kind: 'class',
+                namespace: 'Alias',
+                filePath: 'Assets/Scripts/GameManager.cs',
+                guid: gameManagerGuid
+            }
+        ]));
+
+        try {
+            const result = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'GameManager',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Ambiguous type "GameManager"');
+            expect(result.error).toContain('Unity.GameManager');
+            expect(result.error).toContain('Alias.GameManager');
+            expect(result.error).toContain('Specify which GameManager to use');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
+    it('should return ambiguity error for duplicate unqualified registry matches in strict component resolver', () => {
+        const projectDir = join(tmpdir(), 'test-unity-strict-ambiguity');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const registryPath = join(cacheDir, 'type-registry.json');
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(registryPath, JSON.stringify([
+            {
+                name: 'Foo',
+                kind: 'class',
+                namespace: null,
+                filePath: 'Assets/Scripts/Foo.cs',
+                guid: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            },
+            {
+                name: 'Foo',
+                kind: 'class',
+                namespace: null,
+                filePath: 'Packages/com.test/Foo.cs',
+                guid: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+            }
+        ]));
 
         try {
             const result = addComponent({
@@ -1267,25 +1514,23 @@ describe('addComponent', () => {
 
             expect(result.success).toBe(false);
             expect(result.error).toContain('Ambiguous type "Foo"');
-            expect(result.error).toContain('exact script name matches');
+            expect(result.error).toContain('found 2 matches');
+            expect(result.error).toContain('Assets/Scripts/Foo.cs');
+            expect(result.error).toContain('Packages/com.test/Foo.cs');
         } finally {
             rmSync(projectDir, { recursive: true, force: true });
         }
     });
 
-    it('should prefer exact filename match over substring match in GUID cache', () => {
-        // Regression: "CampStateMgr" was resolving to "ArenaCampStateMgr.cs"
+    it('should not resolve script names from GUID cache when the type registry is missing', () => {
         const projectDir = join(tmpdir(), 'test-unity-exact-match');
         const cacheDir = join(projectDir, '.unity-agentic');
         const cachePath = join(cacheDir, 'guid-cache.json');
-        const arenaGuid = 'aaaa000000000000000000000000aaaa';
-        const exactGuid = 'bbbb000000000000000000000000bbbb';
 
         mkdirSync(cacheDir, { recursive: true });
         writeFileSync(cachePath, JSON.stringify({
-            // Substring match comes first in iteration order
-            [arenaGuid]: 'Assets/Scripts/ArenaCampStateMgr.cs',
-            [exactGuid]: 'Assets/Scripts/CampStateMgr.cs'
+            ['aaaa000000000000000000000000aaaa']: 'Assets/Scripts/ArenaCampStateMgr.cs',
+            ['bbbb000000000000000000000000bbbb']: 'Assets/Scripts/CampStateMgr.cs'
         }));
 
         try {
@@ -1296,9 +1541,9 @@ describe('addComponent', () => {
                 project_path: projectDir
             });
 
-            expect(result.success).toBe(true);
-            expect(result.script_guid).toBe(exactGuid);
-            expect(result.script_path).toBe('Assets/Scripts/CampStateMgr.cs');
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Component or script not found: "CampStateMgr"');
+            expect(result.error).toContain('Type registry not found');
         } finally {
             rmSync(projectDir, { recursive: true, force: true });
         }
@@ -1878,6 +2123,100 @@ describe('removeComponent', () => {
 
         const content = readFileSync(temp_fixture.temp_path, 'utf-8');
         expect(content).not.toContain(`--- !u!65 &${addResult.component_id}`);
+    });
+
+    it('should remove a custom script by name when it collides with a non-component Unity type', () => {
+        const projectDir = join(tmpdir(), 'test-unity-gamemanager-script');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const registryPath = join(cacheDir, 'type-registry.json');
+        const gameManagerGuid = '33333333333333333333333333333333';
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(registryPath, JSON.stringify([
+            {
+                name: 'GameManager',
+                kind: 'class',
+                namespace: null,
+                filePath: 'Assets/Scripts/GameManager.cs',
+                guid: gameManagerGuid
+            }
+        ]));
+
+        try {
+            const addResult = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'GameManager',
+                project_path: projectDir
+            });
+            expect(addResult.success).toBe(true);
+
+            const result = removeComponent({
+                file_path: temp_fixture.temp_path,
+                file_id: 'GameManager',
+                game_object: 'Player',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(true);
+            expect(result.removed_file_id).toBe(String(addResult.component_id));
+            expect(result.removed_class_id).toBe(114);
+
+            const content = readFileSync(temp_fixture.temp_path, 'utf-8');
+            expect(content).not.toContain(`--- !u!114 &${addResult.component_id}`);
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
+
+    it('should surface qualified short-name ambiguity when removing by component type', () => {
+        const projectDir = join(tmpdir(), 'test-unity-delete-qualified-short-name-ambiguity');
+        const cacheDir = join(projectDir, '.unity-agentic');
+        const registryPath = join(cacheDir, 'type-registry.json');
+        const gameManagerGuid = '77777777777777777777777777777777';
+
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(registryPath, JSON.stringify([
+            {
+                name: 'GameManager',
+                kind: 'class',
+                namespace: 'Unity',
+                filePath: 'Assets/Scripts/GameManager.cs',
+                guid: gameManagerGuid
+            },
+            {
+                name: 'GameManager',
+                kind: 'class',
+                namespace: 'Alias',
+                filePath: 'Assets/Scripts/GameManager.cs',
+                guid: gameManagerGuid
+            }
+        ]));
+
+        try {
+            const addResult = addComponent({
+                file_path: temp_fixture.temp_path,
+                game_object_name: 'Player',
+                component_type: 'Unity.GameManager',
+                project_path: projectDir
+            });
+            expect(addResult.success).toBe(true);
+
+            const result = removeComponent({
+                file_path: temp_fixture.temp_path,
+                file_id: 'GameManager',
+                game_object: 'Player',
+                project_path: projectDir
+            });
+
+            expect(result.success).toBe(false);
+            expect(result.error).toContain('Ambiguous type "GameManager"');
+            expect(result.error).toContain('Unity.GameManager');
+            expect(result.error).toContain('Alias.GameManager');
+            expect(result.error).toContain('Specify which GameManager to use');
+        } finally {
+            rmSync(projectDir, { recursive: true, force: true });
+        }
     });
 
     it('should reject Transform removal', () => {
