@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using UnityEditor;
 using UnityEngine;
 
 namespace UnityAgenticTools.Server
@@ -320,6 +321,7 @@ namespace UnityAgenticTools.Server
             if (value is long l) return l.ToString();
             if (value is float f) return f.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (value is double d) return d.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (value is UnityEngine.Object unityObject) return SerializeUnityObject(unityObject);
             if (value is Dictionary<string, object> dict)
             {
                 var entries = dict.Select(kvp => $"\"{EscapeString(kvp.Key)}\":{SerializeValue(kvp.Value)}");
@@ -341,6 +343,73 @@ namespace UnityAgenticTools.Server
             }
 
             return SerializeObject(value);
+        }
+
+        private static string SerializeUnityObject(UnityEngine.Object unityObject)
+        {
+            if (unityObject == null)
+            {
+                return "null";
+            }
+
+            var payload = new Dictionary<string, object>
+            {
+                { "type", unityObject.GetType().Name },
+                { "name", string.IsNullOrEmpty(unityObject.name) ? unityObject.GetType().Name : unityObject.name },
+                { "instanceId", unityObject.GetInstanceID() },
+            };
+
+            if (unityObject is GameObject gameObject)
+            {
+                payload["path"] = GetHierarchyPath(gameObject.transform);
+                payload["activeSelf"] = gameObject.activeSelf;
+                payload["activeInHierarchy"] = gameObject.activeInHierarchy;
+
+                if (gameObject.scene.IsValid())
+                {
+                    payload["scene"] = gameObject.scene.name;
+                    payload["scenePath"] = gameObject.scene.path;
+                }
+            }
+            else if (unityObject is Component component)
+            {
+                payload["gameObjectName"] = component.gameObject.name;
+                payload["gameObjectInstanceId"] = component.gameObject.GetInstanceID();
+                payload["path"] = GetHierarchyPath(component.transform);
+
+                if (component.gameObject.scene.IsValid())
+                {
+                    payload["scene"] = component.gameObject.scene.name;
+                    payload["scenePath"] = component.gameObject.scene.path;
+                }
+            }
+
+            var assetPath = AssetDatabase.GetAssetPath(unityObject);
+            if (!string.IsNullOrEmpty(assetPath))
+            {
+                payload["assetPath"] = assetPath;
+            }
+
+            return SerializeValue(payload);
+        }
+
+        private static string GetHierarchyPath(Transform transform)
+        {
+            if (transform == null)
+            {
+                return string.Empty;
+            }
+
+            var names = new List<string>();
+            var current = transform;
+            while (current != null)
+            {
+                names.Add(current.name);
+                current = current.parent;
+            }
+
+            names.Reverse();
+            return string.Join("/", names);
         }
 
         private static string SerializeObject(object obj)

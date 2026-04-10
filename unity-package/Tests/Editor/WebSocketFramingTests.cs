@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using UnityAgenticTools.Server;
+using UnityEngine;
 
 namespace UnityAgenticTools.Tests
 {
@@ -114,6 +115,45 @@ namespace UnityAgenticTools.Tests
             var request = JsonRpcParser.ParseRequest(json);
 
             Assert.AreEqual(25, request.Params["count"]);
+        }
+
+        [Test]
+        public void JsonRpcParser_SerializeValue_SerializesGameObjectSafely()
+        {
+            var gameObject = new GameObject("AppRoot");
+            try
+            {
+                var result = JsonRpcParser.SerializeValue(gameObject);
+                Assert.That(result, Does.Contain("\"name\":\"AppRoot\""));
+                Assert.That(result, Does.Contain("\"type\":\"GameObject\""));
+                Assert.That(result, Does.Contain("\"path\":\"AppRoot\""));
+                Assert.That(result, Does.Contain("\"instanceId\":"));
+                Assert.That(result, Does.Not.Contain("\"transform\""));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void JsonRpcParser_SerializeValue_SerializesComponentSafely()
+        {
+            var gameObject = new GameObject("AppRoot");
+            var component = gameObject.AddComponent<BoxCollider>();
+            try
+            {
+                var result = JsonRpcParser.SerializeValue(component);
+                Assert.That(result, Does.Contain("\"name\":\"BoxCollider\""));
+                Assert.That(result, Does.Contain("\"type\":\"BoxCollider\""));
+                Assert.That(result, Does.Contain("\"gameObjectName\":\"AppRoot\""));
+                Assert.That(result, Does.Contain("\"path\":\"AppRoot\""));
+                Assert.That(result, Does.Not.Contain("\"gameObject\":{"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
         }
     }
 }
