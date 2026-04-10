@@ -155,5 +155,33 @@ namespace UnityAgenticTools.Tests
                 Object.DestroyImmediate(gameObject);
             }
         }
+
+        [Test]
+        public void JsonRpcParser_NormalizeValueForTransport_AllowsWorkerThreadSerialization()
+        {
+            var gameObject = new GameObject("AppRoot");
+            try
+            {
+                var envelope = new System.Collections.Generic.Dictionary<string, object>
+                {
+                    { "success", true },
+                    { "result", gameObject }
+                };
+
+                var normalized = JsonRpcParser.NormalizeValueForTransport(envelope);
+                var result = System.Threading.Tasks.Task.Run(() => JsonRpcParser.SerializeValue(normalized))
+                    .GetAwaiter()
+                    .GetResult();
+
+                Assert.That(result, Does.Contain("\"success\":true"));
+                Assert.That(result, Does.Contain("\"type\":\"GameObject\""));
+                Assert.That(result, Does.Contain("\"name\":\"AppRoot\""));
+                Assert.That(result, Does.Contain("\"path\":\"AppRoot\""));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
+        }
     }
 }

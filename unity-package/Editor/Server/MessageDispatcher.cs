@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -71,7 +72,9 @@ namespace UnityAgenticTools.Server
                 }
 
                 var result = await handler.HandleAsync(request.Method, request.Params);
-                return JsonRpcParser.BuildResult(id, result);
+                var transportResult = await EditorWebSocketServer.RunOnMainThread(
+                    () => JsonRpcParser.NormalizeValueForTransport(result));
+                return JsonRpcParser.BuildResult(id, transportResult);
             }
             catch (Exception ex)
             {
@@ -152,7 +155,7 @@ namespace UnityAgenticTools.Server
 
         public static string BuildNotification(string method, object data)
         {
-            var paramsJson = SerializeValue(data);
+            var paramsJson = SerializeValue(NormalizeValueForTransport(data));
             return $"{{\"jsonrpc\":\"2.0\",\"method\":\"{EscapeString(method)}\",\"params\":{paramsJson}}}";
         }
 
@@ -345,11 +348,93 @@ namespace UnityAgenticTools.Server
             return SerializeObject(value);
         }
 
+        public static object NormalizeValueForTransport(object value)
+        {
+            return NormalizeValueForTransport(value, 0);
+        }
+
+        private static object NormalizeValueForTransport(object value, int depth)
+        {
+            if (depth > 8)
+            {
+                return value == null ? null : value.ToString();
+            }
+
+            if (value == null ||
+                value is string ||
+                value is bool ||
+                value is int ||
+                value is long ||
+                value is float ||
+                value is double)
+            {
+                return value;
+            }
+
+            if (value is Enum enumValue)
+            {
+                return enumValue.ToString();
+            }
+
+            if (value is UnityEngine.Object unityObject)
+            {
+                return BuildUnityObjectPayload(unityObject);
+            }
+
+            if (value is Dictionary<string, object> typedDict)
+            {
+                var normalized = new Dictionary<string, object>();
+                foreach (var kvp in typedDict)
+                {
+                    normalized[kvp.Key] = NormalizeValueForTransport(kvp.Value, depth + 1);
+                }
+                return normalized;
+            }
+
+            if (value is IDictionary dictionary)
+            {
+                var normalized = new Dictionary<string, object>();
+                foreach (DictionaryEntry entry in dictionary)
+                {
+                    var key = entry.Key == null ? "null" : entry.Key.ToString();
+                    normalized[key] = NormalizeValueForTransport(entry.Value, depth + 1);
+                }
+                return normalized;
+            }
+
+            if (value is Array array)
+            {
+                var normalized = new List<object>();
+                foreach (var item in array)
+                {
+                    normalized.Add(NormalizeValueForTransport(item, depth + 1));
+                }
+                return normalized;
+            }
+
+            if (value is IEnumerable enumerable)
+            {
+                var normalized = new List<object>();
+                foreach (var item in enumerable)
+                {
+                    normalized.Add(NormalizeValueForTransport(item, depth + 1));
+                }
+                return normalized;
+            }
+
+            return NormalizeObject(value, depth);
+        }
+
         private static string SerializeUnityObject(UnityEngine.Object unityObject)
+        {
+            return SerializeValue(BuildUnityObjectPayload(unityObject));
+        }
+
+        private static Dictionary<string, object> BuildUnityObjectPayload(UnityEngine.Object unityObject)
         {
             if (unityObject == null)
             {
-                return "null";
+                return null;
             }
 
             var payload = new Dictionary<string, object>
@@ -390,7 +475,7 @@ namespace UnityAgenticTools.Server
                 payload["assetPath"] = assetPath;
             }
 
-            return SerializeValue(payload);
+            return payload;
         }
 
         private static string GetHierarchyPath(Transform transform)
@@ -414,30 +499,35 @@ namespace UnityAgenticTools.Server
 
         private static string SerializeObject(object obj)
         {
+            return SerializeValue(NormalizeObject(obj, 0));
+        }
+
+        private static Dictionary<string, object> NormalizeObject(object obj, int depth)
+        {
             var type = obj.GetType();
             var fields = type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
             var props = type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
 
-            var entries = new List<string>();
+            var normalized = new Dictionary<string, object>();
 
             foreach (var field in fields)
             {
                 var val = field.GetValue(obj);
-                entries.Add($"\"{EscapeString(field.Name)}\":{SerializeValue(val)}");
+                normalized[field.Name] = NormalizeValueForTransport(val, depth + 1);
             }
 
             foreach (var prop in props)
             {
-                if (!prop.CanRead) continue;
+                if (!prop.CanRead || prop.GetIndexParameters().Length > 0) continue;
                 try
                 {
                     var val = prop.GetValue(obj);
-                    entries.Add($"\"{EscapeString(prop.Name)}\":{SerializeValue(val)}");
+                    normalized[prop.Name] = NormalizeValueForTransport(val, depth + 1);
                 }
                 catch { }
             }
 
-            return "{" + string.Join(",", entries) + "}";
+            return normalized;
         }
 
         private static string EscapeString(string s)
