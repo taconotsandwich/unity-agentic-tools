@@ -1,7 +1,6 @@
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { ensure_parent_dir } from '../utils';
 import * as path from 'path';
-import { load_guid_cache } from '../guid-cache';
 import type {
     CreateGameObjectOptions, CreateGameObjectResult,
     AddComponentOptions, AddComponentResult,
@@ -13,7 +12,7 @@ import type {
     CopyComponentOptions, CopyComponentResult,
     CSharpFieldRef,
 } from '../types';
-import { get_class_id, UNITY_CLASS_IDS } from '../class-ids';
+import { get_addable_component_class_id, get_class_id, UNITY_CLASS_IDS } from '../class-ids';
 import { generateGuid, validate_name, validate_file_path, find_unity_project_root } from '../utils';
 import { extractGuidFromMeta, resolve_script_with_fields, resolve_source_prefab, build_type_lookup } from './shared';
 import { generate_field_yaml, json_value_to_yaml_lines } from './yaml-fields';
@@ -609,6 +608,18 @@ function appendToAddedComponents(
   newComponentId: string,
 ): { success: boolean; changed?: boolean; error?: string } {
   return appendToAddedOverrideArray(doc, piId, 'm_AddedComponents', targetSourceRef, newComponentId);
+}
+
+function createPrefabRootOrderOverride(
+  rootTransformFileId: string,
+  sourceGuid: string,
+  rootOrder: number,
+): string {
+  return `    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_RootOrder
+      value: ${rootOrder}
+      objectReference: {fileID: 0}
+`;
 }
 
 /** Full YAML templates for built-in components that are sensitive to missing fields. */
@@ -1660,6 +1671,7 @@ export function createPrefabInstance(options: CreatePrefabInstanceOptions): Crea
     const prefabInstanceId = doc.generate_file_id();
     const strippedGoId = doc.generate_file_id();
     const strippedTransformId = doc.generate_file_id();
+    const rootOrder = doc.calculate_root_order(parentTransformIdStr);
 
     const instanceName = name || path.basename(prefab_path, '.prefab');
     const pos = position ?? { x: 0, y: 0, z: 0 };
@@ -1667,17 +1679,7 @@ export function createPrefabInstance(options: CreatePrefabInstanceOptions): Crea
     const rootGoFileId = rootInfo.game_object.file_id;
     const rootTransformFileId = rootInfo.transform.file_id;
 
-    const yaml = `--- !u!1 &${strippedGoId} stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: ${rootGoFileId}, guid: ${sourceGuid}, type: 3}
-  m_PrefabInstance: {fileID: ${prefabInstanceId}}
-  m_PrefabAsset: {fileID: 0}
---- !u!4 &${strippedTransformId} stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
-  m_PrefabInstance: {fileID: ${prefabInstanceId}}
-  m_PrefabAsset: {fileID: 0}
---- !u!1001 &${prefabInstanceId}
+    const yaml = `--- !u!1001 &${prefabInstanceId}
 PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
@@ -1717,7 +1719,7 @@ PrefabInstance:
       propertyPath: m_LocalRotation.z
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+${createPrefabRootOrderOverride(rootTransformFileId, sourceGuid, rootOrder)}    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
       propertyPath: m_LocalEulerAnglesHint.x
       value: 0
       objectReference: {fileID: 0}
@@ -1734,12 +1736,24 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: ${sourceGuid}, type: 3}
+--- !u!4 &${strippedTransformId} stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+  m_PrefabInstance: {fileID: ${prefabInstanceId}}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &${strippedGoId} stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: ${rootGoFileId}, guid: ${sourceGuid}, type: 3}
+  m_PrefabInstance: {fileID: ${prefabInstanceId}}
+  m_PrefabAsset: {fileID: 0}
 `;
 
     doc.append_raw(yaml);
 
     if (parentTransformIdStr !== '0') {
         doc.add_child_to_parent(parentTransformIdStr, strippedTransformId);
+    } else {
+        doc.add_root_to_scene_roots(strippedTransformId);
     }
 
     try {
@@ -1787,11 +1801,8 @@ export function createScriptableObject(options: CreateScriptableObjectOptions): 
   if (!resolved) {
     const hints: string[] = [];
     if (project_path) {
-      const cacheExists = load_guid_cache(project_path) !== null;
       const registryExists = existsSync(path.join(project_path, '.unity-agentic', 'type-registry.json'));
-      if (!cacheExists && !registryExists) {
-        hints.push(`No GUID cache or type registry found at ${path.join(project_path, '.unity-agentic/')}. Run "unity-agentic-tools setup" first.`);
-      } else if (!registryExists) {
+      if (!registryExists) {
         hints.push('Type registry not found. Re-run "unity-agentic-tools setup" to rebuild.');
       }
     } else {
@@ -2149,10 +2160,18 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
   }
   const gameObjectId = gameObjectIdStr;
 
-  // Check if it's a known Unity built-in component
-  const classId = get_class_id(component_type);
+  const shortComponentType = component_type.includes('.')
+    ? component_type.slice(component_type.lastIndexOf('.') + 1)
+    : component_type;
+  const explicitBuiltInClassId = component_type.includes('.')
+    ? get_addable_component_class_id(component_type)
+    : null;
+  const fallbackBuiltInClassId = component_type.includes('.')
+    ? null
+    : get_addable_component_class_id(component_type);
+  const serializedTypeId = get_class_id(component_type) ?? get_class_id(shortComponentType);
 
-  if (classId === 114 && component_type.toLowerCase() === 'monobehaviour') {
+  if (serializedTypeId === 114 && shortComponentType.toLowerCase() === 'monobehaviour') {
     return {
       success: false,
       file_path,
@@ -2160,7 +2179,34 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
     };
   }
 
-  // Check for existing component of the same type (warn but allow — some like AudioSource can be duplicated)
+  // Generate unique component ID
+  const componentIdStr = doc.generate_file_id();
+  const componentId = componentIdStr;
+
+  let componentYAML: string;
+  let scriptGuid: string | undefined;
+  let scriptPath: string | undefined;
+  let extractionError: string | undefined;
+  let classId = explicitBuiltInClassId;
+  let resolved: ReturnType<typeof resolve_script_with_fields> = null;
+
+  if (classId === null) {
+    try {
+      resolved = resolve_script_with_fields(component_type, project_path, { strict_exact_name: true });
+    } catch (e) {
+      return {
+        success: false,
+        file_path,
+        error: e instanceof Error ? e.message : String(e),
+      };
+    }
+  }
+
+  if (!resolved && classId === null) {
+    classId = fallbackBuiltInClassId;
+  }
+
+  // Check for existing built-in component of the same type (warn but allow — some like AudioSource can be duplicated)
   let duplicateWarning: string | undefined;
   const goBlock = doc.find_by_file_id(gameObjectIdStr);
   if (goBlock && classId !== null) {
@@ -2174,43 +2220,21 @@ export function addComponent(options: AddComponentOptions): AddComponentResult {
     }
   }
 
-  // Generate unique component ID
-  const componentIdStr = doc.generate_file_id();
-  const componentId = componentIdStr;
-
-  let componentYAML: string;
-  let scriptGuid: string | undefined;
-  let scriptPath: string | undefined;
-  let extractionError: string | undefined;
   if (classId !== null) {
     // Get the canonical component name from the class ID mapping
     const componentName = UNITY_CLASS_IDS[classId] || component_type;
     componentYAML = createGenericComponentYAML(componentName, classId, componentId, gameObjectId);
   } else {
-    // Treat as custom script -- resolve with field extraction
-    let resolved: ReturnType<typeof resolve_script_with_fields>;
-    try {
-      resolved = resolve_script_with_fields(component_type, project_path, { strict_exact_name: true });
-    } catch (e) {
-      return {
-        success: false,
-        file_path,
-        error: e instanceof Error ? e.message : String(e),
-      };
-    }
     if (!resolved) {
       const hints: string[] = [];
+      if (serializedTypeId !== null) {
+        hints.push(`"${component_type}" matches Unity serialized type class ${serializedTypeId}, but that type is not an addable GameObject component.`);
+      }
       if (project_path) {
         const agenticDir = path.join(project_path, '.unity-agentic');
-        const cacheExists = load_guid_cache(project_path) !== null;
         const registryExists = existsSync(path.join(agenticDir, 'type-registry.json'));
-        const pkgCacheExists = existsSync(path.join(agenticDir, 'package-cache.json'));
-        if (!cacheExists && !registryExists) {
-          hints.push(`No GUID cache or type registry found at ${agenticDir}/. Run "unity-agentic-tools setup" first.`);
-        } else if (!registryExists) {
+        if (!registryExists) {
           hints.push('Type registry not found. Re-run "unity-agentic-tools setup" to rebuild.');
-        } else if (!pkgCacheExists) {
-          hints.push('Package cache not found. Re-run "unity-agentic-tools setup" to index package scripts.');
         }
       } else {
         hints.push('No Unity project detected. Provide --project or run from inside a Unity project directory.');

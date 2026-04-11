@@ -16,24 +16,6 @@ program
     .option('--project-root <path>', 'Unity project root (auto-detected if omitted)')
     .option('--storage-path <path>', 'Index storage file path (auto-resolved if omitted)');
 
-/** Extract a human-readable title from a doc file path */
-function extract_doc_title(filePath: string | undefined): string {
-    if (!filePath) return 'Unknown';
-    const filename = filePath.split('/').pop()?.replace(/\.[^.]+$/, '') ?? 'Unknown';
-    // Convert filenames like "class-Rigidbody" or "Rigidbody-velocity" to readable form
-    return filename.replace(/^class-/, '').replace(/-/g, '.');
-}
-
-/** Extract relative source path (ScriptReference/X.html or Manual/X.html) */
-function extract_relative_source(filePath: string | undefined): string | undefined {
-    if (!filePath) return undefined;
-    // Match common Unity doc path segments
-    const match = filePath.match(/((?:ScriptReference|Manual|Documentation)\/[^/]*\.html?)$/i);
-    if (match) return match[1];
-    // Fallback: just the filename
-    return filePath.split('/').pop();
-}
-
 /** Resolve storage path from CLI options. */
 function get_storage_path(opts: { projectRoot?: string; storagePath?: string }): string {
     if (opts.storagePath) return opts.storagePath;
@@ -64,8 +46,7 @@ async function auto_index(storage: DocStorage, projectRoot: string | null): Prom
 program
     .command('search <query>')
     .description('Search documentation (auto-discovers and indexes on first use)')
-    .option('-j, --json', 'Output as JSON')
-    .action(async (query, options) => {
+    .action(async (query) => {
         const globalOpts = program.opts();
         const storagePath = get_storage_path(globalOpts);
         const projectRoot = globalOpts.projectRoot || find_project_root() || null;
@@ -77,11 +58,7 @@ program
         await auto_index(storage, projectRoot);
 
         if (storage.chunk_count() === 0) {
-            const output = {
-                results: [],
-                message: 'No documentation indexed. Install Unity docs via Unity Hub > Installs > Modules > Documentation, or run: unity-agentic-tools setup --index-docs',
-            };
-            console.log(JSON.stringify(output, null, 2));
+            console.log(JSON.stringify({ results: [] }, null, 2));
             return;
         }
 
@@ -94,27 +71,9 @@ program
             keyword_weight: 0.4
         });
 
-        if (options.json) {
-            console.log(JSON.stringify(results, null, 2));
-            return;
-        }
-
-        // Markdown output
-        const count = results.results.length;
-        console.log(`# Unity Docs: "${query}" (${count} result${count !== 1 ? 's' : ''})\n`);
-
-        for (const result of results.results) {
-            const meta = result.metadata as Record<string, string | undefined>;
-            const title = meta?.section || meta?.unity_class || extract_doc_title(meta?.file_path);
-            const source = extract_relative_source(meta?.file_path);
-
-            console.log(`## ${title}\n`);
-            console.log(result.content);
-            if (source) {
-                console.log(`\n*Source: ${source}*`);
-            }
-            console.log('\n---\n');
-        }
+        console.log(JSON.stringify({
+            results: results.results.map(({ metadata: _metadata, ...entry }) => entry),
+        }, null, 2));
     });
 
 program

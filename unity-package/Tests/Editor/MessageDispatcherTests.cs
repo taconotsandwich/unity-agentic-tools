@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using NUnit.Framework;
-using UnityAgenticTools.Server;
+using UnityAgenticTools.Bridge.Transport;
 
 namespace UnityAgenticTools.Tests
 {

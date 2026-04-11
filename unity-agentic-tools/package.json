@@ -1,7 +1,7 @@
 {
   "name": "unity-agentic-tools",
   "packageManager": "bun@latest",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "Fast, token-efficient Unity YAML parser for AI agents",
   "exports": {
     ".": {
@@ -28,7 +28,8 @@
     "rebuild": "bun run clean && bun run build",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "test:coverage": "bun test --coverage"
+    "test:coverage": "bun test --coverage",
+    "test:unity-headless": "bun test/run-headless-validation.ts"
   },
   "dependencies": {
     "commander": "^14.0.2"

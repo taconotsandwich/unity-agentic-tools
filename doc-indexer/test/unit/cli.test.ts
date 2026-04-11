@@ -75,10 +75,9 @@ describe('doc-indexer CLI integration', () => {
         expect(result.stderr).toContain('unknown option');
     });
 
-    it('search -j (json) should output valid JSON', () => {
+    it('search should output valid JSON by default', () => {
         const storagePath = join(temp_dir, 'index.json');
-        const result = runCli(`--storage-path ${storagePath} search "Rigidbody" -j`, temp_dir);
-        expect(result.stderr).not.toContain('unknown option');
+        const result = runCli(`--storage-path ${storagePath} search "Rigidbody"`, temp_dir);
         expect(() => JSON.parse(result.stdout)).not.toThrow();
     });
 });

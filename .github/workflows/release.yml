@@ -177,27 +177,21 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Generate changelog
-        id: changelog
+      - name: Resolve release notes
+        id: notes
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            CHANGELOG=$(git log --pretty=format:"- %s" $PREV_TAG..HEAD)
-          else
-            CHANGELOG=$(git log --pretty=format:"- %s" -10)
+          NOTES_FILE="release-notes/v${{ steps.version.outputs.VERSION }}.md"
+          if [ ! -f "$NOTES_FILE" ]; then
+            echo "ERROR: Missing release notes file: $NOTES_FILE"
+            exit 1
           fi
-          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "path=$NOTES_FILE" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           name: Release v${{ steps.version.outputs.VERSION }}
-          body: |
-            ## What's Changed
-
-            ${{ steps.changelog.outputs.CHANGELOG }}
+          body_path: ${{ steps.notes.outputs.path }}
           draft: false
           prerelease: true
         env:

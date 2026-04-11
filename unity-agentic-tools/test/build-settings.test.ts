@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
+import { cpSync, mkdtempSync, rmSync, unlinkSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import {
     parse_editor_build_settings,
     list_build_profiles,
@@ -64,5 +67,21 @@ describe('get_build_settings', () => {
 
         // Build profiles (empty for Unity 2022)
         expect(result.buildProfiles).toEqual([]);
+    });
+
+    it('should flag missing build scenes on disk', () => {
+        const tmp = mkdtempSync(join(tmpdir(), 'build-settings-missing-scene-'));
+        cpSync(FIXTURE_PATH, tmp, { recursive: true });
+        unlinkSync(path.join(tmp, 'Assets', 'Scenes', 'Level.unity'));
+
+        try {
+            const result = get_build_settings(tmp);
+            const level = result.editorBuildSettings.scenes.find((scene) => scene.path === 'Assets/Scenes/Level.unity');
+
+            expect(level?.exists).toBe(false);
+            expect(result.missingScenes).toContain('Assets/Scenes/Level.unity');
+        } finally {
+            rmSync(tmp, { recursive: true, force: true });
+        }
     });
 });

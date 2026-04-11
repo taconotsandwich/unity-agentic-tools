@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { setup } from '../src/setup';
+import { isNativeModuleAvailable } from '../src/scanner';
 
 /**
  * Create a minimal temp Unity project with Assets/ and optional .meta files.
@@ -70,6 +71,16 @@ describe('setup', () => {
         expect(config.version).toBeDefined();
         expect(config.project_path).toBe(project.dir);
         expect(config.created_at).toBeDefined();
+    });
+
+    it('should create type-registry.json', () => {
+        project = create_temp_unity_project();
+        const result = setup({ project: project.dir });
+        const nativeAvailable = isNativeModuleAvailable();
+
+        expect(result.success).toBe(true);
+        expect(result.type_registry_created).toBe(nativeAvailable);
+        expect(existsSync(join(project.dir, '.unity-agentic', 'type-registry.json'))).toBe(nativeAvailable);
     });
 
     it('should build GUID cache from .meta files (3 files -> guid_count: 3)', () => {

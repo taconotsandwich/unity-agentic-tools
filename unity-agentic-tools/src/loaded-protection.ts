@@ -1,5 +1,5 @@
 import { dirname, relative, resolve, sep } from 'path';
-import { call_editor, ping_editor, read_editor_config } from './editor-client';
+import { call_editor, discover_editor_config } from './editor-client';
 import { find_unity_project_root, resolve_project_path } from './utils';
 
 interface LoadedState {
@@ -30,11 +30,8 @@ function normalize_loaded_paths(paths: string[]): Set<string> {
 }
 
 async function get_loaded_state(project_path: string): Promise<LoadedState | null> {
-    const config = read_editor_config(project_path);
+    const config = await discover_editor_config(project_path);
     if ('error' in config) return null;
-
-    const ping = await ping_editor(config.port, 1200);
-    if (!ping.reachable) return null;
 
     const response = await call_editor({
         project_path,
@@ -60,10 +57,8 @@ async function get_loaded_state(project_path: string): Promise<LoadedState | nul
 
 export async function is_editor_connected_for_project(project_path: string): Promise<boolean> {
     const resolved_project = resolve_project_path(project_path);
-    const config = read_editor_config(resolved_project);
-    if ('error' in config) return false;
-    const ping = await ping_editor(config.port, 1200);
-    return ping.reachable;
+    const config = await discover_editor_config(resolved_project);
+    return !('error' in config);
 }
 
 export async function enforce_loaded_edit_protection(

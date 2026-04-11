@@ -1,4 +1,4 @@
-# read -- 21 commands
+# read -- 20 commands
 
 | Command | What it does |
 |---------|-------------|
@@ -16,7 +16,6 @@
 | `read overrides <file> <instance>` | PrefabInstance override modifications (`--flat`) |
 | `read script <file>` | C# type declarations from .cs or .NET DLL |
 | `read scripts` | List C# types from registry |
-| `read log` | Unity Editor.log |
 | `read meta <file>` | .meta importer settings (`--summary`) |
 | `read animation <file>` | AnimationClip (.anim) (`--summary`, `--paths`, `--curves`) |
 | `read animator <file>` | AnimatorController (.controller) |
@@ -37,22 +36,6 @@ Paginated hierarchy of GameObjects in `.unity` or `.prefab` files.
 | `--page-size <n>` | Objects per page (default 200, max 1000) |
 | `--cursor <n>` | Pagination offset |
 | `--max-depth <n>` | Hierarchy depth limit (default 10, max 50) |
-
-## read log
-
-Reads the Unity Editor.log with auto-detection of log path.
-
-| Option | Effect |
-|--------|--------|
-| `--path <file>` | Explicit log path (auto-detected if omitted) |
-| `--project <path>` | Filter to entries from a specific project session |
-| `--tail <n>` | Last N lines (default 50) |
-| `--errors` | Error entries only |
-| `--warnings` | Warning entries only |
-| `--compile-errors` | C# compilation errors only |
-| `--import-errors` | Asset import errors only |
-| `--since <timestamp>` | After timestamp (YYYY-MM-DD or HH:MM:SS) |
-| `--search <pattern>` | Regex filter on content |
 
 ## read scripts
 

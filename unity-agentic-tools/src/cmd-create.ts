@@ -4,79 +4,23 @@ import { basename } from 'path';
 import { randomBytes } from 'crypto';
 import { ensure_parent_dir, resolve_project_path } from './utils';
 import {
-    createGameObject,
     createScene,
     createPrefabVariant,
-    createPrefabInstance,
     createScriptableObject,
     createMetaFile,
-    addComponent,
-    copyComponent,
 } from './editor';
 import { add_scene } from './build-editor';
 import { add_package } from './packages';
 import { save_input_actions } from './input-actions';
 import type { InputActionsFile } from './input-actions';
-import { enforce_loaded_edit_protection } from './loaded-protection';
 
 export function build_create_command(): Command {
     const cmd = new Command('create')
-        .description('Create Unity objects (GameObjects, scenes, prefabs, components)');
-
-    cmd.command('gameobject <file> [name]')
-        .description('Create a new GameObject in a Unity file')
-        .option('-p, --parent <name|id>', 'Parent GameObject name or Transform fileID')
-        .option('-n, --name <name>', 'GameObject name (alternative to positional arg)')
-        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
-        .option('-j, --json', 'Output as JSON')
-        .action(async (file, name_positional, options) => {
-            const name = name_positional || options.name;
-            if (!name) {
-                console.log(JSON.stringify({
-                    success: false,
-                    error: 'Missing required name. Provide as positional argument or --name flag.',
-                    correct_usage: [
-                        'unity-agentic-tools create gameobject <file> <name>',
-                        'unity-agentic-tools create gameobject <file> --name <name>',
-                    ],
-                }, null, 2));
-                process.exitCode = 1;
-                return;
-            }
-            const ext = file.toLowerCase().split('.').pop();
-            if (!ext || !['unity', 'prefab', 'asset'].includes(ext)) {
-                console.log(JSON.stringify({ success: false, error: `Invalid file type ".${ext}". create gameobject only works with .unity, .prefab, or .asset files` }, null, 2));
-                process.exitCode = 1;
-                return;
-            }
-
-            let parent: string | number | undefined;
-            if (options.parent) {
-                const asNumber = parseInt(options.parent, 10);
-                parent = isNaN(asNumber) ? options.parent : asNumber;
-            }
-
-            const guard = await enforce_loaded_edit_protection(file, options.bypassLoadedProtection);
-            if (!guard.allowed) {
-                console.log(JSON.stringify({ success: false, file_path: file, error: guard.error }, null, 2));
-                process.exitCode = 1;
-                return;
-            }
-
-            const result = createGameObject({
-                file_path: file,
-                name: name,
-                parent: parent,
-            });
-
-            console.log(JSON.stringify(result, null, 2));
-            if (!result.success) process.exitCode = 1;
-        });
+        .description('Create Unity-generated assets and project files');
 
     cmd.command('scene <output_path>')
         .description('Create a new Unity scene file with required global blocks')
         .option('-d, --defaults', 'Include default Main Camera and Directional Light')
-        .option('-j, --json', 'Output as JSON')
         .action((output_path, options) => {
             const result = createScene({
                 output_path,
@@ -90,7 +34,6 @@ export function build_create_command(): Command {
     cmd.command('prefab-variant <source_prefab> <output_path>')
         .description('Create a Prefab Variant from a source prefab')
         .option('-n, --name <name>', 'Override variant name')
-        .option('-j, --json', 'Output as JSON')
         .action((source_prefab, output_path, options) => {
             const result = createPrefabVariant({
                 source_prefab,
@@ -102,58 +45,10 @@ export function build_create_command(): Command {
             if (!result.success) process.exitCode = 1;
         });
 
-    cmd.command('prefab-instance <scene_file> <prefab_path>')
-        .description('Instantiate a prefab into a scene file')
-        .option('-n, --name <name>', 'Instance name (defaults to prefab filename)')
-        .option('-p, --parent <name|id>', 'Parent GameObject name or Transform fileID')
-        .option('--position <x,y,z>', 'Local position (default: 0,0,0)')
-        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
-        .option('-j, --json', 'Output as JSON')
-        .action(async (scene_file, prefab_path_arg, options) => {
-            let position: { x: number; y: number; z: number } | undefined;
-            if (options.position) {
-                const parts = (options.position as string).split(',').map(Number);
-                if (parts.length !== 3 || parts.some(isNaN)) {
-                    console.log(JSON.stringify({
-                        success: false,
-                        error: '--position must be three comma-separated numbers, e.g. 1,2,3'
-                    }, null, 2));
-                    process.exitCode = 1;
-                    return;
-                }
-                position = { x: parts[0], y: parts[1], z: parts[2] };
-            }
-
-            let parent: string | number | undefined;
-            if (options.parent) {
-                const asNumber = parseInt(options.parent, 10);
-                parent = isNaN(asNumber) ? options.parent : asNumber;
-            }
-
-            const guard = await enforce_loaded_edit_protection(scene_file, options.bypassLoadedProtection);
-            if (!guard.allowed) {
-                console.log(JSON.stringify({ success: false, file_path: scene_file, error: guard.error }, null, 2));
-                process.exitCode = 1;
-                return;
-            }
-
-            const result = createPrefabInstance({
-                scene_path: scene_file,
-                prefab_path: prefab_path_arg,
-                name: options.name,
-                parent,
-                position,
-            });
-
-            console.log(JSON.stringify(result, null, 2));
-            if (!result.success) process.exitCode = 1;
-        });
-
     cmd.command('scriptable-object <output_path> <script>')
         .description('Create a new ScriptableObject .asset file')
         .option('-p, --project <path>', 'Unity project path (for script GUID lookup)')
         .option('--set <json>', 'Initial field values as JSON object (e.g. \'{"damage": "10", "targetScope": "1"}\')')
-        .option('-j, --json', 'Output as JSON')
         .action((output_path, script, options) => {
             let initial_values: Record<string, unknown> | undefined;
             if (options.set) {
@@ -178,61 +73,9 @@ export function build_create_command(): Command {
 
     cmd.command('meta <script_path>')
         .description('Generate a Unity .meta file for a script (MonoImporter)')
-        .option('-j, --json', 'Output as JSON')
         .action((script_path, _options) => {
             const result = createMetaFile({
                 script_path: script_path,
-            });
-
-            console.log(JSON.stringify(result, null, 2));
-            if (!result.success) process.exitCode = 1;
-        });
-
-    cmd.command('component <file> <object_name> <component>')
-        .description('Add a Unity component (e.g., MeshRenderer, Animator, Rigidbody) or custom script')
-        .option('-p, --project <path>', 'Unity project path (for script GUID lookup)')
-        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
-        .option('-j, --json', 'Output as JSON')
-        .action(async (file, object_name, component, options) => {
-            if (!component || component.trim() === '') {
-                console.log(JSON.stringify({ success: false, file_path: file, error: 'Component name must not be empty' }, null, 2));
-                process.exitCode = 1;
-                return;
-            }
-
-            const guard = await enforce_loaded_edit_protection(file, options.bypassLoadedProtection, options.project);
-            if (!guard.allowed) {
-                console.log(JSON.stringify({ success: false, file_path: file, error: guard.error }, null, 2));
-                process.exitCode = 1;
-                return;
-            }
-
-            const result = addComponent({
-                file_path: file,
-                game_object_name: object_name,
-                component_type: component,
-                project_path: options.project,
-            });
-
-            console.log(JSON.stringify(result, null, 2));
-            if (!result.success) process.exitCode = 1;
-        });
-
-    cmd.command('component-copy <file> <source_file_id> <target_object_name>')
-        .description('Copy a component to a target GameObject')
-        .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
-        .option('-j, --json', 'Output as JSON')
-        .action(async (file, source_file_id, target_object_name, options) => {
-            const guard = await enforce_loaded_edit_protection(file, options.bypassLoadedProtection);
-            if (!guard.allowed) {
-                console.log(JSON.stringify({ success: false, file_path: file, error: guard.error }, null, 2));
-                process.exitCode = 1;
-                return;
-            }
-            const result = copyComponent({
-                file_path: file,
-                source_file_id: source_file_id,
-                target_game_object_name: target_object_name,
             });
 
             console.log(JSON.stringify(result, null, 2));
@@ -243,7 +86,6 @@ export function build_create_command(): Command {
          .description('Add a scene to build settings')
          .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
          .option('--index <n>', 'Insert at position (0-based)')
-         .option('-j, --json', 'Output as JSON')
          .action((scene_path, options) => {
              try {
                  const resolvedProjectPath = resolve_project_path(options.project);
@@ -264,7 +106,6 @@ export function build_create_command(): Command {
         .option('--shader-fileid <id>', 'Shader fileID (default: 4800000)', '4800000')
         .option('--name <name>', 'Material name (defaults to filename)')
         .option('--properties <json>', 'Initial properties JSON: {"floats":{"_Metallic":0.5},"colors":{"_Color":[1,0,0,1]}}')
-        .option('-j, --json', 'Output as JSON')
         .action((output_path, options) => {
             if (!options.shader) {
                 console.log(JSON.stringify({ success: false, error: '--shader <guid> is required' }, null, 2));
@@ -380,7 +221,6 @@ NativeFormatImporter:
      cmd.command('package <name> <version>')
          .description('Add a package to Packages/manifest.json')
          .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
-         .option('-j, --json', 'Output as JSON')
          .action((name, version, options) => {
              try {
                  const resolvedProjectPath = resolve_project_path(options.project);
@@ -400,7 +240,6 @@ NativeFormatImporter:
     // ========== Input Actions creation ==========
     cmd.command('input-actions <output_path> <name>')
         .description('Create a blank .inputactions file')
-        .option('-j, --json', 'Output as JSON')
         .action((output_path, name, _options) => {
             if (!output_path.endsWith('.inputactions')) {
                 console.log(JSON.stringify({ success: false, error: 'Output path must end with .inputactions' }, null, 2));
@@ -453,7 +292,6 @@ ScriptedImporter:
         .description('Create a blank .anim AnimationClip file (name defaults to filename without extension)')
         .option('--sample-rate <n>', 'Sample rate (default: 60)', '60')
         .option('--loop', 'Enable loop time')
-        .option('-j, --json', 'Output as JSON')
         .action((output_path, name_arg, options) => {
             if (!output_path.endsWith('.anim')) {
                 console.log(JSON.stringify({ success: false, error: 'Output path must end with .anim' }, null, 2));
@@ -562,7 +400,6 @@ NativeFormatImporter:
     cmd.command('animator <output_path> [name]')
         .description('Create a blank .controller AnimatorController file (name defaults to filename without extension)')
         .option('--layer <name>', 'Name of the initial layer (default: "Base Layer")', 'Base Layer')
-        .option('-j, --json', 'Output as JSON')
         .action((output_path, name_arg, options) => {
             const name = name_arg || basename(output_path).replace(/\.controller$/i, '');
             if (!output_path.toLowerCase().endsWith('.controller')) {
@@ -650,7 +487,6 @@ NativeFormatImporter:
     // ========== create prefab ==========
     cmd.command('prefab <output_path> [name]')
         .description('Create a blank .prefab file (name defaults to filename without extension)')
-        .option('-j, --json', 'Output as JSON')
         .action((output_path, name_arg) => {
             const name = name_arg || basename(output_path).replace(/\.prefab$/i, '');
             if (!output_path.toLowerCase().endsWith('.prefab')) {

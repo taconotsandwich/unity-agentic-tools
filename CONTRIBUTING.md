@@ -68,3 +68,4 @@ GitHub release notes should contain a single section only:
 
 Under that heading, add 2-4 concise bullets that summarize user-visible improvements.
 Avoid raw commit dumps, merge-commit lines, and extra sections.
+Store the notes in `release-notes/v<version>.md`; the release workflow publishes that file verbatim.

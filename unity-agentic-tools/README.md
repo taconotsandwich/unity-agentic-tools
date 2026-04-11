@@ -12,25 +12,36 @@ Fast CLI for Unity scene, prefab, and asset files. Extracts GameObject hierarchi
 npm install -g unity-agentic-tools
 unity-agentic-tools read scene MyScene.unity
 unity-agentic-tools read gameobject MyScene.unity "Main Camera" -p
-unity-agentic-tools update transform MyScene.unity "Main Camera" -p 0,5,-10
+unity-agentic-tools editor invoke UnityAgenticTools.Update.Objects Transform --args '["Assets/Scenes/Main.unity","Main Camera","0,5,-10"]'
 ```
 
-## Commands (126 total)
+## Command Surface
 
-### Read (21)
-`read scene` | `read gameobject` | `read asset` | `read scriptable-object` | `read material` | `read dependencies` | `read dependents` | `read unused` | `read settings` | `read build` | `read overrides` | `read component` | `read reference` | `read script` | `read scripts` | `read log` | `read meta` | `read animation` | `read animator` | `read manifest` | `read input-actions`
+Unsafe scene and prefab graph mutations no longer live under top-level `create` / `update`. Use the editor bridge instead:
 
-### Create (15)
-`create gameobject` | `create scene` | `create prefab-variant` | `create prefab-instance` | `create scriptable-object` | `create meta` | `create component` | `create component-copy` | `create build` | `create material` | `create package` | `create input-actions` | `create animation` | `create animator` | `create prefab`
+```bash
+unity-agentic-tools editor invoke UnityAgenticTools.Create.Scenes GameObject --args '["Assets/Scenes/Main.unity","EnemyRoot","Gameplay"]'
+unity-agentic-tools editor invoke UnityAgenticTools.Create.Prefabs PrefabInstance --args '["Assets/Scenes/Boot.unity","Assets/Prefabs/AppRoot.prefab"]'
+unity-agentic-tools editor invoke UnityAgenticTools.Update.Objects Component --args '["Assets/Scenes/Main.unity","Player","BoxCollider","0","m_IsTrigger","true"]'
+unity-agentic-tools editor invoke UnityAgenticTools.Update.Serialized BatchComponents --args '["Assets/Scenes/Main.unity","[{\"gameObjectPath\":\"Player\",\"componentType\":\"BoxCollider\",\"componentIndex\":0,\"propertyPath\":\"m_IsTrigger\",\"value\":\"true\"}]"]'
+```
 
-### Update (28)
-`update gameobject` | `update component` | `update transform` | `update scriptable-object` | `update settings` | `update tag` | `update layer` | `update sorting-layer` | `update parent` | `update build` | `update array` | `update batch` | `update batch-components` | `update material` | `update meta` | `update animation` | `update animator` | `update sibling-index` | `update input-actions` | `update animation-curves` | `update animator-state` | `update prefab` (7 subcommands)
+Top-level CLI commands remain for file-safe asset and project mutations. `UnityAgenticTools.Create.*` / `UnityAgenticTools.Update.*` require a reachable live editor bridge; they do not fall back to handwritten YAML.
+
+### Read (20)
+`read scene` | `read gameobject` | `read asset` | `read scriptable-object` | `read material` | `read dependencies` | `read dependents` | `read unused` | `read settings` | `read build` | `read overrides` | `read component` | `read reference` | `read script` | `read scripts` | `read meta` | `read animation` | `read animator` | `read manifest` | `read input-actions`
+
+### Create (0 top-level)
+Creation is editor-only now. Use `unity-agentic-tools editor invoke UnityAgenticTools.Create.* ...`.
+
+### Update (7 top-level)
+`update scriptable-object` | `update settings` | `update layer` | `update material` | `update meta` | `update animation` | `update animator`
 
 ### Delete (6)
 `delete gameobject` | `delete component` | `delete build` | `delete prefab` | `delete asset` | `delete package`
 
-### Editor (49) -- Live Unity Bridge
-`editor status` | `editor play` | `editor stop` | `editor pause` | `editor step` | `editor play-state` | `editor save` | `editor scene-open` | `editor active-scene` | `editor refresh` | `editor compiling` | `editor selection-get` | `editor selection-set` | `editor selection-clear` | `editor console-logs` | `editor console-clear` | `editor console-follow` | `editor menu` | `editor screenshot` | `editor tests-run` | `editor install` | `editor uninstall` | `editor hierarchy-snapshot` | `editor ui-snapshot` | `editor input-map` | `editor get text` | `editor get value` | `editor get active` | `editor get position` | `editor get component` | `editor ui-click` | `editor ui-fill` | `editor ui-type` | `editor ui-toggle` | `editor ui-slider` | `editor ui-select` | `editor ui-scroll` | `editor ui-focus` | `editor input-key` | `editor input-mouse` | `editor input-touch` | `editor input-action` | `editor wait`
+### Editor (6) -- Live Unity Bridge
+`editor status` | `editor invoke` | `editor console-follow` | `editor list` | `editor install` | `editor uninstall`
 
 ### Utilities (8)
 `search` | `grep` | `clone` | `version` | `docs` | `setup` | `cleanup` | `status`
@@ -39,21 +50,64 @@ Run any command with `--help` for full options.
 
 ## Loaded Edit Protection
 
-When editor bridge is connected, mutating `.unity`/`.prefab` files is soft-protected. If target file is loaded/open in Unity editor, pass `--bypass-loaded-protection`.
+When editor bridge is connected, file-based mutators that still edit `.unity`/`.prefab` files are soft-protected. If a remaining file-based command targets a loaded file, pass `--bypass-loaded-protection`.
 
 This affects scene/prefab mutators including:
 - `clone`
-- `create gameobject|component|component-copy|prefab-instance`
-- `update` mutators on `.unity`/`.prefab` (including `update prefab ...`)
 - `delete gameobject|component|prefab|asset`
 
-If editor bridge is offline/unreachable, operations remain unchanged.
+Scene/prefab graph creation and mutation should now go through `editor invoke UnityAgenticTools.Create.* ...` or `UnityAgenticTools.Update.* ...`, not `--bypass-loaded-protection`.
 
-## Script Component Validation
+If editor bridge is offline/unreachable, the remaining file-based operations behave the same as before, but `editor invoke UnityAgenticTools.Create.* ...` and `UnityAgenticTools.Update.* ...` cannot run.
 
-- `MonoBehaviour` literal is rejected for `create component`.
-- all-zero GUID is rejected.
-- abstract scripts are rejected for `create component` and `create scriptable-object`.
+## Editor-Only Scene / Prefab Mutation APIs
+
+`UnityAgenticTools.Create.Scenes`
+- `Scene(assetPath, includeDefaults = false)`
+- `GameObject(assetPath, name, parentPath = "")`
+- `Component(assetPath, gameObjectPath, componentType)`
+- `ComponentCopy(assetPath, sourceGameObjectPath, sourceComponentType, sourceComponentIndex, targetGameObjectPath)`
+
+`UnityAgenticTools.Create.Prefabs`
+- `Prefab(assetPath, name = "")`
+- `PrefabVariant(sourcePrefabPath, outputPath, variantName = "")`
+- `PrefabInstance(assetPath, prefabPath, parentPath = "", instanceName = "", localPosX = 0, localPosY = 0, localPosZ = 0)`
+
+`UnityAgenticTools.Create.Assets`
+- `ScriptableObject(assetPath, script, initialValuesJson = "")`
+- `Meta(scriptPath)`
+- `Material(assetPath, shaderGuid, materialName = "")`
+- `InputActions(assetPath, name)`
+- `Animation(assetPath, clipName = "", sampleRate = 60, loopTime = false)`
+- `Animator(assetPath, controllerName = "", layerName = "Base Layer")`
+
+`UnityAgenticTools.Create.Project`
+- `Build(scenePath, position = -1)`
+- `Package(name, version)`
+
+`UnityAgenticTools.Update.Objects`
+- `GameObject(assetPath, gameObjectPath, propertyPath, value)`
+- `Component(assetPath, gameObjectPath, componentType, componentIndex, propertyPath, value)`
+- `Transform(assetPath, gameObjectPath, position = "", rotation = "", scale = "")`
+- `Parent(assetPath, gameObjectPath, newParentPath = "")`
+- `SiblingIndex(assetPath, gameObjectPath, index)`
+
+`UnityAgenticTools.Update.Serialized`
+- `Array(assetPath, gameObjectPath, componentType, componentIndex, arrayProperty, action, payloadJson = "")`
+- `Batch(assetPath, editsJson)`
+- `BatchComponents(assetPath, editsJson)`
+- `ManagedReference(assetPath, gameObjectPath, componentType, componentIndex, fieldPath, typeName, initialValuesJson = "", append = false)`
+
+`UnityAgenticTools.Update.Prefabs`
+- `PrefabUnpack(assetPath, prefabInstancePath, mode = "OutermostRoot")`
+- `PrefabOverride(assetPath, gameObjectPath, componentType, componentIndex, propertyPath, value)`
+- `PrefabBatchOverrides(assetPath, editsJson)`
+- `PrefabManagedReference(assetPath, gameObjectPath, componentType, componentIndex, fieldPath, typeName, initialValuesJson = "", append = false)`
+- `PrefabRemoveOverride(assetPath, gameObjectPath, componentType, componentIndex, propertyPath)`
+- `PrefabRemoveComponent(assetPath, gameObjectPath, componentType, componentIndex)`
+- `PrefabRestoreComponent(assetPath, gameObjectPath, componentType, componentIndex)`
+- `PrefabRemoveGameObject(assetPath, gameObjectPath)`
+- `PrefabRestoreGameObject(assetPath, gameObjectPath)`
 
 ## Requirements
 

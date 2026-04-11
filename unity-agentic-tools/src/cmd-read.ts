@@ -1,19 +1,19 @@
 import { Command } from 'commander';
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { resolve, dirname, extname, join, basename, relative } from 'path';
-import { homedir, platform } from 'os';
 import type { UnityScanner } from './scanner';
 import { getNativeExtractCsharpTypes, getNativeExtractDllTypes, getNativeBuildTypeRegistry } from './scanner';
 import { read_settings } from './settings';
 import { get_build_settings } from './build-settings';
 import { UnityDocument } from './editor';
-import { extractGuidFromMeta, resolve_source_prefab } from './editor/shared';
-import { get_class_id } from './class-ids';
+import { extractGuidFromMeta, resolveScriptGuid, resolve_source_prefab } from './editor/shared';
+import { get_component_class_id } from './class-ids';
 import { load_guid_cache, load_guid_cache_for_file } from './guid-cache';
 import { path_glob_to_regex, find_unity_project_root, resolve_project_path } from './utils';
 import { list_packages } from './packages';
 import { load_input_actions } from './input-actions';
 import type { InputActionsFile } from './input-actions';
+import { to_cli_output } from './cli-output';
 
 // ========== Material Parsing ==========
 
@@ -114,6 +114,18 @@ function extract_prefab_list_section(raw: string, key: string): { key_indent: nu
     }
 
     return { key_indent, section_lines };
+}
+
+function to_build_cli_output(result: ReturnType<typeof get_build_settings>): Record<string, unknown> {
+    const { projectPath: _projectPath, buildProfilesPath: _buildProfilesPath, ...project_info } = result.projectInfo;
+
+    return {
+        projectInfo: project_info,
+        editorBuildSettings: result.editorBuildSettings,
+        buildProfiles: result.buildProfiles.map(({ path: _path, ...profile }) => profile),
+        ...(result.activeBuildProfile ? { activeBuildProfile: result.activeBuildProfile } : {}),
+        ...(result.missingScenes ? { missingScenes: result.missingScenes } : {}),
+    };
 }
 
 function parse_removed_list(raw: string, key: string): UnityRefData[] {
@@ -410,80 +422,6 @@ function find_project_root_from_file(filePath: string): string | null {
         dir = parent;
     }
     return null;
-}
-
-// ========== Editor Log Helpers ==========
-
-/** Get the default Unity Editor.log path for the current platform. */
-function get_editor_log_path(): string | null {
-    const p = platform();
-    if (p === 'darwin') return join(homedir(), 'Library', 'Logs', 'Unity', 'Editor.log');
-    if (p === 'win32') {
-        const localAppData = process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local');
-        return join(localAppData, 'Unity', 'Editor', 'Editor.log');
-    }
-    if (p === 'linux') return join(homedir(), '.config', 'unity3d', 'Editor.log');
-    return null;
-}
-
-export interface LogEntry {
-    line_number: number;
-    level: 'error' | 'warning' | 'info' | 'import_error';
-    message: string;
-    stack_trace?: string[];
-}
-
-/** Try to extract a timestamp from a Unity Editor.log line.
- *  Common formats: "2024/01/15 10:30:45", "2024-01-15T10:30:45", "[HH:MM:SS]" */
-function parse_log_line_timestamp(line: string): Date | null {
-    // ISO-ish: 2024-01-15T10:30:45 or 2024/01/15 10:30:45 or 2024-01-15 10:30:45
-    const iso_re = /(\d{4}[-/]\d{2}[-/]\d{2})[T ](\d{2}:\d{2}:\d{2})/;
-    const m = iso_re.exec(line);
-    if (m) {
-        const dateStr = m[1].replace(/\//g, '-');
-        const d = new Date(`${dateStr}T${m[2]}`);
-        if (!isNaN(d.getTime())) return d;
-    }
-    return null;
-}
-
-/** Parse Unity Editor.log lines into structured entries. */
-export function parse_log_entries(lines: string[]): LogEntry[] {
-    const entries: LogEntry[] = [];
-    const error_re = /\b(error|exception)\b/i;
-    const runtime_error_re = /\b(NullReferenceException|IndexOutOfRangeException|ArgumentException|MissingReferenceException|StackOverflowException|DivideByZeroException|InvalidOperationException|KeyNotFoundException|FormatException|ObjectDisposedException|MissingComponentException|UnassignedReferenceException)\b/;
-    const warning_re = /\bwarning\b/i;
-    const compile_re = /Assets\/.*\.cs\(\d+,\d+\):\s*error\s+CS/;
-    const import_error_re = /Failed to import|Error while importing|Could not create asset|Unable to import|Shader error in|Import of asset .* failed/i;
-    const assertion_re = /^Assertion failed/;
-    const stack_re = /^\s+at\s+|^\s*\(Filename:/;
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        if (line.trim().length === 0) continue;
-
-        let level: LogEntry['level'] = 'info';
-        if (import_error_re.test(line)) level = 'import_error';
-        else if (compile_re.test(line)) level = 'error';
-        else if (error_re.test(line) || runtime_error_re.test(line) || assertion_re.test(line)) level = 'error';
-        else if (warning_re.test(line)) level = 'warning';
-
-        // Collect stack trace lines
-        const stack: string[] = [];
-        let j = i + 1;
-        while (j < lines.length && stack_re.test(lines[j])) {
-            stack.push(lines[j].trim());
-            j++;
-        }
-
-        if (level !== 'info' || stack.length > 0) {
-            const entry: LogEntry = { line_number: i + 1, level, message: line };
-            if (stack.length > 0) entry.stack_trace = stack;
-            entries.push(entry);
-            i = j - 1;
-        }
-    }
-    return entries;
 }
 
 // ========== Animation Clip Helpers ==========
@@ -870,7 +808,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
     cmd.command('scene <file>')
         .description('List GameObject hierarchy in a Unity scene or prefab file')
-        .option('-j, --json', 'Output as JSON')
         .option('-p, --properties', 'Include component properties')
         .option('-v, --verbose', 'Show internal Unity IDs')
         .option('--page-size <n>', 'Max objects per page (default 200, max 1000)', '200')
@@ -1023,26 +960,26 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 }
                 const prefab_instances = result.prefabInstances?.length || 0;
                 console.log(JSON.stringify({
-                    file: result.file,
                     total_gameobjects: result.totalInScene,
                     total_at_depth: result.total,
                     prefab_instances,
                     component_counts,
-                    ...(result.truncated ? { component_counts_note: 'Counts reflect current page only. Use --page-size or --cursor to see more.' } : {}),
-                    page_shown: gos.length,
                     truncated: result.truncated,
                 }, null, 2));
                 return;
             }
 
-            console.log(JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(
+                to_cli_output(result as unknown as Record<string, unknown>, { drop_keys: ['file', 'warning'] }),
+                null,
+                2
+            ));
         });
 
     cmd.command('gameobject <file> <object_id>')
         .description('Get GameObject details by name or file ID')
         .option('-c, --component <type>', 'Get specific component type')
         .option('-p, --properties', 'Include component properties')
-        .option('-j, --json', 'Output as JSON')
         .option('-v, --verbose', 'Show internal Unity IDs')
         .action((file, object_id, options) => {
             const validationErr = validate_unity_yaml(file);
@@ -1085,7 +1022,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 const comps = result.components.filter(c => c.type === options.component);
                 if (comps.length > 0) {
                     console.log(JSON.stringify({
-                        file,
                         name: result.name,
                         file_id: result.file_id,
                         components: comps,
@@ -1100,14 +1036,13 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 return;
             }
 
-            console.log(JSON.stringify({ file, object: result }, null, 2));
+            console.log(JSON.stringify(result, null, 2));
         });
 
     cmd.command('asset <file>')
         .description('Read any Unity YAML asset file (.asset, .mat, .anim, etc.)')
         .option('-p, --properties', 'Include object properties (omitted by default for token efficiency)')
         .option('--raw', 'Output raw hex data for mesh vertex/index buffers (skip auto-decode)')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             const soValidationError = validate_unity_yaml(file);
             if (soValidationError) {
@@ -1122,8 +1057,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     return rest;
                 });
             const output = {
-                file,
-                count: outputObjects.length,
                 objects: outputObjects,
             };
             console.log(JSON.stringify(output, null, 2));
@@ -1134,7 +1067,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .description('Read a Unity Material file (.mat) with structured property output')
         .option('--project <path>', 'Unity project root (for GUID resolution)')
         .option('--summary', 'Show shader name, property count, texture count only')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             if (!file.toLowerCase().endsWith('.mat')) {
                 console.log(JSON.stringify({ error: `File must be a .mat file: ${file}` }, null, 2));
@@ -1172,7 +1104,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             if (options.summary) {
                 console.log(JSON.stringify({
-                    file,
                     name: mat.name,
                     shader_guid: mat.shader.guid || 'unknown',
                     shader_path,
@@ -1186,7 +1117,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             console.log(JSON.stringify({
-                file,
                 name: mat.name,
                 shader: { ...mat.shader, path: shader_path },
                 render_queue: mat.render_queue,
@@ -1202,7 +1132,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--project <path>', 'Unity project root (for GUID resolution)')
         .option('--unresolved', 'Show only GUIDs that could not be resolved')
         .option('--recursive [depth]', 'Follow dependency chain N levels deep (default: 3)')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             if (!existsSync(file)) {
                 console.log(JSON.stringify({ error: `File not found: ${file}` }, null, 2));
@@ -1228,7 +1157,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             // Load GUID cache for resolution
             const cache = load_guid_cache_for_file(file, options.project);
-            const projectPath = cache?.project_path || options.project || find_project_root_from_file(file);
 
             // Build dependency list
             interface Dependency {
@@ -1339,8 +1267,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 }
 
                 console.log(JSON.stringify({
-                    file,
-                    project_path: projectPath || null,
                     max_depth,
                     total_direct_references: guids.size,
                     total_unique_dependencies: visited.size,
@@ -1350,17 +1276,12 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             const output: Record<string, unknown> = {
-                file,
-                project_path: projectPath || null,
                 total_references: guids.size,
                 resolved: dependencies.filter(d => d.path !== null).length,
                 unresolved: dependencies.filter(d => d.path === null).length,
                 dependencies: options.unresolved ? filtered : undefined,
                 by_type: options.unresolved ? undefined : byType,
             };
-            if (!cache) {
-                output._hint = "Run 'setup' (or 'setup -p <path>') to resolve GUID paths";
-            }
             console.log(JSON.stringify(output, null, 2));
         });
 
@@ -1368,7 +1289,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .description('Read Unity project settings (TagManager, DynamicsManager, QualitySettings, TimeManager, etc.)')
         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('-s, --setting <name>', 'Setting name or alias (tags, physics, quality, time)', 'TagManager')
-        .option('-j, --json', 'Output as JSON')
         .action((options) => {
             const resolvedProjectPath = resolve_project_path(options.project);
             const result = read_settings({
@@ -1376,19 +1296,22 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 setting: options.setting,
             });
 
-            console.log(JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(
+                to_cli_output(result as unknown as Record<string, unknown>, { drop_keys: ['project_path', 'file_path'] }),
+                null,
+                2
+            ));
             if (!result.success) process.exit(1);
         });
 
     cmd.command('build')
         .description('Read build settings (scene list, build profiles)')
         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
-        .option('-j, --json', 'Output as JSON')
         .action((options) => {
             const resolvedProjectPath = resolve_project_path(options.project);
             try {
                 const result = get_build_settings(resolvedProjectPath);
-                console.log(JSON.stringify(result, null, 2));
+                console.log(JSON.stringify(to_build_cli_output(result), null, 2));
             } catch (err) {
                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
                 process.exitCode = 1;
@@ -1398,12 +1321,11 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
     cmd.command('scenes')
         .description('Read build scenes (alias for "read build")')
         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
-        .option('-j, --json', 'Output as JSON')
         .action((options) => {
             const resolvedProjectPath = resolve_project_path(options.project);
             try {
                 const result = get_build_settings(resolvedProjectPath);
-                console.log(JSON.stringify(result, null, 2));
+                console.log(JSON.stringify(to_build_cli_output(result), null, 2));
             } catch (err) {
                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
                 process.exitCode = 1;
@@ -1413,7 +1335,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
     cmd.command('overrides <file> <prefab_instance>')
         .description('Read PrefabInstance overrides (modifications + removed/added state)')
         .option('--flat', 'Output simplified list')
-        .option('-j, --json', 'Output as JSON')
         .action((file, prefab_instance, options) => {
             try {
                 const doc = UnityDocument.from_file(file);
@@ -1515,7 +1436,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
     cmd.command('component <file> <file_id>')
         .description('Read a single component by fileID (use -p for content)')
         .option('-p, --properties', 'Include component properties/raw text (required to see values)')
-        .option('-j, --json', 'Output as JSON')
         .action((file, file_id, options) => {
             try {
                 const doc = UnityDocument.from_file(file);
@@ -1527,7 +1447,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 }
 
                 const output: Record<string, unknown> = {
-                    file,
                     file_id: block.file_id,
                     class_id: block.class_id,
                     type_name: block.type_name,
@@ -1550,7 +1469,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .description('Trace fileID references')
         .option('--direction <dir>', 'Direction to trace: in, out, or both (default: both)', 'both')
         .option('--depth <n>', 'Maximum depth to trace (default: 3)', '3')
-        .option('-j, --json', 'Output as JSON')
         .action((file, file_id, options) => {
             try {
                 const doc = UnityDocument.from_file(file);
@@ -1568,7 +1486,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 }
 
                 const edges = doc.trace_references(file_id, direction, depth);
-                console.log(JSON.stringify({ file, file_id, direction, depth, edges }, null, 2));
+                console.log(JSON.stringify({ file_id, direction, depth, edges }, null, 2));
             } catch (err) {
                 console.log(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }, null, 2));
                 process.exit(1);
@@ -1578,7 +1496,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
     cmd.command('target <file> <gameobject_name> [component_type]')
         .description('Build a --target reference string for prefab override commands')
         .option('-p, --project <path>', 'Unity project path')
-        .option('-j, --json', 'Output as JSON')
         .action((file, gameobject_name, component_type, options) => {
             try {
                 if (!existsSync(file)) {
@@ -1635,7 +1552,13 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
                 // If component_type specified, find the component on the GO
                 if (component_type) {
-                    const classId = get_class_id(component_type);
+                    const project = options.project || find_unity_project_root(dirname(file));
+                    const explicitClassId = component_type.includes('.') ? get_component_class_id(component_type) : null;
+                    let resolvedScript: { guid: string; path: string | null } | null = null;
+                    if (explicitClassId === null) {
+                        resolvedScript = resolveScriptGuid(component_type, project ?? undefined, { strict_exact_name: true });
+                    }
+                    const classId = resolvedScript ? null : (explicitClassId ?? (!component_type.includes('.') ? get_component_class_id(component_type) : null));
                     const goBlock = doc.find_by_file_id(targetFileId!);
 
                     if (goBlock && !goBlock.is_stripped) {
@@ -1651,21 +1574,12 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                                 break;
                             }
                             // Script-based match: check m_Script guid for MonoBehaviours
-                            if (classId === null && compBlock.class_id === 114) {
+                            if (resolvedScript && compBlock.class_id === 114) {
                                 const scriptMatch = compBlock.raw.match(/m_Script:[ \t]*\{[^}]*guid:[ \t]*([a-f0-9]{32})/);
-                                if (scriptMatch) {
-                                    const project = options.project || find_unity_project_root(dirname(file));
-                                    if (project) {
-                                        const cache = load_guid_cache(project);
-                                        if (cache) {
-                                            const scriptPath = cache.resolve(scriptMatch[1]);
-                                            if (scriptPath && basename(scriptPath, '.cs').toLowerCase() === component_type.toLowerCase().replace(/\.cs$/, '')) {
-                                                targetFileId = refId;
-                                                compFound = true;
-                                                break;
-                                            }
-                                        }
-                                    }
+                                if (scriptMatch && scriptMatch[1] === resolvedScript.guid) {
+                                    targetFileId = refId;
+                                    compFound = true;
+                                    break;
                                 }
                             }
                         }
@@ -1675,7 +1589,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                         }
                     } else {
                         // Stripped GO or not found directly: search source prefab for component
-                        const project = options.project || find_unity_project_root(dirname(file));
                         const resolved = resolve_source_prefab(doc, file, project ?? undefined);
                         if (resolved) {
                             const sourceDoc = UnityDocument.from_file(resolved.source_path);
@@ -1691,6 +1604,14 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                                         compFound = true;
                                         break;
                                     }
+                                    if (resolvedScript && compBlock.class_id === 114) {
+                                        const scriptMatch = compBlock.raw.match(/m_Script:[ \t]*\{[^}]*guid:[ \t]*([a-f0-9]{32})/);
+                                        if (scriptMatch && scriptMatch[1] === resolvedScript.guid) {
+                                            targetFileId = refId;
+                                            compFound = true;
+                                            break;
+                                        }
+                                    }
                                 }
                                 if (!compFound) {
                                     console.log(JSON.stringify({ error: `Component "${component_type}" not found on "${gameobject_name}" in source prefab` }, null, 2));
@@ -1702,12 +1623,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 }
 
                 const target = `{fileID: ${targetFileId!}, guid: ${guid}, type: 3}`;
-                console.log(JSON.stringify({
-                    target,
-                    file_id: targetFileId!,
-                    guid,
-                    type: 3,
-                }, null, 2));
+                console.log(JSON.stringify({ target }, null, 2));
             } catch (err) {
                 console.log(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }, null, 2));
                 process.exit(1);
@@ -1716,7 +1632,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
     cmd.command('script <file>')
         .description('Extract C# type declarations from a .cs file or .NET DLL')
-        .option('-j, --json', 'Output as JSON')
         .action((file, _options) => {
             if (!existsSync(file)) {
                 console.log(JSON.stringify({ error: `File not found: ${file}` }, null, 2));
@@ -1738,7 +1653,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     process.exit(1);
                 }
                 const types = extractDll(file);
-                console.log(JSON.stringify({ file, types }, null, 2));
+                console.log(JSON.stringify({ types }, null, 2));
             } else {
                 const extractCs = getNativeExtractCsharpTypes();
                 if (!extractCs) {
@@ -1746,7 +1661,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     process.exit(1);
                 }
                 const types = extractCs(file);
-                console.log(JSON.stringify({ file, types }, null, 2));
+                console.log(JSON.stringify({ types }, null, 2));
             }
         });
 
@@ -1759,7 +1674,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--kind <kind>', 'Filter by kind: class, struct, enum, interface')
         .option('--source <source>', 'Filter by source: assets, packages, dlls, all', 'all')
         .option('--max <n>', 'Maximum results to return', '100')
-        .option('-j, --json', 'Output as JSON')
         .action((options) => {
             if (options.filter && !options.name) options.name = options.filter;
             const buildRegistry = getNativeBuildTypeRegistry();
@@ -1816,177 +1730,9 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             const displayed = types.slice(0, maxResults);
 
             console.log(JSON.stringify({
-                project: projectPath,
                 total: types.length,
                 truncated,
                 types: displayed,
-            }, null, 2));
-        });
-
-    // ========== P3.1: Editor.log reading ==========
-    cmd.command('log')
-        .description('Read and filter the Unity Editor.log')
-        .option('--path <file>', 'Path to Editor.log (auto-detected if omitted)')
-        .option('--project <path>', 'Filter to log entries from a specific Unity project session')
-        .option('--tail <n>', 'Show last N lines (default 50)', '50')
-        .option('--errors', 'Show only error entries')
-        .option('--warnings', 'Show only warning entries')
-        .option('--compile-errors', 'Show only C# compilation errors')
-        .option('--import-errors', 'Show only asset import errors')
-        .option('--since <timestamp>', 'Filter entries after this timestamp (YYYY-MM-DD or HH:MM:SS)')
-        .option('--search <pattern>', 'Regex filter on log content')
-        .option('-j, --json', 'Output as JSON')
-        .action((options) => {
-            const logPath = options.path || get_editor_log_path();
-            if (!logPath || !existsSync(logPath)) {
-                console.log(JSON.stringify({ error: `Editor.log not found${logPath ? `: ${logPath}` : '. Could not detect platform log path.'}` }, null, 2));
-                process.exit(1);
-            }
-
-            const content = readFileSync(logPath, 'utf-8');
-            let lines = content.split(/\r?\n/);
-
-            // Apply --project filter: find last session matching the project path
-            if (options.project) {
-                const projectPath = resolve(options.project as string);
-                const projectName = basename(projectPath);
-                const escapedPath = projectPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const escapedName = projectName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                // Unity session markers for the target project
-                // Anchor project name to path separator to avoid partial matches (e.g. "my-echo" matching "echo")
-                const session_markers = [
-                    new RegExp(`Loading project at '${escapedPath}'`),
-                    new RegExp(`Loading from Project at ${escapedPath}\\b`),
-                    new RegExp(`Loading project at '.*[/\\\\]${escapedName}'`),
-                    new RegExp(`Loading from Project at .*[/\\\\]${escapedName}\\b`),
-                ];
-                // Generic session marker: any project loading (for boundary detection)
-                const any_session_re = /(?:Loading project at '|Loading from Project at )/;
-                // Scan backwards for the last session marker for THIS project
-                let session_start = -1;
-                for (let si = lines.length - 1; si >= 0; si--) {
-                    if (session_markers.some(re => re.test(lines[si]))) {
-                        session_start = si;
-                        break;
-                    }
-                }
-                if (session_start >= 0) {
-                    // Find the next session boundary (any project loading after our marker)
-                    let session_end = lines.length;
-                    for (let si = session_start + 1; si < lines.length; si++) {
-                        if (any_session_re.test(lines[si]) && !session_markers.some(re => re.test(lines[si]))) {
-                            session_end = si;
-                            break;
-                        }
-                    }
-                    lines = lines.slice(session_start, session_end);
-                } else {
-                    // No session found for this project — return empty rather than all lines
-                    lines = [];
-                }
-            }
-
-            // Apply --since filter
-            if (options.since) {
-                const since = options.since as string;
-                // First try: literal substring match (e.g., session marker text)
-                const sinceIdx = lines.findIndex(l => l.includes(since));
-                if (sinceIdx >= 0) {
-                    lines = lines.slice(sinceIdx);
-                } else {
-                    // Second try: date-based comparison against timestamps in log lines
-                    const sinceDate = new Date(since);
-                    if (!isNaN(sinceDate.getTime())) {
-                        let foundIdx = -1;
-                        for (let li = 0; li < lines.length; li++) {
-                            const ts = parse_log_line_timestamp(lines[li]);
-                            if (ts && ts >= sinceDate) {
-                                foundIdx = li;
-                                break;
-                            }
-                        }
-                        if (foundIdx >= 0) {
-                            lines = lines.slice(foundIdx);
-                        } else {
-                            // Check if ANY timestamps exist in the log
-                            const hasTimestamps = lines.some(l => parse_log_line_timestamp(l) !== null);
-                            if (hasTimestamps) {
-                                // Timestamps found but all before --since date: return empty
-                                lines = [];
-                            } else {
-                                console.log(JSON.stringify({
-                                    error: `--since "${since}" did not match: no timestamps found in log. Unity Editor.log may not contain parseable timestamps.`,
-                                    log_path: logPath,
-                                }, null, 2));
-                                process.exit(1);
-                            }
-                        }
-                    } else {
-                        console.log(JSON.stringify({
-                            error: `--since "${since}" is not a valid date and was not found as text in the log`,
-                            log_path: logPath,
-                        }, null, 2));
-                        process.exit(1);
-                    }
-                }
-            }
-
-            // Parse structured entries for error/warning/compile-errors modes
-            if (options.errors || options.warnings || options.compileErrors || options.importErrors) {
-                const entries = parse_log_entries(lines);
-                let filtered = entries;
-                if (options.compileErrors) {
-                    const compileRe = /Assets\/.*\.cs\(\d+,\d+\):\s*error\s+CS/;
-                    filtered = entries.filter(e => compileRe.test(e.message));
-                } else if (options.importErrors) {
-                    filtered = entries.filter(e => e.level === 'import_error');
-                } else if (options.errors) {
-                    filtered = entries.filter(e => e.level === 'error' || e.level === 'import_error');
-                } else if (options.warnings) {
-                    filtered = entries.filter(e => e.level === 'warning');
-                }
-                // Apply --search AFTER level classification to avoid fragmenting entries
-                if (options.search) {
-                    const re = new RegExp(options.search as string, 'i');
-                    filtered = filtered.filter(e =>
-                        re.test(e.message) || (e.stack_trace && e.stack_trace.some(s => re.test(s)))
-                    );
-                }
-                const tail_filtered = parseInt(options.tail as string, 10);
-                if (isNaN(tail_filtered) || tail_filtered < 1) {
-                    console.log(JSON.stringify({ error: `Invalid --tail value "${options.tail}". Must be a positive integer.` }, null, 2));
-                    process.exitCode = 1;
-                    return;
-                }
-                const shown = filtered.slice(-tail_filtered);
-                console.log(JSON.stringify({
-                    log_path: logPath,
-                    total_entries: filtered.length,
-                    shown: shown.length,
-                    entries: shown,
-                }, null, 2));
-                return;
-            }
-
-            // Apply --search filter (plain tail mode only)
-            if (options.search) {
-                const re = new RegExp(options.search as string, 'i');
-                lines = lines.filter(l => re.test(l));
-            }
-
-            // Default: show last N lines
-            const tail = parseInt(options.tail as string, 10);
-            if (isNaN(tail) || tail < 1) {
-                console.log(JSON.stringify({ error: `Invalid --tail value "${options.tail}". Must be a positive integer.` }, null, 2));
-                process.exitCode = 1;
-                return;
-            }
-            const tailLines = lines.slice(-tail);
-            console.log(JSON.stringify({
-                log_path: logPath,
-                total_lines: lines.length,
-                shown: tailLines.length,
-                lines: tailLines,
             }, null, 2));
         });
 
@@ -1994,7 +1740,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
     cmd.command('meta <file>')
         .description('Read a Unity .meta file and show importer settings')
         .option('--summary', 'Show importer type and key settings only')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             const metaPath = file.endsWith('.meta') ? file : `${file}.meta`;
             if (!existsSync(metaPath)) {
@@ -2067,7 +1812,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     if (settings[key]) key_settings[key] = settings[key];
                 }
                 console.log(JSON.stringify({
-                    file: metaPath,
                     guid,
                     importer_type,
                     settings: key_settings,
@@ -2079,7 +1823,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             console.log(JSON.stringify({
-                file: metaPath,
                 guid,
                 importer_type,
                 assetBundleName,
@@ -2095,7 +1838,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--summary', 'Show name, duration, curve count, event count only')
         .option('--paths', 'List only animated property paths')
         .option('--curves', 'Show full keyframe data per curve')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             const animValidationError = validate_unity_yaml(file);
             if (animValidationError) {
@@ -2116,7 +1858,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             if (options.paths) {
                 console.log(JSON.stringify({
-                    file,
                     name: clip.name,
                     animated_paths: clip.animated_paths,
                 }, null, 2));
@@ -2125,7 +1866,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             if (options.summary) {
                 console.log(JSON.stringify({
-                    file,
                     name: clip.name,
                     duration: clip.duration,
                     sample_rate: clip.sample_rate,
@@ -2140,7 +1880,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             const output: Record<string, unknown> = {
-                file,
                 name: clip.name,
                 duration: clip.duration,
                 sample_rate: clip.sample_rate,
@@ -2172,7 +1911,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--parameters', 'List parameters only')
         .option('--states', 'List states only (per layer)')
         .option('--transitions', 'List transitions with conditions')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             const ctrlValidationError = validate_unity_yaml(file);
             if (ctrlValidationError) {
@@ -2274,15 +2012,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             const animCache = load_guid_cache_for_file(file, options.project);
 
-            // Check if we should hint about missing GUID cache
-            const has_motion_refs = state_blocks.some(sb => {
-                const motion_line = sb.raw.split(/\r?\n/).find((l: string) => l.trimStart().startsWith('m_Motion:'));
-                if (!motion_line) return false;
-                const ref = parse_inline_ref(motion_line);
-                return ref && ref.guid;
-            });
-            const needs_setup_hint = !animCache && has_motion_refs;
-
             const states: State[] = state_blocks.map(sb => {
                 const name = yaml_field(sb.raw, 'm_Name') || '';
                 const speed = parseFloat(yaml_field(sb.raw, 'm_Speed') || '1');
@@ -2358,7 +2087,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             // Output
             if (options.parameters) {
-                console.log(JSON.stringify({ file, parameters: params }, null, 2));
+                console.log(JSON.stringify({ parameters: params }, null, 2));
                 return;
             }
             if (options.states) {
@@ -2370,8 +2099,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                         motion_path: s.motion_ref ? animCache?.resolve(s.motion_ref) ?? null : null,
                     });
                 }
-                const states_out: Record<string, unknown> = { file, states_by_layer: by_layer };
-                if (needs_setup_hint) states_out._hint = "Run 'setup' (or 'setup -p <path>') to resolve motion paths";
+                const states_out: Record<string, unknown> = { states_by_layer: by_layer };
                 console.log(JSON.stringify(states_out, null, 2));
                 return;
             }
@@ -2384,12 +2112,11 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     source_state: state_names[t.source_state_id] || t.source_state_id,
                     destination_state: state_names[t.destination_state_id] || t.destination_state_id,
                 }));
-                console.log(JSON.stringify({ file, transitions: resolved }, null, 2));
+                console.log(JSON.stringify({ transitions: resolved }, null, 2));
                 return;
             }
             if (options.summary) {
                 console.log(JSON.stringify({
-                    file,
                     name: yaml_field(controller_block.raw, 'm_Name') || basename(file),
                     parameter_count: params.length,
                     layer_count: layers.length,
@@ -2404,7 +2131,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             for (const s of states) default_state_names[s.file_id] = s.name;
 
             const default_out: Record<string, unknown> = {
-                file,
                 name: yaml_field(controller_block.raw, 'm_Name') || basename(file),
                 parameters: params,
                 layers: layers.map(l => l.name),
@@ -2419,7 +2145,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     has_exit_time: t.has_exit_time,
                 })),
             };
-            if (needs_setup_hint) default_out._hint = "Run 'setup' (or 'setup -p <path>') to resolve motion paths";
             console.log(JSON.stringify(default_out, null, 2));
         });
 
@@ -2428,7 +2153,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .description('Find which files reference a given GUID (reverse dependency lookup)')
         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('--type <type>', 'Filter to specific file types (scene, prefab, mat, etc.)')
-        .option('-j, --json', 'Output as JSON')
         .action((guid, options) => {
             if (!/^[0-9a-f]{32}$/i.test(guid)) {
                 console.log(JSON.stringify({ error: 'GUID must be a 32-character hexadecimal string' }, null, 2));
@@ -2477,7 +2201,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             console.log(JSON.stringify({
-                project_path: resolve(project_path),
                 guid,
                 total_references: filtered.length,
                 by_type,
@@ -2491,7 +2214,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--type <type>', 'Filter to specific asset types')
         .option('--ignore <glob>', 'Exclude paths matching this pattern')
         .option('--max <n>', 'Maximum results to return (default 200)', '200')
-        .option('-j, --json', 'Output as JSON')
         .action((options) => {
             const resolvedProject = resolve_project_path(options.project);
             const assetsDir = join(resolvedProject, 'Assets');
@@ -2586,7 +2308,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             console.log(JSON.stringify({
-                project_path: resolvedProject,
                 total_assets: Object.keys(guidCache).length,
                 referenced: referenced_guids.size,
                 potentially_unused: unused.length,
@@ -2600,7 +2321,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .description('List packages from Packages/manifest.json')
         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('--search <pattern>', 'Filter packages by name pattern')
-        .option('-j, --json', 'Output as JSON')
         .action((options) => {
             const project_path = resolve_project_path(options.project);
             const result = list_packages(project_path, options.search);
@@ -2609,7 +2329,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 process.exitCode = 1;
                 return;
             }
-            console.log(JSON.stringify({ success: true, ...result }, null, 2));
+            console.log(JSON.stringify({ packages: result.packages }, null, 2));
         });
 
     // ========== Input Actions reading ==========
@@ -2619,7 +2339,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--maps', 'List action maps only')
         .option('--actions', 'List all actions grouped by map')
         .option('--bindings', 'List all bindings grouped by action')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             if (!file.endsWith('.inputactions')) {
                 console.log(JSON.stringify({ success: false, error: `File is not an Input Actions file (.inputactions): ${file}` }, null, 2));
@@ -2638,7 +2357,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 const total_actions = ia.maps.reduce((sum, m) => sum + m.actions.length, 0);
                 const total_bindings = ia.maps.reduce((sum, m) => sum + m.bindings.length, 0);
                 console.log(JSON.stringify({
-                    file,
                     name: ia.name,
                     map_count: ia.maps.length,
                     action_count: total_actions,
@@ -2650,7 +2368,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             if (options.maps) {
                 console.log(JSON.stringify({
-                    file,
                     maps: ia.maps.map(m => ({ name: m.name, action_count: m.actions.length, binding_count: m.bindings.length })),
                 }, null, 2));
                 return;
@@ -2661,7 +2378,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 for (const m of ia.maps) {
                     by_map[m.name] = m.actions.map(a => ({ name: a.name, type: a.type, expectedControlType: a.expectedControlType }));
                 }
-                console.log(JSON.stringify({ file, actions_by_map: by_map }, null, 2));
+                console.log(JSON.stringify({ actions_by_map: by_map }, null, 2));
                 return;
             }
 
@@ -2675,12 +2392,12 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                         by_map[m.name][action_name].push({ path: b.path, groups: b.groups });
                     }
                 }
-                console.log(JSON.stringify({ file, bindings_by_map: by_map }, null, 2));
+                console.log(JSON.stringify({ bindings_by_map: by_map }, null, 2));
                 return;
             }
 
             // Full output
-            console.log(JSON.stringify({ file, ...ia }, null, 2));
+            console.log(JSON.stringify(ia, null, 2));
         });
 
     return cmd;

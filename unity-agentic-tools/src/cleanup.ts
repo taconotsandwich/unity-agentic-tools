@@ -5,6 +5,8 @@ const CONFIG_DIR = '.unity-agentic';
 const CONFIG_FILE = 'config.json';
 const GUID_CACHE_FILE = 'guid-cache.json';
 const DOC_INDEX_FILE = 'doc-index.json';
+const EDITOR_LOCK_FILE = 'editor.json';
+const LAST_EDITOR_CONFIG_FILE = 'editor.last.json';
 
 export interface CleanupOptions {
   project?: string;
@@ -32,7 +34,6 @@ export function cleanup(options: CleanupOptions = {}): CleanupResult {
       project_path: projectPath,
       files_removed: [],
       directory_removed: false,
-      error: `No ${CONFIG_DIR} directory found`,
     };
   }
 
@@ -55,8 +56,13 @@ export function cleanup(options: CleanupOptions = {}): CleanupResult {
       };
     }
   } else {
-    // Remove only cache files, keep config
-    const filesToRemove = [GUID_CACHE_FILE, DOC_INDEX_FILE];
+    // Remove transient cache/runtime files, keep durable config.
+    const filesToRemove = [
+      GUID_CACHE_FILE,
+      DOC_INDEX_FILE,
+      EDITOR_LOCK_FILE,
+      LAST_EDITOR_CONFIG_FILE,
+    ];
 
     for (const file of filesToRemove) {
       const filePath = join(configPath, file);

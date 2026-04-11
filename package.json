@@ -13,6 +13,7 @@
     "test:quick": "cd unity-agentic-tools && bun run test",
     "test:all": "bun run test && bun run test:integration",
     "test:integration": "cd unity-agentic-tools && bash test/cli-integration.test.sh",
+    "test:integration:unity": "cd unity-agentic-tools && bun run test:unity-headless",
     "test:coverage": "cd unity-agentic-tools && bun run test:coverage",
     "check:classids": "bun scripts/check-classid-drift.js",
     "type-check": "cd unity-agentic-tools && tsc --noEmit && cd ../doc-indexer && tsc --noEmit",
