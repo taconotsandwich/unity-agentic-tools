@@ -4,6 +4,7 @@ import { remove_scene } from './build-editor';
 import { remove_package } from './packages';
 import { resolve_project_path } from './utils';
 import { enforce_loaded_edit_protection, is_editor_connected_for_project } from './loaded-protection';
+import { to_cli_output } from './cli-output';
 
 export function build_delete_command(): Command {
     const cmd = new Command('delete')
@@ -12,11 +13,10 @@ export function build_delete_command(): Command {
     cmd.command('gameobject <file> <object_name>')
         .description('Delete a GameObject and its hierarchy from a Unity file')
         .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
-        .option('-j, --json', 'Output as JSON')
         .action(async (file, object_name, options) => {
             const guard = await enforce_loaded_edit_protection(file, options.bypassLoadedProtection);
             if (!guard.allowed) {
-                console.log(JSON.stringify({ success: false, file_path: file, error: guard.error }, null, 2));
+                console.log(JSON.stringify({ success: false, error: guard.error }, null, 2));
                 process.exitCode = 1;
                 return;
             }
@@ -25,7 +25,7 @@ export function build_delete_command(): Command {
                 object_name: object_name,
             });
 
-            console.log(JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(to_cli_output(result as unknown as Record<string, unknown>, { drop_keys: ['file_path'] }), null, 2));
             if (!result.success) process.exitCode = 1;
         });
 
@@ -35,7 +35,6 @@ export function build_delete_command(): Command {
         .option('-p, --project <path>', 'Unity project path (for script GUID lookup)')
         .option('--all', 'Remove from all scenes and prefabs in the project (first arg becomes project path)')
         .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
-        .option('-j, --json', 'Output as JSON')
         .action(async (file_or_project, component, options) => {
             if (options.all) {
                 const resolvedProjectPath = resolve_project_path(file_or_project);
@@ -55,12 +54,12 @@ export function build_delete_command(): Command {
                     component_type: component,
                     game_object: options.on,
                 });
-                console.log(JSON.stringify(result, null, 2));
+                console.log(JSON.stringify(to_cli_output(result as unknown as Record<string, unknown>, { drop_keys: ['project_path'] }), null, 2));
                 if (!result.success) process.exitCode = 1;
             } else {
                 const guard = await enforce_loaded_edit_protection(file_or_project, options.bypassLoadedProtection, options.project);
                 if (!guard.allowed) {
-                    console.log(JSON.stringify({ success: false, file_path: file_or_project, error: guard.error }, null, 2));
+                    console.log(JSON.stringify({ success: false, error: guard.error }, null, 2));
                     process.exitCode = 1;
                     return;
                 }
@@ -70,7 +69,11 @@ export function build_delete_command(): Command {
                     game_object: options.on,
                     project_path: options.project,
                 });
-                console.log(JSON.stringify(result, null, 2));
+                console.log(JSON.stringify(
+                    to_cli_output(result as unknown as Record<string, unknown>, { drop_keys: ['file_path', 'warning'] }),
+                    null,
+                    2
+                ));
                 if (!result.success) process.exitCode = 1;
             }
         });
@@ -78,12 +81,11 @@ export function build_delete_command(): Command {
     cmd.command('build <scene_path>')
         .description('Remove a scene from build settings')
         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
-        .option('-j, --json', 'Output as JSON')
         .action((scene_path, options) => {
             const resolvedProjectPath = resolve_project_path(options.project);
             try {
                 const result = remove_scene(resolvedProjectPath, scene_path);
-                console.log(JSON.stringify(result, null, 2));
+                console.log(JSON.stringify(to_cli_output(result as unknown as Record<string, unknown>), null, 2));
                 if (!result.success) process.exitCode = 1;
             } catch (err) {
                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
@@ -94,11 +96,10 @@ export function build_delete_command(): Command {
     cmd.command('prefab <file> <prefab_instance>')
         .description('Delete a PrefabInstance and all its stripped/added blocks from a Unity file')
         .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
-        .option('-j, --json', 'Output as JSON')
         .action(async (file, prefab_instance, options) => {
             const guard = await enforce_loaded_edit_protection(file, options.bypassLoadedProtection);
             if (!guard.allowed) {
-                console.log(JSON.stringify({ success: false, file_path: file, error: guard.error }, null, 2));
+                console.log(JSON.stringify({ success: false, error: guard.error }, null, 2));
                 process.exitCode = 1;
                 return;
             }
@@ -106,23 +107,26 @@ export function build_delete_command(): Command {
                 file_path: file,
                 prefab_instance,
             });
-            console.log(JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(to_cli_output(result as unknown as Record<string, unknown>, { drop_keys: ['file_path'] }), null, 2));
             if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('asset <file>')
         .description('Delete an asset file and its .meta sidecar (missing .meta => warning)')
         .option('--bypass-loaded-protection', 'Allow editing files currently loaded in Unity Editor')
-        .option('-j, --json', 'Output as JSON')
         .action(async (file, options) => {
             const guard = await enforce_loaded_edit_protection(file, options.bypassLoadedProtection);
             if (!guard.allowed) {
-                console.log(JSON.stringify({ success: false, file_path: file, error: guard.error }, null, 2));
+                console.log(JSON.stringify({ success: false, error: guard.error }, null, 2));
                 process.exitCode = 1;
                 return;
             }
             const result = deleteAssetFile({ file_path: file });
-            console.log(JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(
+                to_cli_output(result as unknown as Record<string, unknown>, { drop_keys: ['file_path', 'deleted_file', 'warning'] }),
+                null,
+                2
+            ));
             if (!result.success) process.exitCode = 1;
         });
 
@@ -130,7 +134,6 @@ export function build_delete_command(): Command {
     cmd.command('package <name>')
         .description('Remove a package from Packages/manifest.json')
         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
-        .option('-j, --json', 'Output as JSON')
         .action((name, options) => {
             try {
                 const resolvedProjectPath = resolve_project_path(options.project);
@@ -140,7 +143,7 @@ export function build_delete_command(): Command {
                     process.exitCode = 1;
                     return;
                 }
-                console.log(JSON.stringify(result, null, 2));
+                console.log(JSON.stringify(to_cli_output(result as unknown as Record<string, unknown>), null, 2));
             } catch (err: unknown) {
                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
                 process.exitCode = 1;

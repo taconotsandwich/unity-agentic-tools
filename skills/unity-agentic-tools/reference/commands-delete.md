@@ -2,7 +2,7 @@
 
 Authoritative reference for `unity-agentic-tools delete ...` operations that do not require a reachable live editor bridge.
 
-All top-level delete commands support `-j, --json`.
+All top-level delete commands emit JSON output by default.
 
 ## Command matrix
 

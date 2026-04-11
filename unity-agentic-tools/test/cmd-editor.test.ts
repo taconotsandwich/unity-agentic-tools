@@ -105,7 +105,7 @@ describe('cmd-editor', () => {
         test('returns compact output by default flags behavior', () => {
             const root = new Command('unity-agentic-tools');
             const read_cmd = new Command('read').description('Read data');
-            read_cmd.command('scene <file>').description('Read scene').option('--json', 'Output json');
+            read_cmd.command('scene <file>').description('Read scene').option('--verbose', 'Verbose output');
             root.addCommand(read_cmd);
 
             const entries = collect_command_entries(root, {

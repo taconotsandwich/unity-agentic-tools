@@ -13,6 +13,7 @@ import { path_glob_to_regex, find_unity_project_root, resolve_project_path } fro
 import { list_packages } from './packages';
 import { load_input_actions } from './input-actions';
 import type { InputActionsFile } from './input-actions';
+import { to_cli_output } from './cli-output';
 
 // ========== Material Parsing ==========
 
@@ -113,6 +114,18 @@ function extract_prefab_list_section(raw: string, key: string): { key_indent: nu
     }
 
     return { key_indent, section_lines };
+}
+
+function to_build_cli_output(result: ReturnType<typeof get_build_settings>): Record<string, unknown> {
+    const { projectPath: _projectPath, buildProfilesPath: _buildProfilesPath, ...project_info } = result.projectInfo;
+
+    return {
+        projectInfo: project_info,
+        editorBuildSettings: result.editorBuildSettings,
+        buildProfiles: result.buildProfiles.map(({ path: _path, ...profile }) => profile),
+        ...(result.activeBuildProfile ? { activeBuildProfile: result.activeBuildProfile } : {}),
+        ...(result.missingScenes ? { missingScenes: result.missingScenes } : {}),
+    };
 }
 
 function parse_removed_list(raw: string, key: string): UnityRefData[] {
@@ -795,7 +808,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
     cmd.command('scene <file>')
         .description('List GameObject hierarchy in a Unity scene or prefab file')
-        .option('-j, --json', 'Output as JSON')
         .option('-p, --properties', 'Include component properties')
         .option('-v, --verbose', 'Show internal Unity IDs')
         .option('--page-size <n>', 'Max objects per page (default 200, max 1000)', '200')
@@ -948,26 +960,26 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 }
                 const prefab_instances = result.prefabInstances?.length || 0;
                 console.log(JSON.stringify({
-                    file: result.file,
                     total_gameobjects: result.totalInScene,
                     total_at_depth: result.total,
                     prefab_instances,
                     component_counts,
-                    ...(result.truncated ? { component_counts_note: 'Counts reflect current page only. Use --page-size or --cursor to see more.' } : {}),
-                    page_shown: gos.length,
                     truncated: result.truncated,
                 }, null, 2));
                 return;
             }
 
-            console.log(JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(
+                to_cli_output(result as unknown as Record<string, unknown>, { drop_keys: ['file', 'warning'] }),
+                null,
+                2
+            ));
         });
 
     cmd.command('gameobject <file> <object_id>')
         .description('Get GameObject details by name or file ID')
         .option('-c, --component <type>', 'Get specific component type')
         .option('-p, --properties', 'Include component properties')
-        .option('-j, --json', 'Output as JSON')
         .option('-v, --verbose', 'Show internal Unity IDs')
         .action((file, object_id, options) => {
             const validationErr = validate_unity_yaml(file);
@@ -1010,7 +1022,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 const comps = result.components.filter(c => c.type === options.component);
                 if (comps.length > 0) {
                     console.log(JSON.stringify({
-                        file,
                         name: result.name,
                         file_id: result.file_id,
                         components: comps,
@@ -1025,14 +1036,13 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 return;
             }
 
-            console.log(JSON.stringify({ file, object: result }, null, 2));
+            console.log(JSON.stringify(result, null, 2));
         });
 
     cmd.command('asset <file>')
         .description('Read any Unity YAML asset file (.asset, .mat, .anim, etc.)')
         .option('-p, --properties', 'Include object properties (omitted by default for token efficiency)')
         .option('--raw', 'Output raw hex data for mesh vertex/index buffers (skip auto-decode)')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             const soValidationError = validate_unity_yaml(file);
             if (soValidationError) {
@@ -1047,8 +1057,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     return rest;
                 });
             const output = {
-                file,
-                count: outputObjects.length,
                 objects: outputObjects,
             };
             console.log(JSON.stringify(output, null, 2));
@@ -1059,7 +1067,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .description('Read a Unity Material file (.mat) with structured property output')
         .option('--project <path>', 'Unity project root (for GUID resolution)')
         .option('--summary', 'Show shader name, property count, texture count only')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             if (!file.toLowerCase().endsWith('.mat')) {
                 console.log(JSON.stringify({ error: `File must be a .mat file: ${file}` }, null, 2));
@@ -1097,7 +1104,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             if (options.summary) {
                 console.log(JSON.stringify({
-                    file,
                     name: mat.name,
                     shader_guid: mat.shader.guid || 'unknown',
                     shader_path,
@@ -1111,7 +1117,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             console.log(JSON.stringify({
-                file,
                 name: mat.name,
                 shader: { ...mat.shader, path: shader_path },
                 render_queue: mat.render_queue,
@@ -1127,7 +1132,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--project <path>', 'Unity project root (for GUID resolution)')
         .option('--unresolved', 'Show only GUIDs that could not be resolved')
         .option('--recursive [depth]', 'Follow dependency chain N levels deep (default: 3)')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             if (!existsSync(file)) {
                 console.log(JSON.stringify({ error: `File not found: ${file}` }, null, 2));
@@ -1153,7 +1157,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             // Load GUID cache for resolution
             const cache = load_guid_cache_for_file(file, options.project);
-            const projectPath = cache?.project_path || options.project || find_project_root_from_file(file);
 
             // Build dependency list
             interface Dependency {
@@ -1264,8 +1267,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 }
 
                 console.log(JSON.stringify({
-                    file,
-                    project_path: projectPath || null,
                     max_depth,
                     total_direct_references: guids.size,
                     total_unique_dependencies: visited.size,
@@ -1275,17 +1276,12 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             const output: Record<string, unknown> = {
-                file,
-                project_path: projectPath || null,
                 total_references: guids.size,
                 resolved: dependencies.filter(d => d.path !== null).length,
                 unresolved: dependencies.filter(d => d.path === null).length,
                 dependencies: options.unresolved ? filtered : undefined,
                 by_type: options.unresolved ? undefined : byType,
             };
-            if (!cache) {
-                output._hint = "Run 'setup' (or 'setup -p <path>') to resolve GUID paths";
-            }
             console.log(JSON.stringify(output, null, 2));
         });
 
@@ -1293,7 +1289,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .description('Read Unity project settings (TagManager, DynamicsManager, QualitySettings, TimeManager, etc.)')
         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('-s, --setting <name>', 'Setting name or alias (tags, physics, quality, time)', 'TagManager')
-        .option('-j, --json', 'Output as JSON')
         .action((options) => {
             const resolvedProjectPath = resolve_project_path(options.project);
             const result = read_settings({
@@ -1301,19 +1296,22 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 setting: options.setting,
             });
 
-            console.log(JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(
+                to_cli_output(result as unknown as Record<string, unknown>, { drop_keys: ['project_path', 'file_path'] }),
+                null,
+                2
+            ));
             if (!result.success) process.exit(1);
         });
 
     cmd.command('build')
         .description('Read build settings (scene list, build profiles)')
         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
-        .option('-j, --json', 'Output as JSON')
         .action((options) => {
             const resolvedProjectPath = resolve_project_path(options.project);
             try {
                 const result = get_build_settings(resolvedProjectPath);
-                console.log(JSON.stringify(result, null, 2));
+                console.log(JSON.stringify(to_build_cli_output(result), null, 2));
             } catch (err) {
                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
                 process.exitCode = 1;
@@ -1323,12 +1321,11 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
     cmd.command('scenes')
         .description('Read build scenes (alias for "read build")')
         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
-        .option('-j, --json', 'Output as JSON')
         .action((options) => {
             const resolvedProjectPath = resolve_project_path(options.project);
             try {
                 const result = get_build_settings(resolvedProjectPath);
-                console.log(JSON.stringify(result, null, 2));
+                console.log(JSON.stringify(to_build_cli_output(result), null, 2));
             } catch (err) {
                 console.log(JSON.stringify({ success: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
                 process.exitCode = 1;
@@ -1338,7 +1335,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
     cmd.command('overrides <file> <prefab_instance>')
         .description('Read PrefabInstance overrides (modifications + removed/added state)')
         .option('--flat', 'Output simplified list')
-        .option('-j, --json', 'Output as JSON')
         .action((file, prefab_instance, options) => {
             try {
                 const doc = UnityDocument.from_file(file);
@@ -1440,7 +1436,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
     cmd.command('component <file> <file_id>')
         .description('Read a single component by fileID (use -p for content)')
         .option('-p, --properties', 'Include component properties/raw text (required to see values)')
-        .option('-j, --json', 'Output as JSON')
         .action((file, file_id, options) => {
             try {
                 const doc = UnityDocument.from_file(file);
@@ -1452,7 +1447,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 }
 
                 const output: Record<string, unknown> = {
-                    file,
                     file_id: block.file_id,
                     class_id: block.class_id,
                     type_name: block.type_name,
@@ -1475,7 +1469,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .description('Trace fileID references')
         .option('--direction <dir>', 'Direction to trace: in, out, or both (default: both)', 'both')
         .option('--depth <n>', 'Maximum depth to trace (default: 3)', '3')
-        .option('-j, --json', 'Output as JSON')
         .action((file, file_id, options) => {
             try {
                 const doc = UnityDocument.from_file(file);
@@ -1493,7 +1486,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 }
 
                 const edges = doc.trace_references(file_id, direction, depth);
-                console.log(JSON.stringify({ file, file_id, direction, depth, edges }, null, 2));
+                console.log(JSON.stringify({ file_id, direction, depth, edges }, null, 2));
             } catch (err) {
                 console.log(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }, null, 2));
                 process.exit(1);
@@ -1503,7 +1496,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
     cmd.command('target <file> <gameobject_name> [component_type]')
         .description('Build a --target reference string for prefab override commands')
         .option('-p, --project <path>', 'Unity project path')
-        .option('-j, --json', 'Output as JSON')
         .action((file, gameobject_name, component_type, options) => {
             try {
                 if (!existsSync(file)) {
@@ -1631,12 +1623,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 }
 
                 const target = `{fileID: ${targetFileId!}, guid: ${guid}, type: 3}`;
-                console.log(JSON.stringify({
-                    target,
-                    file_id: targetFileId!,
-                    guid,
-                    type: 3,
-                }, null, 2));
+                console.log(JSON.stringify({ target }, null, 2));
             } catch (err) {
                 console.log(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }, null, 2));
                 process.exit(1);
@@ -1645,7 +1632,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
     cmd.command('script <file>')
         .description('Extract C# type declarations from a .cs file or .NET DLL')
-        .option('-j, --json', 'Output as JSON')
         .action((file, _options) => {
             if (!existsSync(file)) {
                 console.log(JSON.stringify({ error: `File not found: ${file}` }, null, 2));
@@ -1667,7 +1653,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     process.exit(1);
                 }
                 const types = extractDll(file);
-                console.log(JSON.stringify({ file, types }, null, 2));
+                console.log(JSON.stringify({ types }, null, 2));
             } else {
                 const extractCs = getNativeExtractCsharpTypes();
                 if (!extractCs) {
@@ -1675,7 +1661,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     process.exit(1);
                 }
                 const types = extractCs(file);
-                console.log(JSON.stringify({ file, types }, null, 2));
+                console.log(JSON.stringify({ types }, null, 2));
             }
         });
 
@@ -1688,7 +1674,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--kind <kind>', 'Filter by kind: class, struct, enum, interface')
         .option('--source <source>', 'Filter by source: assets, packages, dlls, all', 'all')
         .option('--max <n>', 'Maximum results to return', '100')
-        .option('-j, --json', 'Output as JSON')
         .action((options) => {
             if (options.filter && !options.name) options.name = options.filter;
             const buildRegistry = getNativeBuildTypeRegistry();
@@ -1745,7 +1730,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             const displayed = types.slice(0, maxResults);
 
             console.log(JSON.stringify({
-                project: projectPath,
                 total: types.length,
                 truncated,
                 types: displayed,
@@ -1756,7 +1740,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
     cmd.command('meta <file>')
         .description('Read a Unity .meta file and show importer settings')
         .option('--summary', 'Show importer type and key settings only')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             const metaPath = file.endsWith('.meta') ? file : `${file}.meta`;
             if (!existsSync(metaPath)) {
@@ -1829,7 +1812,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     if (settings[key]) key_settings[key] = settings[key];
                 }
                 console.log(JSON.stringify({
-                    file: metaPath,
                     guid,
                     importer_type,
                     settings: key_settings,
@@ -1841,7 +1823,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             console.log(JSON.stringify({
-                file: metaPath,
                 guid,
                 importer_type,
                 assetBundleName,
@@ -1857,7 +1838,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--summary', 'Show name, duration, curve count, event count only')
         .option('--paths', 'List only animated property paths')
         .option('--curves', 'Show full keyframe data per curve')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             const animValidationError = validate_unity_yaml(file);
             if (animValidationError) {
@@ -1878,7 +1858,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             if (options.paths) {
                 console.log(JSON.stringify({
-                    file,
                     name: clip.name,
                     animated_paths: clip.animated_paths,
                 }, null, 2));
@@ -1887,7 +1866,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             if (options.summary) {
                 console.log(JSON.stringify({
-                    file,
                     name: clip.name,
                     duration: clip.duration,
                     sample_rate: clip.sample_rate,
@@ -1902,7 +1880,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             const output: Record<string, unknown> = {
-                file,
                 name: clip.name,
                 duration: clip.duration,
                 sample_rate: clip.sample_rate,
@@ -1934,7 +1911,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--parameters', 'List parameters only')
         .option('--states', 'List states only (per layer)')
         .option('--transitions', 'List transitions with conditions')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             const ctrlValidationError = validate_unity_yaml(file);
             if (ctrlValidationError) {
@@ -2036,15 +2012,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             const animCache = load_guid_cache_for_file(file, options.project);
 
-            // Check if we should hint about missing GUID cache
-            const has_motion_refs = state_blocks.some(sb => {
-                const motion_line = sb.raw.split(/\r?\n/).find((l: string) => l.trimStart().startsWith('m_Motion:'));
-                if (!motion_line) return false;
-                const ref = parse_inline_ref(motion_line);
-                return ref && ref.guid;
-            });
-            const needs_setup_hint = !animCache && has_motion_refs;
-
             const states: State[] = state_blocks.map(sb => {
                 const name = yaml_field(sb.raw, 'm_Name') || '';
                 const speed = parseFloat(yaml_field(sb.raw, 'm_Speed') || '1');
@@ -2120,7 +2087,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             // Output
             if (options.parameters) {
-                console.log(JSON.stringify({ file, parameters: params }, null, 2));
+                console.log(JSON.stringify({ parameters: params }, null, 2));
                 return;
             }
             if (options.states) {
@@ -2132,8 +2099,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                         motion_path: s.motion_ref ? animCache?.resolve(s.motion_ref) ?? null : null,
                     });
                 }
-                const states_out: Record<string, unknown> = { file, states_by_layer: by_layer };
-                if (needs_setup_hint) states_out._hint = "Run 'setup' (or 'setup -p <path>') to resolve motion paths";
+                const states_out: Record<string, unknown> = { states_by_layer: by_layer };
                 console.log(JSON.stringify(states_out, null, 2));
                 return;
             }
@@ -2146,12 +2112,11 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     source_state: state_names[t.source_state_id] || t.source_state_id,
                     destination_state: state_names[t.destination_state_id] || t.destination_state_id,
                 }));
-                console.log(JSON.stringify({ file, transitions: resolved }, null, 2));
+                console.log(JSON.stringify({ transitions: resolved }, null, 2));
                 return;
             }
             if (options.summary) {
                 console.log(JSON.stringify({
-                    file,
                     name: yaml_field(controller_block.raw, 'm_Name') || basename(file),
                     parameter_count: params.length,
                     layer_count: layers.length,
@@ -2166,7 +2131,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             for (const s of states) default_state_names[s.file_id] = s.name;
 
             const default_out: Record<string, unknown> = {
-                file,
                 name: yaml_field(controller_block.raw, 'm_Name') || basename(file),
                 parameters: params,
                 layers: layers.map(l => l.name),
@@ -2181,7 +2145,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                     has_exit_time: t.has_exit_time,
                 })),
             };
-            if (needs_setup_hint) default_out._hint = "Run 'setup' (or 'setup -p <path>') to resolve motion paths";
             console.log(JSON.stringify(default_out, null, 2));
         });
 
@@ -2190,7 +2153,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .description('Find which files reference a given GUID (reverse dependency lookup)')
         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('--type <type>', 'Filter to specific file types (scene, prefab, mat, etc.)')
-        .option('-j, --json', 'Output as JSON')
         .action((guid, options) => {
             if (!/^[0-9a-f]{32}$/i.test(guid)) {
                 console.log(JSON.stringify({ error: 'GUID must be a 32-character hexadecimal string' }, null, 2));
@@ -2239,7 +2201,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             console.log(JSON.stringify({
-                project_path: resolve(project_path),
                 guid,
                 total_references: filtered.length,
                 by_type,
@@ -2253,7 +2214,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--type <type>', 'Filter to specific asset types')
         .option('--ignore <glob>', 'Exclude paths matching this pattern')
         .option('--max <n>', 'Maximum results to return (default 200)', '200')
-        .option('-j, --json', 'Output as JSON')
         .action((options) => {
             const resolvedProject = resolve_project_path(options.project);
             const assetsDir = join(resolvedProject, 'Assets');
@@ -2348,7 +2308,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
             }
 
             console.log(JSON.stringify({
-                project_path: resolvedProject,
                 total_assets: Object.keys(guidCache).length,
                 referenced: referenced_guids.size,
                 potentially_unused: unused.length,
@@ -2362,7 +2321,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .description('List packages from Packages/manifest.json')
         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
         .option('--search <pattern>', 'Filter packages by name pattern')
-        .option('-j, --json', 'Output as JSON')
         .action((options) => {
             const project_path = resolve_project_path(options.project);
             const result = list_packages(project_path, options.search);
@@ -2371,7 +2329,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 process.exitCode = 1;
                 return;
             }
-            console.log(JSON.stringify({ success: true, ...result }, null, 2));
+            console.log(JSON.stringify({ packages: result.packages }, null, 2));
         });
 
     // ========== Input Actions reading ==========
@@ -2381,7 +2339,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
         .option('--maps', 'List action maps only')
         .option('--actions', 'List all actions grouped by map')
         .option('--bindings', 'List all bindings grouped by action')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             if (!file.endsWith('.inputactions')) {
                 console.log(JSON.stringify({ success: false, error: `File is not an Input Actions file (.inputactions): ${file}` }, null, 2));
@@ -2400,7 +2357,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 const total_actions = ia.maps.reduce((sum, m) => sum + m.actions.length, 0);
                 const total_bindings = ia.maps.reduce((sum, m) => sum + m.bindings.length, 0);
                 console.log(JSON.stringify({
-                    file,
                     name: ia.name,
                     map_count: ia.maps.length,
                     action_count: total_actions,
@@ -2412,7 +2368,6 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
 
             if (options.maps) {
                 console.log(JSON.stringify({
-                    file,
                     maps: ia.maps.map(m => ({ name: m.name, action_count: m.actions.length, binding_count: m.bindings.length })),
                 }, null, 2));
                 return;
@@ -2423,7 +2378,7 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                 for (const m of ia.maps) {
                     by_map[m.name] = m.actions.map(a => ({ name: a.name, type: a.type, expectedControlType: a.expectedControlType }));
                 }
-                console.log(JSON.stringify({ file, actions_by_map: by_map }, null, 2));
+                console.log(JSON.stringify({ actions_by_map: by_map }, null, 2));
                 return;
             }
 
@@ -2437,12 +2392,12 @@ export function build_read_command(getScanner: () => UnityScanner): Command {
                         by_map[m.name][action_name].push({ path: b.path, groups: b.groups });
                     }
                 }
-                console.log(JSON.stringify({ file, bindings_by_map: by_map }, null, 2));
+                console.log(JSON.stringify({ bindings_by_map: by_map }, null, 2));
                 return;
             }
 
             // Full output
-            console.log(JSON.stringify({ file, ...ia }, null, 2));
+            console.log(JSON.stringify(ia, null, 2));
         });
 
     return cmd;

@@ -34,7 +34,6 @@ export function cleanup(options: CleanupOptions = {}): CleanupResult {
       project_path: projectPath,
       files_removed: [],
       directory_removed: false,
-      error: `No ${CONFIG_DIR} directory found`,
     };
   }
 

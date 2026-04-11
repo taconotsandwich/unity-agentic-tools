@@ -37,7 +37,7 @@ run_cli() {
 
 # Test 1: List GameObjects
 echo "Test 1: List GameObjects"
-if run_cli "test1" bun dist/cli.js read scene test/fixtures/SampleScene.unity --json; then
+if run_cli "test1" bun dist/cli.js read scene test/fixtures/SampleScene.unity; then
     echo "✓ List command works"
 else
     echo "✗ List command failed"
@@ -47,7 +47,7 @@ fi
 # Test 2: Search GameObjects in file (exact)
 echo ""
 echo "Test 2: Search GameObjects in file (exact match)"
-if run_cli "test2" bun dist/cli.js search test/fixtures/SampleScene.unity "Player" --exact --json; then
+if run_cli "test2" bun dist/cli.js search test/fixtures/SampleScene.unity "Player" --exact; then
     echo "✓ Search (file mode) exact command works"
 else
     echo "✗ Search (file mode) exact command failed"
@@ -57,7 +57,7 @@ fi
 # Test 3: Get object by name
 echo ""
 echo "Test 3: Get GameObject by name"
-if run_cli "test3" bun dist/cli.js read gameobject test/fixtures/SampleScene.unity "Player" --json; then
+if run_cli "test3" bun dist/cli.js read gameobject test/fixtures/SampleScene.unity "Player"; then
     echo "✓ Get command works"
 else
     echo "✗ Get command failed"
@@ -118,7 +118,7 @@ fi
 # Test 5: Search PrefabInstance by name in file
 echo ""
 echo "Test 5: Search PrefabInstance by name in file"
-search_prefab_output=$(bun dist/cli.js search test/fixtures/SceneWithPrefab.unity "MyEnemy" --json 2>&1)
+search_prefab_output=$(bun dist/cli.js search test/fixtures/SceneWithPrefab.unity "MyEnemy" 2>&1)
 if echo "$search_prefab_output" | grep -q '"resultType": "PrefabInstance"'; then
     echo "✓ Search returns PrefabInstance results"
 else
@@ -130,7 +130,7 @@ fi
 # Test 6: Search returns mixed results (GO + PrefabInstance)
 echo ""
 echo "Test 6: Search mixed results (GameObject + PrefabInstance)"
-search_mixed_output=$(bun dist/cli.js search test/fixtures/SceneWithPrefab.unity "m" --json 2>&1)
+search_mixed_output=$(bun dist/cli.js search test/fixtures/SceneWithPrefab.unity "m" 2>&1)
 has_go=$(echo "$search_mixed_output" | grep -c '"resultType": "GameObject"' || true)
 has_pi=$(echo "$search_mixed_output" | grep -c '"resultType": "PrefabInstance"' || true)
 if [ "$has_go" -gt 0 ] && [ "$has_pi" -gt 0 ]; then
@@ -151,8 +151,8 @@ perl -pe 's/\n/\r\n/' "$fixture_path" > "$tmp_dir/crlf-scene.unity"
 # Verify the file actually has CRLF
 if file "$tmp_dir/crlf-scene.unity" | grep -q "CRLF\|CR"; then
     # Read scene (CRLF) and compare object count to LF original
-    lf_count=$(bun dist/cli.js read scene "$fixture_path" --json 2>/dev/null | grep -c '"name"' || true)
-    crlf_count=$(bun dist/cli.js read scene "$tmp_dir/crlf-scene.unity" --json 2>/dev/null | grep -c '"name"' || true)
+    lf_count=$(bun dist/cli.js read scene "$fixture_path" 2>/dev/null | grep -c '"name"' || true)
+    crlf_count=$(bun dist/cli.js read scene "$tmp_dir/crlf-scene.unity" 2>/dev/null | grep -c '"name"' || true)
 
     if [ "$crlf_count" -gt 0 ] && [ "$crlf_count" -eq "$lf_count" ]; then
         echo "✓ CRLF read scene: $crlf_count objects (matches LF)"
@@ -162,8 +162,8 @@ if file "$tmp_dir/crlf-scene.unity" | grep -q "CRLF\|CR"; then
     fi
 
     # Search by name in CRLF file
-    crlf_search=$(bun dist/cli.js search "$tmp_dir/crlf-scene.unity" "Player" --exact --json 2>/dev/null)
-    if echo "$crlf_search" | grep -q '"count": 1'; then
+    crlf_search=$(bun dist/cli.js search "$tmp_dir/crlf-scene.unity" "Player" --exact 2>/dev/null)
+    if echo "$crlf_search" | grep -q '"name": "Player"'; then
         echo "✓ CRLF search works"
     else
         echo "✗ CRLF search failed"
@@ -171,7 +171,7 @@ if file "$tmp_dir/crlf-scene.unity" | grep -q "CRLF\|CR"; then
     fi
 
     # Inspect in CRLF file
-    if run_cli "test13_inspect" bun dist/cli.js read gameobject "$tmp_dir/crlf-scene.unity" "Player" --json; then
+    if run_cli "test13_inspect" bun dist/cli.js read gameobject "$tmp_dir/crlf-scene.unity" "Player"; then
         echo "✓ CRLF inspect works"
     else
         echo "✗ CRLF inspect failed"

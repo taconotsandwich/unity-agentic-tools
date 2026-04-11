@@ -5,7 +5,7 @@ Authoritative reference for `unity-agentic-tools update ...` operations that do 
 This reference covers only non-editor-dependent update operations.
 Top-level `update` is limited to small in-place value edits. Scene/prefab mutation moved to `unity-agentic-tools editor invoke UnityAgenticTools.Update.* ...` under `unity-agentic-editor`.
 
-All top-level update commands support `-j, --json`.
+All top-level update commands emit JSON output by default.
 
 ## Command matrix
 

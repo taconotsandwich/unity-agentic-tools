@@ -5,6 +5,7 @@ import type { UnityScanner } from './scanner';
 import { editComponentByFileId } from './editor';
 import { edit_settings, edit_layer } from './settings';
 import { resolve_project_path } from './utils';
+import { to_cli_output } from './cli-output';
 
 export function build_update_command(getScanner: () => UnityScanner): Command {
     const cmd = new Command('update')
@@ -13,7 +14,6 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
     cmd.command('scriptable-object <file> <property> <value>')
         .description('Edit a property in a .asset file (first object, or specify --file-id)')
         .option('--file-id <id>', 'Target a specific block by file ID instead of the first object')
-        .option('-j, --json', 'Output as JSON')
         .action((file, property, value, options) => {
             if (!file.endsWith('.asset')) {
                 console.log(JSON.stringify({ success: false, error: `File is not a ScriptableObject (.asset): ${file}` }, null, 2));
@@ -46,7 +46,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                     .replace(/component \d+/g, (m) => m.replace('component', 'object'));
             }
 
-            console.log(JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(to_cli_output(result as unknown as Record<string, unknown>, { drop_keys: ['file_path'] }), null, 2));
             if (!result.success) process.exitCode = 1;
         });
 
@@ -56,7 +56,6 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .option('-s, --setting <name>', 'Setting name or alias')
         .option('--property <name>', 'Property name to edit')
         .option('--value <value>', 'New value')
-        .option('-j, --json', 'Output as JSON')
         .action((options) => {
             if (!options.setting || !options.property || !options.value) {
                 console.log(JSON.stringify({ success: false, error: 'Required: --setting, --property, --value' }, null, 2));
@@ -71,14 +70,17 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 value: options.value,
             });
 
-            console.log(JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(
+                to_cli_output(result as unknown as Record<string, unknown>, { drop_keys: ['project_path', 'file_path'] }),
+                null,
+                2
+            ));
             if (!result.success) process.exitCode = 1;
         });
 
     cmd.command('layer <index> <name>')
         .description('Set a named layer at a specific index (3-31)')
         .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
-        .option('-j, --json', 'Output as JSON')
         .action((index, name, options) => {
             const resolvedProjectPath = resolve_project_path(options.project);
             const result = edit_layer({
@@ -87,7 +89,11 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 name,
             });
 
-            console.log(JSON.stringify(result, null, 2));
+            console.log(JSON.stringify(
+                to_cli_output(result as unknown as Record<string, unknown>, { drop_keys: ['project_path', 'file_path'] }),
+                null,
+                2
+            ));
             if (!result.success) process.exitCode = 1;
         });
 
@@ -97,7 +103,6 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .option('--set-color <property=r,g,b,a>', 'Set a color property (e.g., _Color=1,0,0,1)', (v: string, p: string[]) => [...p, v], [] as string[])
         .option('--set-texture <property=guid>', 'Set a texture property GUID (e.g., _MainTex=abc123)')
         .option('--shader <guid>', 'Change shader reference GUID')
-        .option('-j, --json', 'Output as JSON')
         .configureOutput({
             writeErr: (str: string) => {
                 if (str.includes('too many arguments')) {
@@ -200,13 +205,13 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             // Check if any real modifications were made (vs all skipped)
             const has_real_changes = changes.some(c => !c.includes('(skipped)'));
             if (!has_real_changes) {
-                console.log(JSON.stringify({ success: false, file, changes, error: 'No properties were modified (all targets not found)' }, null, 2));
+                console.log(JSON.stringify({ success: false, changes, error: 'No properties were modified (all targets not found)' }, null, 2));
                 process.exitCode = 1;
                 return;
             }
 
             writeFileSync(file, content, 'utf-8');
-            console.log(JSON.stringify({ success: true, file, changes }, null, 2));
+            console.log(JSON.stringify({ changes }, null, 2));
         });
 
     cmd.command('meta [file]')
@@ -219,7 +224,6 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
         .option('--no-read-write', 'Disable isReadable')
         .option('--batch <glob>', 'Apply to all matching files')
         .option('--dry-run', 'Preview changes without writing')
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             if (!file && !options.batch) {
                 console.log(JSON.stringify({ success: false, error: 'Provide a file path or use --batch <glob>' }, null, 2));
@@ -312,7 +316,6 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
                 }
 
                 console.log(JSON.stringify({
-                    success: true,
                     dry_run: !!options.dryRun,
                     files_matched: meta_files.length,
                     files_modified: results.length,
@@ -342,18 +345,17 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             }
 
             if (options.dryRun) {
-                console.log(JSON.stringify({ success: true, dry_run: true, file: metaPath, changes }, null, 2));
+                console.log(JSON.stringify({ dry_run: true, changes }, null, 2));
                 return;
             }
 
             writeFileSync(metaPath, content, 'utf-8');
-            console.log(JSON.stringify({ success: true, file: metaPath, changes }, null, 2));
+            console.log(JSON.stringify({ changes }, null, 2));
         });
 
     cmd.command('animation <file>')
         .description('Edit existing AnimationClip settings')
         .option('--set <property=value>', 'Set a clip property (e.g., wrap-mode=2 for Loop)', (v: string, p: string[]) => [...p, v], [] as string[])
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             if (!existsSync(file)) {
                 console.log(JSON.stringify({ success: false, error: `File not found: ${file}` }, null, 2));
@@ -395,19 +397,18 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             // Check if all changes were skipped (no real modifications)
             const has_real_anim_changes = changes.some(c => !c.includes('(skipped)'));
             if (!has_real_anim_changes) {
-                console.log(JSON.stringify({ success: false, file, changes, error: 'No properties were modified (all targets not found)' }, null, 2));
+                console.log(JSON.stringify({ success: false, changes, error: 'No properties were modified (all targets not found)' }, null, 2));
                 process.exitCode = 1;
                 return;
             }
 
             writeFileSync(file, content, 'utf-8');
-            console.log(JSON.stringify({ success: true, file, changes }, null, 2));
+            console.log(JSON.stringify({ changes }, null, 2));
         });
 
     cmd.command('animator <file>')
         .description('Edit existing AnimatorController parameter default values')
         .option('--set-default <param=value>', 'Set parameter default value (e.g., Speed=1.5)', (v: string, p: string[]) => [...p, v], [] as string[])
-        .option('-j, --json', 'Output as JSON')
         .action((file, options) => {
             if (!existsSync(file)) {
                 console.log(JSON.stringify({ success: false, error: `File not found: ${file}` }, null, 2));
@@ -478,7 +479,7 @@ export function build_update_command(getScanner: () => UnityScanner): Command {
             // Restore original line endings
             if (had_crlf) content = content.replace(/\n/g, '\r\n');
             writeFileSync(file, content, 'utf-8');
-            console.log(JSON.stringify({ success: true, file, changes }, null, 2));
+            console.log(JSON.stringify({ changes }, null, 2));
         });
 
     return cmd;

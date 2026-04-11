@@ -12,7 +12,7 @@ CLI: `unity-agentic-tools <command>`
 
 **CRITICAL: Use the CLI for ALL Unity operations. NEVER manually read, edit, write, or grep Unity files (.unity, .prefab, .asset, .mat, .anim, .controller, .meta, ProjectSettings/) using Read, Edit, Write, or Grep tools. NEVER manually edit Unity C# scripts or Editor bridge code. The CLI handles YAML parsing, GUID preservation, and safe editing. Manual file access will break things.**
 
-All commands accept `-j`/`--json` for structured output.
+Commands emit structured JSON by default.
 
 ## Single source of truth routing
 

@@ -51,7 +51,6 @@ describeIfNative('CLI', () => {
                 'read', 'gameobject',
                 resolve(fixtures_dir, 'TestSample.unity'),
                 'TestObject',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('file');
@@ -68,7 +67,6 @@ describeIfNative('CLI', () => {
                 'Directional Light',
                 '-c', 'MonoBehaviour',
                 '-p',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('components');
@@ -83,7 +81,6 @@ describeIfNative('CLI', () => {
                 'Player',
                 '-c', 'Transform',
                 '-p',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('components');
@@ -98,7 +95,6 @@ describeIfNative('CLI', () => {
                     resolve(fixtures_dir, 'SampleScene.unity'),
                     'Player',
                     '-c', 'FakeType',
-                    '--json'
                 ]);
                 expect.unreachable('Should have thrown');
             } catch (err: unknown) {
@@ -116,7 +112,6 @@ describeIfNative('CLI', () => {
             const result = run_cli([
                 'read', 'scene',
                 resolve(fixtures_dir, 'TestSample.unity'),
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('file');
@@ -133,7 +128,6 @@ describeIfNative('CLI', () => {
                 'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--page-size', '2',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json.total).toBe(4);
@@ -150,7 +144,6 @@ describeIfNative('CLI', () => {
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--page-size', '2',
                 '--cursor', '2',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json.total).toBe(4);
@@ -164,7 +157,6 @@ describeIfNative('CLI', () => {
                 'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--cursor', '999',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json.total).toBe(4);
@@ -177,7 +169,6 @@ describeIfNative('CLI', () => {
                 'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--summary',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('total_gameobjects', 4);
@@ -190,12 +181,12 @@ describeIfNative('CLI', () => {
             const page1 = JSON.parse(run_cli([
                 'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
-                '--page-size', '2', '--cursor', '0', '--json'
+                '--page-size', '2', '--cursor', '0'
             ]));
             const page2 = JSON.parse(run_cli([
                 'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
-                '--page-size', '2', '--cursor', '2', '--json'
+                '--page-size', '2', '--cursor', '2'
             ]));
             const names1 = page1.gameobjects.map((g: GameObjectEntry) => g.name);
             const names2 = page2.gameobjects.map((g: GameObjectEntry) => g.name);
@@ -214,7 +205,6 @@ describeIfNative('CLI', () => {
                 'search',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 'Player',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('file');
@@ -230,7 +220,6 @@ describeIfNative('CLI', () => {
                 'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--properties',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('gameobjects');
@@ -297,7 +286,7 @@ describeIfNative('CLI', () => {
 
             try {
                 const listResult = JSON.parse(run_cli([
-                    'read', 'scene', temp_fixture.temp_path, '--json'
+                    'read', 'scene', temp_fixture.temp_path
                 ]));
                 const mainCamera = listResult.gameobjects.find((g: GameObjectEntry) => g.name === 'Main Camera');
                 const cameraId = mainCamera.components.find((c: ComponentEntry) => c.type === 'Camera').fileId;
@@ -306,12 +295,11 @@ describeIfNative('CLI', () => {
                     'delete', 'component',
                     temp_fixture.temp_path,
                     cameraId,
-                    '--json'
                 ]);
                 const json = JSON.parse(result);
                 expect(json).toHaveProperty('success', true);
                 const refreshed = JSON.parse(run_cli([
-                    'read', 'scene', temp_fixture.temp_path, '--json'
+                    'read', 'scene', temp_fixture.temp_path
                 ]));
                 const refreshedCamera = refreshed.gameobjects.find((g: GameObjectEntry) => g.name === 'Main Camera');
                 expect(refreshedCamera.components.some((c: ComponentEntry) => c.type === 'Camera')).toBe(false);
@@ -332,14 +320,13 @@ describeIfNative('CLI', () => {
                     'delete', 'gameobject',
                     temp_fixture.temp_path,
                     'GameManager',
-                    '--json'
                 ]);
                 const json = JSON.parse(result);
                 expect(json).toHaveProperty('success', true);
 
                 // Verify it's gone
                 const listResult = JSON.parse(run_cli([
-                    'read', 'scene', temp_fixture.temp_path, '--json'
+                    'read', 'scene', temp_fixture.temp_path
                 ]));
                 const names = listResult.gameobjects.map((g: GameObjectEntry) => g.name);
                 expect(names).not.toContain('GameManager');
@@ -366,7 +353,6 @@ describeIfNative('CLI', () => {
                     'clone',
                     temp_fixture.temp_path,
                     'Player',
-                    '--json'
                 ]);
                 const json = JSON.parse(result);
                 expect(json).toHaveProperty('success', true);
@@ -398,7 +384,6 @@ describeIfNative('CLI', () => {
                 'read', 'settings',
                 '--project', external_fixtures,
                 '--setting', 'tags',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('success', true);
@@ -416,7 +401,6 @@ describeIfNative('CLI', () => {
                     '--project', temp_dir,
                     '8',
                     'CLITestLayer',
-                    '--json'
                 ]);
                 const json = JSON.parse(result);
                 expect(json).toHaveProperty('success', true);
@@ -429,7 +413,6 @@ describeIfNative('CLI', () => {
             const result = run_cli([
                 'read', 'settings',
                 '--setting', 'tags',
-                '--json'
             ], external_fixtures);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('success', true);
@@ -446,7 +429,6 @@ describeIfNative('CLI', () => {
                     'update', 'layer',
                     '8',
                     'CLITestLayerCwd',
-                    '--json'
                 ], temp_dir);
                 const json = JSON.parse(result);
                 expect(json).toHaveProperty('success', true);
@@ -458,7 +440,6 @@ describeIfNative('CLI', () => {
         it('should default read build to cwd project', () => {
             const result = run_cli([
                 'read', 'build',
-                '--json'
             ], external_fixtures);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('projectInfo');
@@ -468,7 +449,6 @@ describeIfNative('CLI', () => {
         it('should default read scenes alias to cwd project', () => {
             const result = run_cli([
                 'read', 'scenes',
-                '--json'
             ], external_fixtures);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('projectInfo');
@@ -489,7 +469,6 @@ describeIfNative('CLI', () => {
                     'search',
                     resolve(fixtures_dir, 'SampleScene.unity'),
                     '',
-                    '--json'
                 ]);
                 expect.unreachable('Should have exited with error');
             } catch (err: unknown) {
@@ -504,7 +483,6 @@ describeIfNative('CLI', () => {
                     'search',
                     '/nonexistent/file.unity',
                     'Camera',
-                    '--json'
                 ]);
                 expect.unreachable('Should have exited with error');
             } catch (err: unknown) {
@@ -521,7 +499,6 @@ describeIfNative('CLI', () => {
                     'grep',
                     '',
                     '--project', external_fixtures,
-                    '--json'
                 ]);
                 expect.unreachable('Should have exited with error');
             } catch (err: unknown) {
@@ -537,7 +514,6 @@ describeIfNative('CLI', () => {
                 'search',
                 external_fixtures,
                 '--name', 'Camera',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('success', true);
@@ -549,7 +525,6 @@ describeIfNative('CLI', () => {
                 'grep',
                 'm_Name',
                 '--project', external_fixtures,
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('success', true);
@@ -560,7 +535,6 @@ describeIfNative('CLI', () => {
             const result = run_cli([
                 'grep',
                 'm_Name',
-                '--json'
             ], external_fixtures);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('success', true);
@@ -577,7 +551,6 @@ describeIfNative('CLI', () => {
                 'read', 'overrides',
                 resolve(fixtures_dir, 'SceneWithPrefab.unity'),
                 identifier,
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('prefab_instance_id', '700000');
@@ -603,7 +576,6 @@ describeIfNative('CLI', () => {
                 resolve(fixtures_dir, 'SceneWithPrefab.unity'),
                 '700000',
                 '--flat',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(Array.isArray(json)).toBe(true);
@@ -634,7 +606,6 @@ describeIfNative('CLI', () => {
                     'read', 'overrides',
                     fixture.temp_path,
                     '700000',
-                    '--json'
                 ]);
                 const json = JSON.parse(result);
 
@@ -667,7 +638,6 @@ describeIfNative('CLI', () => {
                     'read', 'overrides',
                     fixture.temp_path,
                     '700000',
-                    '--json'
                 ]);
                 const json = JSON.parse(result);
 
@@ -689,7 +659,6 @@ describeIfNative('CLI', () => {
                     'read', 'overrides',
                     resolve(fixtures_dir, 'SceneWithPrefab.unity'),
                     'NonExistent',
-                    '--json'
                 ]);
                 expect.unreachable('Should have thrown');
             } catch (err: unknown) {
@@ -708,7 +677,6 @@ describeIfNative('CLI', () => {
                 'read', 'component',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '508316494',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('file');
@@ -723,7 +691,6 @@ describeIfNative('CLI', () => {
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '508316494',
                 '-p',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('raw_lines');
@@ -737,7 +704,6 @@ describeIfNative('CLI', () => {
                     'read', 'component',
                     resolve(fixtures_dir, 'SampleScene.unity'),
                     '999999',
-                    '--json'
                 ]);
                 expect.unreachable('Should have thrown');
             } catch (err: unknown) {
@@ -758,7 +724,6 @@ describeIfNative('CLI', () => {
                 '508316491',
                 '--direction', 'out',
                 '--depth', '1',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('file');
@@ -782,7 +747,6 @@ describeIfNative('CLI', () => {
                 '508316491',
                 '--direction', 'in',
                 '--depth', '1',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('direction', 'in');
@@ -799,7 +763,6 @@ describeIfNative('CLI', () => {
                 '508316491',
                 '--direction', 'both',
                 '--depth', '1',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('direction', 'both');
@@ -815,7 +778,6 @@ describeIfNative('CLI', () => {
                 '999999',
                 '--direction', 'out',
                 '--depth', '1',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('edges');
@@ -829,7 +791,6 @@ describeIfNative('CLI', () => {
                 'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--filter-component', 'Camera',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('gameobjects');
@@ -851,7 +812,6 @@ describeIfNative('CLI', () => {
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--filter-component', 'Camera',
                 '--page-size', '1',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('gameobjects');
@@ -870,7 +830,6 @@ describeIfNative('CLI', () => {
                 'read', 'scene',
                 resolve(fixtures_dir, 'SampleScene.unity'),
                 '--filter-component', 'NonExistentComponent',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json.gameobjects).toEqual([]);
@@ -915,7 +874,6 @@ describeIfNative('CLI', () => {
             const result = run_cli([
                 'search', external_fixtures,
                 '--type', type,
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('success', true);
@@ -930,7 +888,6 @@ describeIfNative('CLI', () => {
                 'search', external_fixtures,
                 '--type', 'mat',
                 '--name', 'Outline',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('success', true);
@@ -947,7 +904,6 @@ describeIfNative('CLI', () => {
                 'read', 'animation',
                 resolve(fixtures_dir, 'keyframe-test.anim'),
                 '--curves',
-                '--json'
             ]);
             curves_json = JSON.parse(result);
         });
@@ -995,7 +951,6 @@ describeIfNative('CLI', () => {
             const result = run_cli([
                 'read', 'animation',
                 resolve(fixtures_dir, 'keyframe-test.anim'),
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).not.toHaveProperty('curve_data');
@@ -1009,7 +964,6 @@ describeIfNative('CLI', () => {
             const result = run_cli([
                 'read', 'animation',
                 resolve(fixtures_dir, 'events-test.anim'),
-                '--json'
             ]);
             events_json = JSON.parse(result);
         });
@@ -1036,7 +990,7 @@ describeIfNative('CLI', () => {
             const matFile = resolve(external_fixtures,
                 'Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF - Outline.mat');
             const result = run_cli([
-                'read', 'material', matFile, '--json'
+                'read', 'material', matFile
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('name', 'LiberationSans SDF - Outline');
@@ -1049,7 +1003,7 @@ describeIfNative('CLI', () => {
         it('should parse idle.anim from external fixtures', () => {
             const animFile = resolve(external_fixtures, 'Assets/dog/Animations/idle.anim');
             const result = run_cli([
-                'read', 'animation', animFile, '--json'
+                'read', 'animation', animFile
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('name', 'idle');
@@ -1064,7 +1018,7 @@ describeIfNative('CLI', () => {
         beforeAll(() => {
             const ctrlFile = resolve(external_fixtures, 'Assets/dog/Animations/sr.controller');
             const result = run_cli([
-                'read', 'animator', ctrlFile, '--json'
+                'read', 'animator', ctrlFile
             ]);
             animator_json = JSON.parse(result);
         });
@@ -1095,7 +1049,7 @@ describeIfNative('CLI', () => {
         it('should return states_by_layer with --states', () => {
             const ctrlFile = resolve(external_fixtures, 'Assets/dog/Animations/sr.controller');
             const result = run_cli([
-                'read', 'animator', ctrlFile, '--states', '--json'
+                'read', 'animator', ctrlFile, '--states'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('states_by_layer');
@@ -1106,7 +1060,7 @@ describeIfNative('CLI', () => {
     describe('read animator transition details', () => {
         it('should include transition source/dest in default output', () => {
             const ctrlFile = resolve(fixtures_dir, 'test-animator.controller');
-            const result = run_cli(['read', 'animator', ctrlFile, '--json']);
+            const result = run_cli(['read', 'animator', ctrlFile]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('transitions');
             expect(Array.isArray(json.transitions)).toBe(true);
@@ -1118,7 +1072,7 @@ describeIfNative('CLI', () => {
 
         it('should include exit_time and source_state in --transitions output', () => {
             const ctrlFile = resolve(fixtures_dir, 'test-animator.controller');
-            const result = run_cli(['read', 'animator', ctrlFile, '--transitions', '--json']);
+            const result = run_cli(['read', 'animator', ctrlFile, '--transitions']);
             const json = JSON.parse(result);
             expect(json.transitions.length).toBe(1);
             const t = json.transitions[0];
@@ -1148,7 +1102,7 @@ describeIfNative('CLI', () => {
             buf.write('UnityFS', 0);
             writeFileSync(binFile, buf);
             try {
-                run_cli(['read', 'asset', binFile, '--json']);
+                run_cli(['read', 'asset', binFile]);
                 expect.unreachable('Should have thrown');
             } catch (err: unknown) {
                 if (err instanceof Error && err.message === 'Should have thrown') throw err;
@@ -1164,7 +1118,7 @@ describeIfNative('CLI', () => {
     describe('read asset --properties YAML arrays', () => {
         it('should parse YAML arrays as arrays not flat objects', () => {
             const file = resolve(external_fixtures, 'ProjectSettings/InputManager.asset');
-            const result = run_cli(['read', 'asset', file, '--properties', '--json']);
+            const result = run_cli(['read', 'asset', file, '--properties']);
             const json = JSON.parse(result);
             const obj = json.objects[0];
             expect(obj.properties.Axes).toBeDefined();
@@ -1178,7 +1132,7 @@ describeIfNative('CLI', () => {
     describe('read asset --properties recursive nested structures', () => {
         it('should parse nested sequences (anim PPtrCurves-like pattern)', () => {
             const file = resolve(fixtures_dir, 'events-test.anim');
-            const result = run_cli(['read', 'asset', file, '--properties', '--json']);
+            const result = run_cli(['read', 'asset', file, '--properties']);
             const json = JSON.parse(result);
             const obj = json.objects[0];
             const events = obj.properties.Events;
@@ -1192,7 +1146,7 @@ describeIfNative('CLI', () => {
 
         it('should parse nested maps under empty keys', () => {
             const file = resolve(fixtures_dir, 'events-test.anim');
-            const result = run_cli(['read', 'asset', file, '--properties', '--json']);
+            const result = run_cli(['read', 'asset', file, '--properties']);
             const json = JSON.parse(result);
             const obj = json.objects[0];
             const bounds = obj.properties.Bounds;
@@ -1206,7 +1160,7 @@ describeIfNative('CLI', () => {
     describe('read asset mesh decode', () => {
         it('should decode mesh vertex data by default', () => {
             const file = resolve(fixtures_dir, 'test-mesh.asset');
-            const result = run_cli(['read', 'asset', file, '--properties', '--json']);
+            const result = run_cli(['read', 'asset', file, '--properties']);
             const json = JSON.parse(result);
             const obj = json.objects[0];
             expect(obj.type_name).toBe('Mesh');
@@ -1225,7 +1179,7 @@ describeIfNative('CLI', () => {
 
         it('should preserve raw hex with --raw flag', () => {
             const file = resolve(fixtures_dir, 'test-mesh.asset');
-            const result = run_cli(['read', 'asset', file, '--properties', '--raw', '--json']);
+            const result = run_cli(['read', 'asset', file, '--properties', '--raw']);
             const json = JSON.parse(result);
             const obj = json.objects[0];
             const vd = obj.properties.VertexData;
@@ -1249,7 +1203,6 @@ describeIfNative('CLI', () => {
                     'delete', 'prefab',
                     fixture.temp_path,
                     identifier,
-                    '--json'
                 ]);
                 const json = JSON.parse(result);
                 expect(json).toHaveProperty('success', true);
@@ -1288,7 +1241,6 @@ describeIfNative('CLI', () => {
                     'delete', 'prefab',
                     fixture.temp_path,
                     '700000',
-                    '--json'
                 ]));
                 expect(delete_result.success).toBe(true);
 
@@ -1311,7 +1263,7 @@ describeIfNative('CLI', () => {
             writeFileSync(file + '.meta', 'fileFormatVersion: 2\nguid: abcdefabcdefabcdefabcdefabcdefab\n', 'utf-8');
 
             try {
-                const result = run_cli(['delete', 'asset', file, '--json']);
+                const result = run_cli(['delete', 'asset', file]);
                 const json = JSON.parse(result);
                 expect(json.success).toBe(true);
                 expect(json.deleted_file).toBe(true);
@@ -1329,7 +1281,7 @@ describeIfNative('CLI', () => {
             writeFileSync(file, '%YAML 1.1\n', 'utf-8');
 
             try {
-                const result = run_cli(['delete', 'asset', file, '--json']);
+                const result = run_cli(['delete', 'asset', file]);
                 const json = JSON.parse(result);
                 expect(json.success).toBe(true);
                 expect(json.deleted_file).toBe(true);
@@ -1348,7 +1300,7 @@ describeIfNative('CLI', () => {
 
             try {
                 try {
-                    run_cli(['delete', 'asset', file, '--json']);
+                    run_cli(['delete', 'asset', file]);
                     throw new Error('Expected non-zero exit code');
                 } catch (err: unknown) {
                     if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
@@ -1373,7 +1325,6 @@ describe('CLI - New Features', () => {
             const result = run_cli([
                 'read', 'manifest',
                 '--project', resolve(fixtures_dir, 'test-manifest'),
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('success', true);
@@ -1386,7 +1337,6 @@ describe('CLI - New Features', () => {
                 'read', 'manifest',
                 '--project', resolve(fixtures_dir, 'test-manifest'),
                 '--search', 'render',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json.count).toBe(1);
@@ -1396,7 +1346,6 @@ describe('CLI - New Features', () => {
         it('should default manifest lookup to cwd project', () => {
             const result = run_cli([
                 'read', 'manifest',
-                '--json'
             ], resolve(fixtures_dir, 'test-manifest'));
             const json = JSON.parse(result);
             expect(json).toHaveProperty('success', true);
@@ -1416,7 +1365,6 @@ describe('CLI - New Features', () => {
             const result = run_cli([
                 'read', 'input-actions',
                 resolve(fixtures_dir, 'test-input-actions.inputactions'),
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('name', 'TestInputActions');
@@ -1428,7 +1376,6 @@ describe('CLI - New Features', () => {
                 'read', 'input-actions',
                 resolve(fixtures_dir, 'test-input-actions.inputactions'),
                 '--summary',
-                '--json'
             ]);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('map_count', 1);
@@ -1497,7 +1444,7 @@ describe('CLI - New Features', () => {
             const file = join(tmp, 'test.controller');
             cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
             try {
-                const result = run_cli(['update', 'animator', file, '--set-default', 'MissingParam=2', '--json']);
+                const result = run_cli(['update', 'animator', file, '--set-default', 'MissingParam=2']);
                 const json = JSON.parse(result);
                 expect(json.success).toBe(true);
                 expect(json.changes.some((c: string) => c.includes('not found (skipped)'))).toBe(true);
@@ -1511,7 +1458,7 @@ describe('CLI - New Features', () => {
             const file = join(tmp, 'test.controller');
             cpSync(resolve(external_fixtures, 'Assets/dog/Animations/sr.controller'), file);
             try {
-                const result = run_cli(['update', 'animator', file, '--set-default', 'jump=1', '--json']);
+                const result = run_cli(['update', 'animator', file, '--set-default', 'jump=1']);
                 const json = JSON.parse(result);
                 expect(json.success).toBe(true);
                 expect(json.changes.some((c: string) => c.includes('trigger parameters have no default value'))).toBe(true);
@@ -1570,7 +1517,6 @@ describe('CLI - New Features', () => {
                 const result = run_cli([
                     'delete', 'build',
                     'Assets/Scenes/Level.unity',
-                    '--json'
                 ], tmp);
                 const json = JSON.parse(result);
                 expect(json).toHaveProperty('success', true);
@@ -1582,7 +1528,6 @@ describe('CLI - New Features', () => {
         it('should default version to cwd project', () => {
             const result = run_cli([
                 'version',
-                '--json'
             ], external_fixtures);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('raw');
@@ -1593,7 +1538,6 @@ describe('CLI - New Features', () => {
             const result = run_cli([
                 'read', 'dependents',
                 '07d404ae2f2e9404ab61c78efb374629',
-                '--json'
             ], external_fixtures);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('project_path', external_fixtures);
@@ -1612,7 +1556,6 @@ describe('CLI - New Features', () => {
             const result = run_cli([
                 'read', 'unused',
                 '--max', '5',
-                '--json'
             ], tmp);
             const json = JSON.parse(result);
             expect(json.project_path).toContain('unused-cwd-');

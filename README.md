@@ -273,7 +273,6 @@ rm -rf native
 - `unity-agentic-tools clone <file> <object_name> [options]`
   - `-n, --name <new_name>`: Name for duplicated object
   - `--bypass-loaded-protection`: Allow editing files currently loaded in Unity Editor
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools search <path> [pattern] [options]`
   - `-n, --name <pattern>`: Search by GameObject name
   - `-e, --exact`: Exact match mode
@@ -282,34 +281,26 @@ rm -rf native
   - `-l, --layer <index>`: Filter by layer index
   - `-T, --type <type>`: File type filter (`scene|prefab|mat|anim|controller|asset|all`, default `all`)
   - `-m, --max-matches <n>`: Max total matches
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools grep <pattern> [options]`
   - `-p, --project <path>`: Unity project path (default cwd)
   - `--type <type>`: File filter (`cs|yaml|unity|prefab|asset|all`, default `all`)
   - `-m, --max <n>`: Max matches (default `100`)
   - `-C, --context <n>`: Context lines around each match (default `0`)
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools docs <query> [options]`
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools version [options]`
   - `-p, --project <path>`: Unity project path
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools setup [options]`
   - `-p, --project <path>`: Unity project path
   - `--index-docs`: Index docs during setup
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools cleanup [options]`
   - `-p, --project <path>`: Unity project path
   - `--all`: Remove all cached state
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools status [options]`
   - `-p, --project <path>`: Unity project path
-  - `-j, --json`: Output as JSON
 
 ### Read
 
 - `unity-agentic-tools read scene <file> [options]`
-  - `-j, --json`: Output as JSON
   - `-p, --properties`: Include component properties
   - `-v, --verbose`: Show internal Unity IDs
   - `--page-size <n>`: Max objects per page (default `200`)
@@ -320,46 +311,34 @@ rm -rf native
 - `unity-agentic-tools read gameobject <file> <object_id> [options]`
   - `-c, --component <type>`: Return one component type
   - `-p, --properties`: Include properties
-  - `-j, --json`: Output as JSON
   - `-v, --verbose`: Show internal IDs
 - `unity-agentic-tools read asset <file> [options]`
   - `-p, --properties`: Include object properties
   - `--raw`: Output raw mesh hex
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read material <file> [options]`
   - `--project <path>`: Project root for GUID resolution
   - `--summary`: Summary output only
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read dependencies <file> [options]`
   - `--project <path>`: Project root for GUID resolution
   - `--unresolved`: Only unresolved GUIDs
   - `--recursive [depth]`: Traverse dependency chain (default depth `3`)
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read settings [options]`
   - `-p, --project <path>`: Unity project path
   - `-s, --setting <name>`: Setting/alias (default `TagManager`)
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read build [options]`
   - `-p, --project <path>`: Unity project path
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read scenes [options]`
   - `-p, --project <path>`: Unity project path
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read overrides <file> <prefab_instance> [options]`
   - `--flat`: Simplified override output
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read component <file> <file_id> [options]`
   - `-p, --properties`: Include component properties
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read reference <file> <file_id> [options]`
   - `--direction <dir>`: `in|out|both` (default `both`)
   - `--depth <n>`: Max traversal depth (default `3`)
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read target <file> <gameobject_name> [component_type] [options]`
   - `-p, --project <path>`: Unity project path
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read script <file> [options]`
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read scripts [options]`
   - `--project <path>`: Project root (default `.`)
   - `--name <name>`: Filter by type name
@@ -368,42 +347,34 @@ rm -rf native
   - `--kind <kind>`: `class|struct|enum|interface`
   - `--source <source>`: `assets|packages|dlls|all` (default `all`)
   - `--max <n>`: Max results (default `100`)
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read meta <file> [options]`
   - `--summary`: Importer summary only
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read animation <file> [options]`
   - `--summary`: Name/duration/count summary
   - `--paths`: Animated paths only
   - `--curves`: Full keyframe data
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read animator <file> [options]`
   - `--project <path>`: Project root for motion GUID resolution
   - `--summary`: Count summary
   - `--parameters`: Parameters only
   - `--states`: States only
   - `--transitions`: Transitions only
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read dependents <guid> [options]`
   - `-p, --project <path>`: Unity project path
   - `--type <type>`: File type filter
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read unused [options]`
   - `-p, --project <path>`: Unity project path
   - `--type <type>`: Asset type filter
   - `--ignore <glob>`: Ignore path pattern
   - `--max <n>`: Max results (default `200`)
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read manifest [options]`
   - `-p, --project <path>`: Unity project path
   - `--search <pattern>`: Package name filter
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools read input-actions <file> [options]`
   - `--summary`: Summary counts only
   - `--maps`: Maps only
   - `--actions`: Actions only
   - `--bindings`: Bindings only
-  - `-j, --json`: Output as JSON
 
 ### Update
 
@@ -411,22 +382,18 @@ Top-level `update` is intentionally limited to small in-place value edits. Struc
 
 - `unity-agentic-tools update scriptable-object <file> <property> <value> [options]`
   - `--file-id <id>`: Target a specific object block
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools update settings [options]`
   - `-p, --project <path>`: Unity project path
   - `-s, --setting <name>`: Setting name/alias
   - `--property <name>`: Property to edit
   - `--value <value>`: New value
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools update layer <index> <name> [options]`
   - `-p, --project <path>`: Unity project path
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools update material <file> [options]`
   - `--set <property=value>`: Set property (repeatable)
   - `--set-color <property=r,g,b,a>`: Set color (repeatable)
   - `--set-texture <property=guid>`: Set texture GUID
   - `--shader <guid>`: Change shader GUID
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools update meta [file] [options]`
   - `--set <key=value>`: Set importer key (repeatable)
   - `--max-size <n>`: Set TextureImporter max size
@@ -436,13 +403,10 @@ Top-level `update` is intentionally limited to small in-place value edits. Struc
   - `--no-read-write`: Disable isReadable
   - `--batch <glob>`: Apply to matching files
   - `--dry-run`: Preview changes without writing
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools update animation <file> [options]`
   - `--set <property=value>`: Set clip property (repeatable)
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools update animator <file> [options]`
   - `--set-default <param=value>`: Set default values (repeatable)
-  - `-j, --json`: Output as JSON
 
 ### Editor-Only Scene / Prefab Mutation APIs
 
@@ -486,25 +450,19 @@ Create operations and scene/prefab graph mutations use `editor invoke` with a re
 
 - `unity-agentic-tools delete gameobject <file> <object_name> [options]`
   - `--bypass-loaded-protection`: Allow editing loaded files
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools delete component <file_or_project> <component> [options]`
   - `--on <game_object>`: Limit delete to one GameObject
   - `-p, --project <path>`: Project path
   - `--all`: Project-wide delete mode
   - `--bypass-loaded-protection`: Allow editing loaded files
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools delete build <scene_path> [options]`
   - `-p, --project <path>`: Project path
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools delete prefab <file> <prefab_instance> [options]`
   - `--bypass-loaded-protection`: Allow editing loaded files
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools delete asset <file> [options]`
   - `--bypass-loaded-protection`: Allow editing loaded files
-  - `-j, --json`: Output as JSON
 - `unity-agentic-tools delete package <name> [options]`
   - `-p, --project <path>`: Project path
-  - `-j, --json`: Output as JSON
 
 ### Editor
 

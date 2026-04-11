@@ -135,7 +135,7 @@ Options:
 }
 
 function run_cli_json(args: string[], cwd: string = PACKAGE_ROOT): Record<string, unknown> {
-    const stdout = execFileSync('bun', [CLI_PATH, ...args, '--json'], {
+    const stdout = execFileSync('bun', [CLI_PATH, ...args], {
         cwd,
         encoding: 'utf-8',
     });

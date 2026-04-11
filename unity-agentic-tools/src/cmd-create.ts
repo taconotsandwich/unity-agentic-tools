@@ -21,7 +21,6 @@ export function build_create_command(): Command {
     cmd.command('scene <output_path>')
         .description('Create a new Unity scene file with required global blocks')
         .option('-d, --defaults', 'Include default Main Camera and Directional Light')
-        .option('-j, --json', 'Output as JSON')
         .action((output_path, options) => {
             const result = createScene({
                 output_path,
@@ -35,7 +34,6 @@ export function build_create_command(): Command {
     cmd.command('prefab-variant <source_prefab> <output_path>')
         .description('Create a Prefab Variant from a source prefab')
         .option('-n, --name <name>', 'Override variant name')
-        .option('-j, --json', 'Output as JSON')
         .action((source_prefab, output_path, options) => {
             const result = createPrefabVariant({
                 source_prefab,
@@ -51,7 +49,6 @@ export function build_create_command(): Command {
         .description('Create a new ScriptableObject .asset file')
         .option('-p, --project <path>', 'Unity project path (for script GUID lookup)')
         .option('--set <json>', 'Initial field values as JSON object (e.g. \'{"damage": "10", "targetScope": "1"}\')')
-        .option('-j, --json', 'Output as JSON')
         .action((output_path, script, options) => {
             let initial_values: Record<string, unknown> | undefined;
             if (options.set) {
@@ -76,7 +73,6 @@ export function build_create_command(): Command {
 
     cmd.command('meta <script_path>')
         .description('Generate a Unity .meta file for a script (MonoImporter)')
-        .option('-j, --json', 'Output as JSON')
         .action((script_path, _options) => {
             const result = createMetaFile({
                 script_path: script_path,
@@ -90,7 +86,6 @@ export function build_create_command(): Command {
          .description('Add a scene to build settings')
          .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
          .option('--index <n>', 'Insert at position (0-based)')
-         .option('-j, --json', 'Output as JSON')
          .action((scene_path, options) => {
              try {
                  const resolvedProjectPath = resolve_project_path(options.project);
@@ -111,7 +106,6 @@ export function build_create_command(): Command {
         .option('--shader-fileid <id>', 'Shader fileID (default: 4800000)', '4800000')
         .option('--name <name>', 'Material name (defaults to filename)')
         .option('--properties <json>', 'Initial properties JSON: {"floats":{"_Metallic":0.5},"colors":{"_Color":[1,0,0,1]}}')
-        .option('-j, --json', 'Output as JSON')
         .action((output_path, options) => {
             if (!options.shader) {
                 console.log(JSON.stringify({ success: false, error: '--shader <guid> is required' }, null, 2));
@@ -227,7 +221,6 @@ NativeFormatImporter:
      cmd.command('package <name> <version>')
          .description('Add a package to Packages/manifest.json')
          .option('-p, --project <path>', 'Unity project path (defaults to cwd)')
-         .option('-j, --json', 'Output as JSON')
          .action((name, version, options) => {
              try {
                  const resolvedProjectPath = resolve_project_path(options.project);
@@ -247,7 +240,6 @@ NativeFormatImporter:
     // ========== Input Actions creation ==========
     cmd.command('input-actions <output_path> <name>')
         .description('Create a blank .inputactions file')
-        .option('-j, --json', 'Output as JSON')
         .action((output_path, name, _options) => {
             if (!output_path.endsWith('.inputactions')) {
                 console.log(JSON.stringify({ success: false, error: 'Output path must end with .inputactions' }, null, 2));
@@ -300,7 +292,6 @@ ScriptedImporter:
         .description('Create a blank .anim AnimationClip file (name defaults to filename without extension)')
         .option('--sample-rate <n>', 'Sample rate (default: 60)', '60')
         .option('--loop', 'Enable loop time')
-        .option('-j, --json', 'Output as JSON')
         .action((output_path, name_arg, options) => {
             if (!output_path.endsWith('.anim')) {
                 console.log(JSON.stringify({ success: false, error: 'Output path must end with .anim' }, null, 2));
@@ -409,7 +400,6 @@ NativeFormatImporter:
     cmd.command('animator <output_path> [name]')
         .description('Create a blank .controller AnimatorController file (name defaults to filename without extension)')
         .option('--layer <name>', 'Name of the initial layer (default: "Base Layer")', 'Base Layer')
-        .option('-j, --json', 'Output as JSON')
         .action((output_path, name_arg, options) => {
             const name = name_arg || basename(output_path).replace(/\.controller$/i, '');
             if (!output_path.toLowerCase().endsWith('.controller')) {
@@ -497,7 +487,6 @@ NativeFormatImporter:
     // ========== create prefab ==========
     cmd.command('prefab <output_path> [name]')
         .description('Create a blank .prefab file (name defaults to filename without extension)')
-        .option('-j, --json', 'Output as JSON')
         .action((output_path, name_arg) => {
             const name = name_arg || basename(output_path).replace(/\.prefab$/i, '');
             if (!output_path.toLowerCase().endsWith('.prefab')) {
