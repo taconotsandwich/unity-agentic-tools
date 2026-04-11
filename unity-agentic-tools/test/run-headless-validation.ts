@@ -42,8 +42,6 @@ const MANIFEST_NAME = 'UATValidationTargets.json';
 const SCENE_ASSET_PATH = 'Assets/Scenes/ValidationScene.unity';
 const GENERATED_ASSET_DIR = 'Assets/Generated';
 const UNITY_EXECUTE_METHOD = 'UnityAgenticTools.Editor.HeadlessValidator.RunValidation';
-const TMP_SHADER_GUID = 'fe393ace9b354375a9cb14cdbbc28be4';
-const TMP_SHADER_DIR = 'Assets/TextMesh Pro/Shaders';
 const DEFAULT_TIMEOUT_MS = 600_000;
 const COPY_EXCLUDES = new Set(['Library', 'Logs', 'Temp', '.DS_Store']);
 const LOG_POLL_INTERVAL_MS = 1_000;
@@ -181,13 +179,6 @@ function copy_external_fixture(project_path: string, source_relative_path: strin
     );
 }
 
-function write_project_text_file(project_path: string, destination_relative_path: string, content: string): string {
-    const destination_path = join(project_path, destination_relative_path);
-    mkdirSync(dirname(destination_path), { recursive: true });
-    writeFileSync(destination_path, content, 'utf-8');
-    return destination_path;
-}
-
 function assert_cli_success(result: Record<string, unknown>, scenario_name: string): void {
     if (result.success === false) {
         throw new Error(`CLI scenario ${scenario_name} failed: ${String(result.error ?? result.message ?? 'unknown error')}`);
@@ -231,55 +222,6 @@ function require_result_string(result: Record<string, unknown>, key: string, sce
     return value;
 }
 
-function material_shader_setup(project_path: string): void {
-    copy_external_fixture(project_path, TMP_SHADER_DIR, TMP_SHADER_DIR);
-}
-
-function create_script_with_meta(project_path: string, script_asset_path: string, script_content: string, scenario_name: string): string {
-    const script_path = write_project_text_file(project_path, script_asset_path, script_content);
-    assert_cli_success(
-        run_cli_json(['create', 'meta', script_path]),
-        `${scenario_name} setup meta`,
-    );
-    return script_path;
-}
-
-function mono_behaviour_script_content(class_name: string): string {
-    return [
-        'using UnityEngine;',
-        '',
-        `public class ${class_name} : MonoBehaviour`,
-        '{',
-        '    public int value = 1;',
-        '    public string label = "default";',
-        '}',
-        '',
-    ].join('\n');
-}
-
-function scriptable_object_script_content(class_name: string): string {
-    return [
-        'using UnityEngine;',
-        '',
-        `[CreateAssetMenu(menuName = "Headless/${class_name}")]`,
-        `public class ${class_name} : ScriptableObject`,
-        '{',
-        '    public int amount = 3;',
-        '    public string note = "seed";',
-        '}',
-        '',
-    ].join('\n');
-}
-
-function get_prefab_target(prefab_path: string, gameobject_name: string, component_type: string | null, scenario_name: string): string {
-    const args = ['read', 'target', prefab_path, gameobject_name];
-    if (component_type) {
-        args.push(component_type);
-    }
-    const result = run_cli_json(args);
-    return require_result_string(result, 'target', scenario_name);
-}
-
 async function bootstrap_project(context: ScenarioContext): Promise<void> {
     if (context.bootstrapped) {
         return;
@@ -302,231 +244,6 @@ const SCENARIOS: Record<string, ScenarioDefinition> = {
             return [scene_asset_path];
         },
     },
-    'create-gameobject': {
-        name: 'create-gameobject',
-        async run(_context, scene_path, scene_asset_path) {
-            assert_cli_success(
-                run_cli_json(['create', 'gameobject', scene_path, 'HeadlessCreated']),
-                'create-gameobject',
-            );
-            return [scene_asset_path];
-        },
-    },
-    'create-gameobject-parented': {
-        name: 'create-gameobject-parented',
-        async run(_context, scene_path, scene_asset_path) {
-            assert_cli_success(
-                run_cli_json(['create', 'gameobject', scene_path, 'HeadlessChild', '--parent', 'TestObject']),
-                'create-gameobject-parented',
-            );
-            return [scene_asset_path];
-        },
-    },
-    'update-gameobject': {
-        name: 'update-gameobject',
-        async run(_context, scene_path, scene_asset_path) {
-            assert_cli_success(
-                run_cli_json(['update', 'gameobject', scene_path, 'TestObject', 'm_IsActive', 'false']),
-                'update-gameobject',
-            );
-            return [scene_asset_path];
-        },
-    },
-    'update-component': {
-        name: 'update-component',
-        async run(_context, scene_path, scene_asset_path) {
-            const camera_id = get_component_file_id(scene_path, 'Main Camera', 'Camera');
-            assert_cli_success(
-                run_cli_json(['update', 'component', scene_path, camera_id, 'm_FieldOfView', '55']),
-                'update-component',
-            );
-            return [scene_asset_path];
-        },
-    },
-    'update-transform': {
-        name: 'update-transform',
-        async run(_context, scene_path, scene_asset_path) {
-            const transform_id = get_transform_file_id(scene_path, 'TestObject');
-            assert_cli_success(
-                run_cli_json(['update', 'transform', scene_path, transform_id, '--position', '3,4,5', '--scale', '2,2,2']),
-                'update-transform',
-            );
-            return [scene_asset_path];
-        },
-    },
-    'create-component': {
-        name: 'create-component',
-        async run(_context, scene_path, scene_asset_path) {
-            assert_cli_success(
-                run_cli_json(['create', 'component', scene_path, 'TestObject', 'BoxCollider']),
-                'create-component',
-            );
-            return [scene_asset_path];
-        },
-    },
-    'create-component-custom-script': {
-        name: 'create-component-custom-script',
-        async run(context, scene_path, scene_asset_path) {
-            const script_asset_path = 'Assets/Scripts/HeadlessBehaviour.cs';
-            const script_path = create_script_with_meta(
-                context.project_path,
-                script_asset_path,
-                mono_behaviour_script_content('HeadlessBehaviour'),
-                'create-component-custom-script',
-            );
-            assert_cli_success(
-                run_cli_json([
-                    'create', 'component', scene_path, 'TestObject', script_path,
-                    '--project', context.project_path,
-                ]),
-                'create-component-custom-script',
-            );
-            return [scene_asset_path, script_asset_path];
-        },
-    },
-    'update-component-custom-script': {
-        name: 'update-component-custom-script',
-        async run(context, scene_path, scene_asset_path) {
-            const script_asset_path = 'Assets/Scripts/HeadlessEditableBehaviour.cs';
-            const script_path = create_script_with_meta(
-                context.project_path,
-                script_asset_path,
-                mono_behaviour_script_content('HeadlessEditableBehaviour'),
-                'update-component-custom-script',
-            );
-            const create_result = run_cli_json([
-                'create', 'component', scene_path, 'TestObject', script_path,
-                '--project', context.project_path,
-            ]);
-            assert_cli_success(create_result, 'update-component-custom-script setup component');
-            const component_id = require_result_string(create_result, 'component_id', 'update-component-custom-script');
-            assert_cli_success(
-                run_cli_json(['update', 'component', scene_path, component_id, 'value', '7']),
-                'update-component-custom-script',
-            );
-            return [scene_asset_path, script_asset_path];
-        },
-    },
-    'create-component-copy': {
-        name: 'create-component-copy',
-        async run(_context, scene_path, scene_asset_path) {
-            const source_component_id = get_component_file_id(scene_path, 'Main Camera', 'Camera');
-            assert_cli_success(
-                run_cli_json(['create', 'component-copy', scene_path, source_component_id, 'TestObject']),
-                'create-component-copy',
-            );
-            return [scene_asset_path];
-        },
-    },
-    'update-parent': {
-        name: 'update-parent',
-        async run(_context, scene_path, scene_asset_path) {
-            assert_cli_success(
-                run_cli_json(['update', 'parent', scene_path, 'TestObject', 'Main Camera']),
-                'update-parent',
-            );
-            return [scene_asset_path];
-        },
-    },
-    'update-sibling-index': {
-        name: 'update-sibling-index',
-        async run(_context, scene_path, scene_asset_path) {
-            assert_cli_success(
-                run_cli_json(['update', 'sibling-index', scene_path, 'TestObject', '0']),
-                'update-sibling-index',
-            );
-            return [scene_asset_path];
-        },
-    },
-    'update-batch': {
-        name: 'update-batch',
-        async run(_context, scene_path, scene_asset_path) {
-            const edits = JSON.stringify([
-                { object_name: 'TestObject', property: 'm_IsActive', value: 'false' },
-                { object_name: 'Main Camera', property: 'm_TagString', value: 'Untagged' },
-            ]);
-            assert_cli_success(
-                run_cli_json(['update', 'batch', scene_path, edits]),
-                'update-batch',
-            );
-            return [scene_asset_path];
-        },
-    },
-    'update-batch-components': {
-        name: 'update-batch-components',
-        async run(_context, scene_path, scene_asset_path) {
-            const camera_id = get_component_file_id(scene_path, 'Main Camera', 'Camera');
-            const transform_id = get_transform_file_id(scene_path, 'TestObject');
-            const edits = JSON.stringify([
-                { file_id: camera_id, property: 'm_FieldOfView', value: '48' },
-                { file_id: transform_id, property: 'm_LocalScale.x', value: '1.5' },
-            ]);
-            assert_cli_success(
-                run_cli_json(['update', 'batch-components', scene_path, edits]),
-                'update-batch-components',
-            );
-            return [scene_asset_path];
-        },
-    },
-    'create-scene': {
-        name: 'create-scene',
-        async run(context) {
-            const created_scene_asset_path = 'Assets/Scenes/GeneratedEmpty.unity';
-            const created_scene_path = join(context.project_path, created_scene_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'scene', created_scene_path]),
-                'create-scene',
-            );
-            return [created_scene_asset_path];
-        },
-    },
-    'create-scene-defaults': {
-        name: 'create-scene-defaults',
-        async run(context) {
-            const created_scene_asset_path = 'Assets/Scenes/GeneratedDefaults.unity';
-            const created_scene_path = join(context.project_path, created_scene_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'scene', created_scene_path, '--defaults']),
-                'create-scene-defaults',
-            );
-            return [created_scene_asset_path];
-        },
-    },
-    'create-build': {
-        name: 'create-build',
-        async run(context) {
-            assert_cli_success(
-                run_cli_json(['create', 'build', SCENE_ASSET_PATH, '--project', context.project_path]),
-                'create-build',
-            );
-            return ['ProjectSettings/EditorBuildSettings.asset'];
-        },
-    },
-    'update-build-disable': {
-        name: 'update-build-disable',
-        async run(context) {
-            assert_cli_success(
-                run_cli_json(['create', 'build', SCENE_ASSET_PATH, '--project', context.project_path]),
-                'update-build-disable setup',
-            );
-            assert_cli_success(
-                run_cli_json(['update', 'build', SCENE_ASSET_PATH, '--project', context.project_path, '--disable']),
-                'update-build-disable',
-            );
-            return ['ProjectSettings/EditorBuildSettings.asset'];
-        },
-    },
-    'update-tag': {
-        name: 'update-tag',
-        async run(context) {
-            await bootstrap_project(context);
-            assert_cli_success(
-                run_cli_json(['update', 'tag', 'add', 'HeadlessTag', '--project', context.project_path]),
-                'update-tag',
-            );
-            return ['ProjectSettings/TagManager.asset'];
-        },
-    },
     'update-layer': {
         name: 'update-layer',
         async run(context) {
@@ -534,17 +251,6 @@ const SCENARIOS: Record<string, ScenarioDefinition> = {
             assert_cli_success(
                 run_cli_json(['update', 'layer', '8', 'HeadlessLayer', '--project', context.project_path]),
                 'update-layer',
-            );
-            return ['ProjectSettings/TagManager.asset'];
-        },
-    },
-    'update-sorting-layer': {
-        name: 'update-sorting-layer',
-        async run(context) {
-            await bootstrap_project(context);
-            assert_cli_success(
-                run_cli_json(['update', 'sorting-layer', 'add', 'HeadlessSorting', '--project', context.project_path]),
-                'update-sorting-layer',
             );
             return ['ProjectSettings/TagManager.asset'];
         },
@@ -566,414 +272,49 @@ const SCENARIOS: Record<string, ScenarioDefinition> = {
             return ['ProjectSettings/TimeManager.asset'];
         },
     },
-    'create-prefab': {
-        name: 'create-prefab',
-        async run(context) {
-            const prefab_asset_path = `${GENERATED_ASSET_DIR}/HeadlessBlank.prefab`;
-            const prefab_path = join(context.project_path, prefab_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'prefab', prefab_path]),
-                'create-prefab',
-            );
-            return [prefab_asset_path];
-        },
-    },
-    'create-prefab-variant': {
-        name: 'create-prefab-variant',
-        async run(context) {
-            const source_prefab_asset_path = `${GENERATED_ASSET_DIR}/HeadlessBase.prefab`;
-            const variant_asset_path = `${GENERATED_ASSET_DIR}/HeadlessVariant.prefab`;
-            const source_prefab_path = join(context.project_path, source_prefab_asset_path);
-            const variant_path = join(context.project_path, variant_asset_path);
-
-            assert_cli_success(
-                run_cli_json(['create', 'prefab', source_prefab_path]),
-                'create-prefab-variant setup',
-            );
-            assert_cli_success(
-                run_cli_json(['create', 'prefab-variant', source_prefab_path, variant_path, '--name', 'Headless Variant']),
-                'create-prefab-variant',
-            );
-
-            return [source_prefab_asset_path, variant_asset_path];
-        },
-    },
-    'create-prefab-instance': {
-        name: 'create-prefab-instance',
-        async run(context, scene_path, scene_asset_path) {
-            const prefab_asset_path = `${GENERATED_ASSET_DIR}/InstanceSource.prefab`;
-            const prefab_path = join(context.project_path, prefab_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'prefab', prefab_path]),
-                'create-prefab-instance setup',
-            );
-            assert_cli_success(
-                run_cli_json(['create', 'prefab-instance', scene_path, prefab_path, '--name', 'InstancedBlank']),
-                'create-prefab-instance',
-            );
-            return [scene_asset_path, prefab_asset_path];
-        },
-    },
-    'update-prefab-remove-component': {
-        name: 'update-prefab-remove-component',
-        async run(context, scene_path, scene_asset_path) {
-            const prefab_name = 'RemoveComponentSource';
-            const prefab_asset_path = `${GENERATED_ASSET_DIR}/${prefab_name}.prefab`;
-            const prefab_path = join(context.project_path, prefab_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'prefab', prefab_path]),
-                'update-prefab-remove-component setup prefab',
-            );
-            assert_cli_success(
-                run_cli_json(['create', 'component', prefab_path, prefab_name, 'BoxCollider']),
-                'update-prefab-remove-component setup collider',
-            );
-            const target = get_prefab_target(prefab_path, prefab_name, 'BoxCollider', 'update-prefab-remove-component');
-            const create_result = run_cli_json(['create', 'prefab-instance', scene_path, prefab_path, '--name', 'RemoveComponentInstance']);
-            assert_cli_success(create_result, 'update-prefab-remove-component setup instance');
-            const prefab_instance_id = require_result_string(create_result, 'prefab_instance_id', 'update-prefab-remove-component');
-            assert_cli_success(
-                run_cli_json(['update', 'prefab', 'remove-component', scene_path, prefab_instance_id, target]),
-                'update-prefab-remove-component',
-            );
-            return [scene_asset_path, prefab_asset_path];
-        },
-    },
-    'update-prefab-restore-component': {
-        name: 'update-prefab-restore-component',
-        async run(context, scene_path, scene_asset_path) {
-            const prefab_name = 'RestoreComponentSource';
-            const prefab_asset_path = `${GENERATED_ASSET_DIR}/${prefab_name}.prefab`;
-            const prefab_path = join(context.project_path, prefab_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'prefab', prefab_path]),
-                'update-prefab-restore-component setup prefab',
-            );
-            assert_cli_success(
-                run_cli_json(['create', 'component', prefab_path, prefab_name, 'BoxCollider']),
-                'update-prefab-restore-component setup collider',
-            );
-            const target = get_prefab_target(prefab_path, prefab_name, 'BoxCollider', 'update-prefab-restore-component');
-            const create_result = run_cli_json(['create', 'prefab-instance', scene_path, prefab_path, '--name', 'RestoreComponentInstance']);
-            assert_cli_success(create_result, 'update-prefab-restore-component setup instance');
-            const prefab_instance_id = require_result_string(create_result, 'prefab_instance_id', 'update-prefab-restore-component');
-            assert_cli_success(
-                run_cli_json(['update', 'prefab', 'remove-component', scene_path, prefab_instance_id, target]),
-                'update-prefab-restore-component setup remove',
-            );
-            assert_cli_success(
-                run_cli_json(['update', 'prefab', 'restore-component', scene_path, prefab_instance_id, target]),
-                'update-prefab-restore-component',
-            );
-            return [scene_asset_path, prefab_asset_path];
-        },
-    },
-    'update-prefab-remove-gameobject': {
-        name: 'update-prefab-remove-gameobject',
-        async run(context, scene_path, scene_asset_path) {
-            const prefab_name = 'RemoveGameObjectSource';
-            const prefab_asset_path = `${GENERATED_ASSET_DIR}/${prefab_name}.prefab`;
-            const prefab_path = join(context.project_path, prefab_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'prefab', prefab_path]),
-                'update-prefab-remove-gameobject setup prefab',
-            );
-            assert_cli_success(
-                run_cli_json(['create', 'gameobject', prefab_path, 'RemovedChild', '--parent', prefab_name]),
-                'update-prefab-remove-gameobject setup child',
-            );
-            const target = get_prefab_target(prefab_path, 'RemovedChild', null, 'update-prefab-remove-gameobject');
-            const create_result = run_cli_json(['create', 'prefab-instance', scene_path, prefab_path, '--name', 'RemoveGameObjectInstance']);
-            assert_cli_success(create_result, 'update-prefab-remove-gameobject setup instance');
-            const prefab_instance_id = require_result_string(create_result, 'prefab_instance_id', 'update-prefab-remove-gameobject');
-            assert_cli_success(
-                run_cli_json(['update', 'prefab', 'remove-gameobject', scene_path, prefab_instance_id, target]),
-                'update-prefab-remove-gameobject',
-            );
-            return [scene_asset_path, prefab_asset_path];
-        },
-    },
-    'update-prefab-restore-gameobject': {
-        name: 'update-prefab-restore-gameobject',
-        async run(context, scene_path, scene_asset_path) {
-            const prefab_name = 'RestoreGameObjectSource';
-            const prefab_asset_path = `${GENERATED_ASSET_DIR}/${prefab_name}.prefab`;
-            const prefab_path = join(context.project_path, prefab_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'prefab', prefab_path]),
-                'update-prefab-restore-gameobject setup prefab',
-            );
-            assert_cli_success(
-                run_cli_json(['create', 'gameobject', prefab_path, 'RestoredChild', '--parent', prefab_name]),
-                'update-prefab-restore-gameobject setup child',
-            );
-            const target = get_prefab_target(prefab_path, 'RestoredChild', null, 'update-prefab-restore-gameobject');
-            const create_result = run_cli_json(['create', 'prefab-instance', scene_path, prefab_path, '--name', 'RestoreGameObjectInstance']);
-            assert_cli_success(create_result, 'update-prefab-restore-gameobject setup instance');
-            const prefab_instance_id = require_result_string(create_result, 'prefab_instance_id', 'update-prefab-restore-gameobject');
-            assert_cli_success(
-                run_cli_json(['update', 'prefab', 'remove-gameobject', scene_path, prefab_instance_id, target]),
-                'update-prefab-restore-gameobject setup remove',
-            );
-            assert_cli_success(
-                run_cli_json(['update', 'prefab', 'restore-gameobject', scene_path, prefab_instance_id, target]),
-                'update-prefab-restore-gameobject',
-            );
-            return [scene_asset_path, prefab_asset_path];
-        },
-    },
-    'update-prefab-override': {
-        name: 'update-prefab-override',
-        async run(context, scene_path, scene_asset_path) {
-            const prefab_asset_path = `${GENERATED_ASSET_DIR}/OverrideSource.prefab`;
-            const prefab_path = join(context.project_path, prefab_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'prefab', prefab_path]),
-                'update-prefab-override setup prefab',
-            );
-            const create_result = run_cli_json(['create', 'prefab-instance', scene_path, prefab_path, '--name', 'OverrideInstance']);
-            assert_cli_success(create_result, 'update-prefab-override setup instance');
-            const prefab_instance_id = require_result_string(create_result, 'prefab_instance_id', 'update-prefab-override');
-            assert_cli_success(
-                run_cli_json(['update', 'prefab', 'override', scene_path, prefab_instance_id, 'm_LocalPosition.x', '7']),
-                'update-prefab-override',
-            );
-            return [scene_asset_path, prefab_asset_path];
-        },
-    },
-    'update-prefab-batch-overrides': {
-        name: 'update-prefab-batch-overrides',
-        async run(context, scene_path, scene_asset_path) {
-            const prefab_asset_path = `${GENERATED_ASSET_DIR}/BatchOverrideSource.prefab`;
-            const prefab_path = join(context.project_path, prefab_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'prefab', prefab_path]),
-                'update-prefab-batch-overrides setup prefab',
-            );
-            const create_result = run_cli_json(['create', 'prefab-instance', scene_path, prefab_path, '--name', 'BatchOverrideInstance']);
-            assert_cli_success(create_result, 'update-prefab-batch-overrides setup instance');
-            const prefab_instance_id = require_result_string(create_result, 'prefab_instance_id', 'update-prefab-batch-overrides');
-            const edits = JSON.stringify([
-                { property_path: 'm_LocalPosition.x', value: '4' },
-                { property_path: 'm_LocalPosition.y', value: '2' },
-            ]);
-            assert_cli_success(
-                run_cli_json(['update', 'prefab', 'batch-overrides', scene_path, prefab_instance_id, edits]),
-                'update-prefab-batch-overrides',
-            );
-            return [scene_asset_path, prefab_asset_path];
-        },
-    },
-    'update-prefab-remove-override': {
-        name: 'update-prefab-remove-override',
-        async run(context, scene_path, scene_asset_path) {
-            const prefab_asset_path = `${GENERATED_ASSET_DIR}/RemoveOverrideSource.prefab`;
-            const prefab_path = join(context.project_path, prefab_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'prefab', prefab_path]),
-                'update-prefab-remove-override setup prefab',
-            );
-            const create_result = run_cli_json(['create', 'prefab-instance', scene_path, prefab_path, '--name', 'RemoveOverrideInstance']);
-            assert_cli_success(create_result, 'update-prefab-remove-override setup instance');
-            const prefab_instance_id = require_result_string(create_result, 'prefab_instance_id', 'update-prefab-remove-override');
-            assert_cli_success(
-                run_cli_json(['update', 'prefab', 'remove-override', scene_path, prefab_instance_id, 'm_LocalPosition.x']),
-                'update-prefab-remove-override',
-            );
-            return [scene_asset_path, prefab_asset_path];
-        },
-    },
-    'update-prefab-unpack': {
-        name: 'update-prefab-unpack',
-        async run(context, scene_path, scene_asset_path) {
-            const prefab_asset_path = `${GENERATED_ASSET_DIR}/UnpackSource.prefab`;
-            const prefab_path = join(context.project_path, prefab_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'prefab', prefab_path]),
-                'update-prefab-unpack setup prefab',
-            );
-            const create_result = run_cli_json(['create', 'prefab-instance', scene_path, prefab_path, '--name', 'UnpackInstance']);
-            assert_cli_success(create_result, 'update-prefab-unpack setup instance');
-            const prefab_instance_id = require_result_string(create_result, 'prefab_instance_id', 'update-prefab-unpack');
-            assert_cli_success(
-                run_cli_json(['update', 'prefab', 'unpack', scene_path, prefab_instance_id]),
-                'update-prefab-unpack',
-            );
-            return [scene_asset_path, prefab_asset_path];
-        },
-    },
-    'create-animation': {
-        name: 'create-animation',
-        async run(context) {
-            const animation_asset_path = `${GENERATED_ASSET_DIR}/HeadlessAnim.anim`;
-            const animation_path = join(context.project_path, animation_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'animation', animation_path, 'HeadlessAnim', '--loop', '--sample-rate', '60']),
-                'create-animation',
-            );
-            return [animation_asset_path];
-        },
-    },
-    'update-animation-remove-event': {
-        name: 'update-animation-remove-event',
-        async run(context) {
-            const animation_asset_path = `${GENERATED_ASSET_DIR}/AnimationRemoveEvent.anim`;
-            const animation_path = copy_local_fixture(context.project_path, 'events-test.anim', animation_asset_path);
-            assert_cli_success(
-                run_cli_json(['update', 'animation', animation_path, '--remove-event', '0']),
-                'update-animation-remove-event',
-            );
-            return [animation_asset_path];
-        },
-    },
     'update-animation': {
         name: 'update-animation',
         async run(context) {
-            const animation_asset_path = `${GENERATED_ASSET_DIR}/AnimationEvents.anim`;
+            const animation_asset_path = `${GENERATED_ASSET_DIR}/AnimationSettings.anim`;
             const animation_path = copy_local_fixture(context.project_path, 'keyframe-test.anim', animation_asset_path);
             assert_cli_success(
-                run_cli_json(['update', 'animation', animation_path, '--add-event', '0.25,OnStep,left']),
+                run_cli_json(['update', 'animation', animation_path, '--set', 'loop-time=1', '--set', 'sample-rate=30']),
                 'update-animation',
             );
             return [animation_asset_path];
         },
     },
-    'update-animation-curves': {
-        name: 'update-animation-curves',
+    'update-animator-defaults': {
+        name: 'update-animator-defaults',
         async run(context) {
-            const animation_asset_path = `${GENERATED_ASSET_DIR}/AnimationCurves.anim`;
-            const animation_path = copy_local_fixture(context.project_path, 'keyframe-test.anim', animation_asset_path);
-            const curve_spec = JSON.stringify({
-                type: 'float',
-                path: 'NewPath',
-                attribute: 'm_Enabled',
-                classID: 23,
-                keyframes: [{ time: 0, value: 1 }, { time: 1, value: 0 }],
-            });
-            assert_cli_success(
-                run_cli_json(['update', 'animation-curves', animation_path, '--add-curve', curve_spec]),
-                'update-animation-curves',
-            );
-            return [animation_asset_path];
-        },
-    },
-    'create-animator': {
-        name: 'create-animator',
-        async run(context) {
-            const animator_asset_path = `${GENERATED_ASSET_DIR}/Headless.controller`;
-            const animator_path = join(context.project_path, animator_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'animator', animator_path]),
-                'create-animator',
-            );
-            return [animator_asset_path];
-        },
-    },
-    'update-animator-parameter': {
-        name: 'update-animator-parameter',
-        async run(context) {
-            const animator_asset_path = `${GENERATED_ASSET_DIR}/AnimatorParameters.controller`;
-            const animator_path = join(context.project_path, animator_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'animator', animator_path]),
-                'update-animator-parameter setup',
-            );
-            assert_cli_success(
-                run_cli_json(['update', 'animator', animator_path, '--add-parameter', 'Speed', '--type', 'float']),
-                'update-animator-parameter',
-            );
-            return [animator_asset_path];
-        },
-    },
-    'update-animator-state-add': {
-        name: 'update-animator-state-add',
-        async run(context) {
-            const animator_asset_path = `${GENERATED_ASSET_DIR}/AnimatorAddState.controller`;
+            const animator_asset_path = `${GENERATED_ASSET_DIR}/AnimatorDefaults.controller`;
             const animator_path = copy_local_fixture(context.project_path, 'test-animator.controller', animator_asset_path);
             assert_cli_success(
-                run_cli_json(['update', 'animator-state', animator_path, '--add-state', 'Run', '--speed', '1.5']),
-                'update-animator-state-add',
+                run_cli_json(['update', 'animator', animator_path, '--set-default', 'Speed=1.5']),
+                'update-animator-defaults',
             );
             return [animator_asset_path];
-        },
-    },
-    'update-animator-state-transition': {
-        name: 'update-animator-state-transition',
-        async run(context) {
-            const animator_asset_path = `${GENERATED_ASSET_DIR}/AnimatorTransition.controller`;
-            const animator_path = copy_local_fixture(context.project_path, 'test-animator.controller', animator_asset_path);
-            assert_cli_success(
-                run_cli_json([
-                    'update', 'animator-state', animator_path,
-                    '--add-transition', 'Idle:Walk',
-                    '--condition', 'Speed,greater,0.1',
-                    '--duration', '0.25',
-                ]),
-                'update-animator-state-transition',
-            );
-            return [animator_asset_path];
-        },
-    },
-    'update-animator-default-state': {
-        name: 'update-animator-default-state',
-        async run(context) {
-            const animator_asset_path = `${GENERATED_ASSET_DIR}/AnimatorDefaultState.controller`;
-            const animator_path = copy_local_fixture(context.project_path, 'test-animator.controller', animator_asset_path);
-            assert_cli_success(
-                run_cli_json(['update', 'animator-state', animator_path, '--set-default-state', 'Walk']),
-                'update-animator-default-state',
-            );
-            return [animator_asset_path];
-        },
-    },
-    'create-material': {
-        name: 'create-material',
-        async run(context) {
-            material_shader_setup(context.project_path);
-            const material_asset_path = `${GENERATED_ASSET_DIR}/HeadlessMaterial.mat`;
-            const material_path = join(context.project_path, material_asset_path);
-            assert_cli_success(
-                run_cli_json(['create', 'material', material_path, '--shader', TMP_SHADER_GUID]),
-                'create-material',
-            );
-            return [material_asset_path];
         },
     },
     'update-material': {
         name: 'update-material',
         async run(context) {
-            material_shader_setup(context.project_path);
             const material_asset_path = `${GENERATED_ASSET_DIR}/UpdatedMaterial.mat`;
-            const material_path = join(context.project_path, material_asset_path);
-            assert_cli_success(
-                run_cli_json([
-                    'create', 'material', material_path,
-                    '--shader', TMP_SHADER_GUID,
-                    '--properties', JSON.stringify({ floats: { _FaceDilate: 0.1 } }),
-                ]),
-                'update-material setup',
+            const material_path = copy_external_fixture(
+                context.project_path,
+                'Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF - Outline.mat',
+                material_asset_path,
+            );
+            copy_external_fixture(
+                context.project_path,
+                'Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF - Outline.mat.meta',
+                `${material_asset_path}.meta`,
             );
             assert_cli_success(
                 run_cli_json(['update', 'material', material_path, '--set', '_FaceDilate=0.3']),
                 'update-material',
             );
             return [material_asset_path];
-        },
-    },
-    'create-meta-script': {
-        name: 'create-meta-script',
-        async run(context) {
-            const script_asset_path = 'Assets/Scripts/GeneratedMetaScript.cs';
-            write_project_text_file(
-                context.project_path,
-                script_asset_path,
-                mono_behaviour_script_content('GeneratedMetaScript'),
-            );
-            assert_cli_success(
-                run_cli_json(['create', 'meta', join(context.project_path, script_asset_path)]),
-                'create-meta-script',
-            );
-            return [script_asset_path];
         },
     },
     'update-meta-texture': {
@@ -987,54 +328,6 @@ const SCENARIOS: Record<string, ScenarioDefinition> = {
                 'update-meta-texture',
             );
             return [texture_asset_path];
-        },
-    },
-    'create-scriptable-object': {
-        name: 'create-scriptable-object',
-        async run(context) {
-            const script_asset_path = 'Assets/Scripts/HeadlessData.cs';
-            const script_path = create_script_with_meta(
-                context.project_path,
-                script_asset_path,
-                scriptable_object_script_content('HeadlessData'),
-                'create-scriptable-object',
-            );
-            const asset_asset_path = `${GENERATED_ASSET_DIR}/HeadlessData.asset`;
-            const asset_path = join(context.project_path, asset_asset_path);
-            assert_cli_success(
-                run_cli_json([
-                    'create', 'scriptable-object', asset_path, script_path,
-                    '--project', context.project_path,
-                ]),
-                'create-scriptable-object',
-            );
-            return [script_asset_path, asset_asset_path];
-        },
-    },
-    'update-scriptable-object': {
-        name: 'update-scriptable-object',
-        async run(context) {
-            const script_asset_path = 'Assets/Scripts/HeadlessMutableData.cs';
-            const script_path = create_script_with_meta(
-                context.project_path,
-                script_asset_path,
-                scriptable_object_script_content('HeadlessMutableData'),
-                'update-scriptable-object',
-            );
-            const asset_asset_path = `${GENERATED_ASSET_DIR}/HeadlessMutableData.asset`;
-            const asset_path = join(context.project_path, asset_asset_path);
-            assert_cli_success(
-                run_cli_json([
-                    'create', 'scriptable-object', asset_path, script_path,
-                    '--project', context.project_path,
-                ]),
-                'update-scriptable-object setup',
-            );
-            assert_cli_success(
-                run_cli_json(['update', 'scriptable-object', asset_path, 'amount', '9']),
-                'update-scriptable-object',
-            );
-            return [script_asset_path, asset_asset_path];
         },
     },
     'negative-harness': {

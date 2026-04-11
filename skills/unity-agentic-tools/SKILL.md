@@ -1,9 +1,9 @@
 ---
 name: unity-agentic-tools
-description: "Unity umbrella skill. Source of truth for setup, routing, read commands, and top-level utilities (search/grep/clone/docs/version/setup/cleanup/status). For mutations and editor actions, load specialized skills: unity-agentic-create, unity-agentic-update, unity-agentic-delete, unity-agentic-editor."
+description: "Unity umbrella skill. Source of truth for all Unity Agentic Tools operations that do not require a reachable live editor bridge."
 allowed-tools:
   - "Bash(unity-agentic-tools *)"
-argument-hint: "<read|search|grep|clone|docs|version|setup|cleanup|status>"
+argument-hint: "<non-editor command and args>"
 ---
 
 # Unity Agentic Tools (Umbrella)
@@ -16,18 +16,13 @@ All commands accept `-j`/`--json` for structured output.
 
 ## Single source of truth routing
 
-This umbrella skill is authoritative for:
-- setup and readiness checks
-- `read` commands
+This umbrella skill is authoritative for operations that do not require a reachable live editor bridge:
+- `read ...`
+- small in-place `update ...` value edits
+- `delete ...`
 - top-level utilities: `search`, `grep`, `clone`, `docs`, `version`, `setup`, `cleanup`, `status`
 
-For other command groups, load the dedicated skill:
-- `create ...` -> `unity-agentic-create`
-- `update ...` -> `unity-agentic-update`
-- `delete ...` -> `unity-agentic-delete`
-- `editor ...` -> `unity-agentic-editor`
-
-Do not use this file as fallback documentation for create/update/delete/editor details.
+If the operation requires a reachable live editor bridge, load `unity-agentic-editor` instead.
 
 ## Boot sequence
 
@@ -36,22 +31,7 @@ Run `unity-agentic-tools setup -p <project>` before first use. Run `unity-agenti
 1. `unity-agentic-tools --help`
 2. `unity-agentic-tools status`
 3. If first run: `unity-agentic-tools setup -p <project>`
-4. Load the specialized skill for the command group you need.
-
-| I want to... | Command |
-|--------------|---------|
-| See what's in a scene/prefab | `read scene <file>` (handles both .unity and .prefab) |
-| Find a GameObject by name | `search <file> <name>` or `search <project> -n "pattern"` |
-| Read/edit component properties | `read gameobject <file> <name> --properties` then `update component` |
-| Add a component to a GameObject | `create component <file> <object> <type>` |
-| Edit a Material | `read material <file>` then `update material <file> --set prop=val` |
-| Change project settings | `read settings -s tags` then `update settings` |
-| Work with prefab overrides | `read overrides` then `update prefab override` |
-| Edit animations/animators | `read animation`/`read animator` then `update animation-curves`/`update animator-state` |
-| Test a running Unity app | `editor invoke UnityAgenticTools.API.PlayModeAPI Enter` then `editor invoke UnityAgenticTools.API.UIAPI Snapshot` then `editor invoke UnityAgenticTools.API.UIAPI Interact "[\"@uN\",\"click\"]"` |
-| Find text across project files | `grep "regex"` |
-| Batch edit multiple objects | `update batch <file> '<json>'` |
-| Manage build scenes | `read build` / `create build` / `update build` / `delete build` |
+4. Use this skill when the operation does not require a reachable live editor bridge. Load `unity-agentic-editor` when it does.
 
 ## Read commands (authoritative)
 
@@ -77,6 +57,18 @@ Core usage:
 | `read manifest` | Package manifest inspection |
 | `read input-actions <file>` | InputActions inspection |
 
+## Update commands (authoritative)
+
+See `reference/commands-update.md` for full usage and options.
+
+This section covers only `update` operations that do not require a reachable live editor bridge.
+Top-level `update` is intentionally limited to in-place value edits such as scalar, color, reference, importer, and default-value changes.
+Scene / prefab mutation moved to `unity-agentic-tools editor invoke UnityAgenticTools.Update.* ...` under `unity-agentic-editor`.
+
+## Delete commands (authoritative)
+
+See `reference/commands-delete.md` for full usage and options.
+
 ## Utilities (authoritative)
 
 See `reference/commands-utilities.md` for full usage and options.
@@ -96,17 +88,18 @@ See `reference/commands-utilities.md` for full usage and options.
 
 Inspect before mutate:
 1. Read target state (`read ...`)
-2. Load specialized mutation skill (`create`/`update`/`delete`)
+2. Choose by dependency:
+   - if the operation does not require a reachable live editor bridge, use `unity-agentic-tools`
+   - if the operation does require a reachable live editor bridge, use `unity-agentic-editor`
 3. Re-read and verify (`read ...`)
 
 See `reference/workflows.md` for end-to-end checklists.
 
-For editor workflows, load `unity-agentic-editor`.
-Use the invoke-based bridge surface there: `editor status`, `editor invoke`, `editor console-follow`, `editor list`, `editor install`, `editor uninstall`.
+`unity-agentic-editor` owns the invoke-based bridge surface: `editor status`, `editor invoke`, `editor console-follow`, `editor list`, `editor install`, `editor uninstall`.
 
 ## Troubleshooting
 
-- **Invalid `@hN`/`@uN` refs**: refs are snapshot-scoped. Re-run `editor invoke UnityAgenticTools.API.HierarchyAPI Snapshot` or `editor invoke UnityAgenticTools.API.UIAPI Snapshot` after scene/play-mode changes.
+- **`get text/value @hN`**: `@hN` is hierarchy ref. `get text`/`get value` need UI refs (`@uN` from `ui-snapshot`). Use `get position`/`get active`/`get component` for hierarchy refs
 - **Editor bridge won't connect**: Ensure Unity is open, check `editor status`, re-run `editor install` (or `editor --project <path> install`)
-- **`SceneAPI.Open` fails**: use Assets-relative path (`Assets/Scenes/Main.unity`). Run `editor invoke UnityEditor.AssetDatabase Refresh` first for newly created scenes.
+- **`scene-open` fails**: Use Assets-relative path (`Assets/Scenes/Main.unity`). Run `editor invoke UnityEditor.AssetDatabase Refresh` first for newly created scenes
 - **Loaded edit protection error**: If editor is connected and target `.unity`/`.prefab` is currently loaded/open, pass `--bypass-loaded-protection` to force file-based edits

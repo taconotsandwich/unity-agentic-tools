@@ -46,16 +46,14 @@ describe('analyze_unity_log', () => {
 });
 
 describe('SCENARIO_NAMES', () => {
-    it('includes the expanded validation matrix', () => {
+    it('includes the file-safe validation matrix', () => {
         expect(SCENARIO_NAMES).toContain('baseline');
-        expect(SCENARIO_NAMES).toContain('create-gameobject');
-        expect(SCENARIO_NAMES).toContain('update-component');
-        expect(SCENARIO_NAMES).toContain('create-prefab-instance');
-        expect(SCENARIO_NAMES).toContain('update-prefab-unpack');
+        expect(SCENARIO_NAMES).toContain('update-layer');
         expect(SCENARIO_NAMES).toContain('update-settings-time');
-        expect(SCENARIO_NAMES).toContain('create-material');
+        expect(SCENARIO_NAMES).toContain('update-material');
+        expect(SCENARIO_NAMES).toContain('update-meta-texture');
         expect(SCENARIO_NAMES).toContain('update-animation');
-        expect(SCENARIO_NAMES).toContain('update-animator-state-transition');
+        expect(SCENARIO_NAMES).toContain('update-animator-defaults');
         expect(SCENARIO_NAMES).toContain('negative-harness');
         expect(new Set(SCENARIO_NAMES).size).toBe(SCENARIO_NAMES.length);
     });

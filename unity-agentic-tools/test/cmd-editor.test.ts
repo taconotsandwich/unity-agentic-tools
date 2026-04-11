@@ -149,9 +149,9 @@ describe('cmd-editor', () => {
 
         test('limits to top-level commands when scope is top', () => {
             const root = new Command('unity-agentic-tools');
-            const create_cmd = new Command('create').description('Create things');
-            create_cmd.command('scene <file>').description('Create scene');
-            root.addCommand(create_cmd);
+            const read_cmd = new Command('read').description('Read things');
+            read_cmd.command('scene <file>').description('Read scene');
+            root.addCommand(read_cmd);
             root.addCommand(new Command('editor').description('Editor bridge'));
 
             const entries = collect_command_entries(root, {
@@ -161,8 +161,8 @@ describe('cmd-editor', () => {
                 show_desc: true,
             });
 
-            expect(entries.map((e) => e.path)).toEqual(['create', 'editor']);
-            expect(entries.some((e) => e.path === 'create scene')).toBe(false);
+            expect(entries.map((e) => e.path)).toEqual(['read', 'editor']);
+            expect(entries.some((e) => e.path === 'read scene')).toBe(false);
         });
     });
 });

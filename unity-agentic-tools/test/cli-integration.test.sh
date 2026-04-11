@@ -14,6 +14,7 @@ fi
 
 failures=0
 tmp_dir="$(mktemp -d 2>/dev/null || mktemp -d -t unity-cli-test)"
+fixture_path="test/fixtures/SampleScene.unity"
 
 cleanup() {
     rm -rf "$tmp_dir"
@@ -63,162 +64,60 @@ else
     failures=$((failures + 1))
 fi
 
-# Test 4: Edit property (temp copy)
+# Test 4: Removed scene mutation commands fail at top level
 echo ""
-echo "Test 4: Edit property (temp copy)"
-fixture_path="test/fixtures/SampleScene.unity"
-temp_fixture_path="$tmp_dir/SampleScene.unity"
+echo "Test 4: Removed scene mutation commands"
+removed_commands=(
+  "create scene Assets/Scenes/New.unity"
+  "create prefab-variant test/fixtures/SamplePrefab.prefab /tmp/TestVariant.prefab"
+  "create scriptable-object /tmp/Test.asset TestType"
+  "create meta /tmp/Test.cs"
+  "create build Assets/Scenes/Main.unity"
+  "create material /tmp/Test.mat"
+  "create package com.unity.test 1.0.0"
+  "create input-actions /tmp/Test.inputactions TestActions"
+  "create animation /tmp/Test.anim TestAnim"
+  "create animator /tmp/Test.controller TestController"
+  "create prefab /tmp/Test.prefab TestPrefab"
+  "create gameobject Scene.unity Root"
+  "create component Scene.unity Player Rigidbody"
+  "create component-copy Scene.unity 12345 Player"
+  "create prefab-instance Scene.unity test/fixtures/SamplePrefab.prefab"
+  "update gameobject Scene.unity Player m_IsActive false"
+  "update transform Scene.unity Player --position 1,2,3"
+  "update parent Scene.unity Child Parent"
+  "update prefab override Scene.unity AppRoot m_Name AppRoot"
+  "update tag add IntegrationTag"
+  "update sorting-layer add IntegrationLayer"
+  "update build Assets/Scenes/Main.unity --disable"
+  "update input-actions test/fixtures/test-input-actions.inputactions --add-map TestMap"
+  "update animation-curves test/fixtures/keyframe-test.anim --add-curve '{\"type\":\"float\",\"path\":\"Body\",\"attribute\":\"m_Alpha\",\"classID\":23,\"keyframes\":[{\"time\":0,\"value\":1}]}'"
+  "update animator-state test/fixtures/test-animator.controller --add-state Run"
+)
 
-cp "$fixture_path" "$temp_fixture_path"
-
-if run_cli "test4" bun dist/cli.js update gameobject "$temp_fixture_path" "Player" "m_IsActive" "false" --json; then
-    echo "✓ Edit command works"
-    echo "  Changes persisted in temp file"
-else
-    echo "✗ Edit command failed"
-    failures=$((failures + 1))
-fi
-
-# Test 5: Create GameObject
-echo ""
-echo "Test 5: Create GameObject"
-cp "$fixture_path" "$tmp_dir/create-test.unity"
-
-if run_cli "test5" bun dist/cli.js create gameobject "$tmp_dir/create-test.unity" "NewTestObject" --json; then
-    # Verify the object was created by finding it
-    if bun dist/cli.js search "$tmp_dir/create-test.unity" "NewTestObject" --exact 2>/dev/null | grep -q '"count": 1'; then
-        echo "✓ Create command works"
+removed_ok=1
+for command in "${removed_commands[@]}"; do
+    if bun dist/cli.js $command > "$tmp_dir/removed-command.out" 2>&1; then
+        echo "✗ Removed command unexpectedly succeeded: $command"
+        removed_ok=0
+    elif grep -q "unknown command" "$tmp_dir/removed-command.out"; then
+        :
     else
-        echo "✗ Create command: object not found after creation"
-        failures=$((failures + 1))
+        echo "✗ Removed command did not fail with unknown command: $command"
+        cat "$tmp_dir/removed-command.out"
+        removed_ok=0
     fi
+done
+
+if [ $removed_ok -eq 1 ]; then
+    echo "✓ Removed create and structural update commands are no longer registered"
 else
-    echo "✗ Create command failed"
     failures=$((failures + 1))
 fi
 
-# Test 6: Create with parent
+# Test 5: Search PrefabInstance by name in file
 echo ""
-echo "Test 6: Create GameObject with parent"
-cp "$fixture_path" "$tmp_dir/parent-test.unity"
-
-if run_cli "test6" bun dist/cli.js create gameobject "$tmp_dir/parent-test.unity" "ChildObject" --parent "Player" --json; then
-    # Verify parent relationship by checking m_Father in the file
-    if grep -q "m_Father: {fileID: 1847675924}" "$tmp_dir/parent-test.unity"; then
-        echo "✓ Create with parent works"
-    else
-        echo "✗ Create with parent: m_Father not set correctly"
-        failures=$((failures + 1))
-    fi
-else
-    echo "✗ Create with parent failed"
-    failures=$((failures + 1))
-fi
-
-# Test 7: Edit transform
-echo ""
-echo "Test 7: Edit Transform"
-cp "$fixture_path" "$tmp_dir/transform-test.unity"
-
-# First create an object to get a known transform ID
-create_output=$(bun dist/cli.js create gameobject "$tmp_dir/transform-test.unity" "TransformTestObj" 2>&1)
-transform_id=$(echo "$create_output" | grep -o '"transform_id": *"*[0-9]*"*' | grep -o '[0-9]*')
-
-if [ -n "$transform_id" ]; then
-    if run_cli "test7" bun dist/cli.js update transform "$tmp_dir/transform-test.unity" "$transform_id" --position "10,20,30" --scale "2,2,2" --json; then
-        # Verify the transform was updated
-        if grep -q "m_LocalPosition: {x: 10, y: 20, z: 30}" "$tmp_dir/transform-test.unity"; then
-            echo "✓ Edit transform works"
-        else
-            echo "✗ Edit transform: position not updated"
-            failures=$((failures + 1))
-        fi
-    else
-        echo "✗ Edit transform failed"
-        failures=$((failures + 1))
-    fi
-else
-    echo "✗ Edit transform: could not get transform ID from create"
-    failures=$((failures + 1))
-fi
-
-# Test 8: Add component
-echo ""
-echo "Test 8: Add Component"
-cp "$fixture_path" "$tmp_dir/component-test.unity"
-
-if run_cli "test8" bun dist/cli.js create component "$tmp_dir/component-test.unity" "Player" "BoxCollider" --json; then
-    # Verify BoxCollider was added
-    if grep -q "BoxCollider:" "$tmp_dir/component-test.unity"; then
-        echo "✓ Add component works"
-    else
-        echo "✗ Add component: BoxCollider not found in file"
-        failures=$((failures + 1))
-    fi
-else
-    echo "✗ Add component failed"
-    failures=$((failures + 1))
-fi
-
-# Test 9: Create prefab variant
-echo ""
-echo "Test 9: Create Prefab Variant"
-prefab_path="test/fixtures/SamplePrefab.prefab"
-variant_path="$tmp_dir/TestVariant.prefab"
-
-if run_cli "test9" bun dist/cli.js create prefab-variant "$prefab_path" "$variant_path" --name "TestVariant" --json; then
-    # Verify variant was created with correct structure
-    if grep -q "PrefabInstance:" "$variant_path" && grep -q "stripped" "$variant_path"; then
-        echo "✓ Create prefab variant works"
-    else
-        echo "✗ Create prefab variant: invalid structure"
-        failures=$((failures + 1))
-    fi
-else
-    echo "✗ Create prefab variant failed"
-    failures=$((failures + 1))
-fi
-
-# Test 9b: Create prefab instance in scene
-echo ""
-echo "Test 9b: Create Prefab Instance in Scene"
-cp "$fixture_path" "$tmp_dir/prefab-instance-test.unity"
-
-if run_cli "test9b" bun dist/cli.js create prefab-instance "$tmp_dir/prefab-instance-test.unity" "$prefab_path" --json; then
-    if grep -q "PrefabInstance:" "$tmp_dir/prefab-instance-test.unity" && \
-       grep -q "stripped" "$tmp_dir/prefab-instance-test.unity" && \
-       grep -q "m_SourcePrefab:" "$tmp_dir/prefab-instance-test.unity"; then
-        echo "✓ Create prefab instance works"
-    else
-        echo "✗ Create prefab instance: invalid structure"
-        failures=$((failures + 1))
-    fi
-else
-    echo "✗ Create prefab instance failed"
-    failures=$((failures + 1))
-fi
-
-# Test 9c: Create prefab instance with name and position
-echo ""
-echo "Test 9c: Create Prefab Instance with name and position"
-cp "$fixture_path" "$tmp_dir/prefab-instance-named.unity"
-
-if run_cli "test9c" bun dist/cli.js create prefab-instance "$tmp_dir/prefab-instance-named.unity" "$prefab_path" --name "BossEnemy" --position "10,0,5" --json; then
-    if grep -q "value: BossEnemy" "$tmp_dir/prefab-instance-named.unity" && \
-       grep -q "value: 10" "$tmp_dir/prefab-instance-named.unity"; then
-        echo "✓ Create prefab instance with name and position works"
-    else
-        echo "✗ Create prefab instance: name/position not set"
-        failures=$((failures + 1))
-    fi
-else
-    echo "✗ Create prefab instance with options failed"
-    failures=$((failures + 1))
-fi
-
-# Test 10: Search PrefabInstance by name in file
-echo ""
-echo "Test 10: Search PrefabInstance by name in file"
+echo "Test 5: Search PrefabInstance by name in file"
 search_prefab_output=$(bun dist/cli.js search test/fixtures/SceneWithPrefab.unity "MyEnemy" --json 2>&1)
 if echo "$search_prefab_output" | grep -q '"resultType": "PrefabInstance"'; then
     echo "✓ Search returns PrefabInstance results"
@@ -228,9 +127,9 @@ else
     failures=$((failures + 1))
 fi
 
-# Test 11: Search returns mixed results (GO + PrefabInstance)
+# Test 6: Search returns mixed results (GO + PrefabInstance)
 echo ""
-echo "Test 11: Search mixed results (GameObject + PrefabInstance)"
+echo "Test 6: Search mixed results (GameObject + PrefabInstance)"
 search_mixed_output=$(bun dist/cli.js search test/fixtures/SceneWithPrefab.unity "m" --json 2>&1)
 has_go=$(echo "$search_mixed_output" | grep -c '"resultType": "GameObject"' || true)
 has_pi=$(echo "$search_mixed_output" | grep -c '"resultType": "PrefabInstance"' || true)
@@ -242,40 +141,9 @@ else
     failures=$((failures + 1))
 fi
 
-# Test 12: Full workflow - create, add components, edit transform
+# Test 7: CRLF line ending support
 echo ""
-echo "Test 12: Full workflow (create → add components → edit transform)"
-cp "$fixture_path" "$tmp_dir/workflow-test.unity"
-
-# Create object
-workflow_output=$(bun dist/cli.js create gameobject "$tmp_dir/workflow-test.unity" "WorkflowObject" 2>&1)
-wf_transform_id=$(echo "$workflow_output" | grep -o '"transform_id": *"*[0-9]*"*' | grep -o '[0-9]*')
-
-if [ -n "$wf_transform_id" ]; then
-    # Add components
-    bun dist/cli.js create component "$tmp_dir/workflow-test.unity" "WorkflowObject" "BoxCollider" > /dev/null 2>&1
-    bun dist/cli.js create component "$tmp_dir/workflow-test.unity" "WorkflowObject" "Rigidbody" > /dev/null 2>&1
-
-    # Edit transform
-    bun dist/cli.js update transform "$tmp_dir/workflow-test.unity" "$wf_transform_id" --position "5,10,15" > /dev/null 2>&1
-
-    # Verify all changes
-    if grep -q "BoxCollider:" "$tmp_dir/workflow-test.unity" && \
-       grep -q "Rigidbody:" "$tmp_dir/workflow-test.unity" && \
-       grep -q "m_LocalPosition: {x: 5, y: 10, z: 15}" "$tmp_dir/workflow-test.unity"; then
-        echo "✓ Full workflow works"
-    else
-        echo "✗ Full workflow: some changes not applied"
-        failures=$((failures + 1))
-    fi
-else
-    echo "✗ Full workflow: could not create initial object"
-    failures=$((failures + 1))
-fi
-
-# Test 13: CRLF line ending support
-echo ""
-echo "Test 13: CRLF line endings (Windows-origin files)"
+echo "Test 7: CRLF line endings (Windows-origin files)"
 
 # Convert LF fixture to CRLF at test time — immune to Git normalization
 perl -pe 's/\n/\r\n/' "$fixture_path" > "$tmp_dir/crlf-scene.unity"

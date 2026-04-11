@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolve, join } from 'path';
-import { readFileSync, unlinkSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
+import { readFileSync, unlinkSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { editProperty, safeUnityYAMLEdit, validateUnityYAML, batchEditProperties, createGameObject, editTransform, addComponent, createPrefabVariant, createPrefabInstance, editComponentByFileId, removeComponent, deleteGameObject, copyComponent, duplicateGameObject, createScriptableObject, unpackPrefab, reparentGameObject, createMetaFile, createScene, editPrefabOverride, batchEditPrefabOverrides, editArray, batchEditComponentProperties, removePrefabOverride, addRemovedComponent, removeRemovedComponent, addRemovedGameObject, removeRemovedGameObject, deletePrefabInstance, editManagedReference, deleteAssetFile } from '../src/editor';
 import { UnityDocument } from '../src/editor/unity-document';
@@ -1822,6 +1822,7 @@ describe('createPrefabInstance', () => {
         expect(content).toContain('m_SourcePrefab:');
         expect(content).toContain('guid: a1b2c3d4e5f6789012345678abcdef12');
         expect(content).toContain('m_Modification:\n    serializedVersion: 3\n    m_TransformParent: {fileID: 0}');
+        expect(content).toContain('propertyPath: m_RootOrder');
     });
 
     it('should default instance name to prefab filename stem', () => {
@@ -1872,8 +1873,56 @@ describe('createPrefabInstance', () => {
         const piBlock = doc.find_by_file_id(result.prefab_instance_id!);
         expect(piBlock).toBeDefined();
         expect(piBlock!.raw).toContain('m_TransformParent: {fileID: 1847675924}');
+        expect(piBlock!.raw).toContain('propertyPath: m_RootOrder');
 
         expect(content).toContain(`- {fileID: ${result.transform_id}}`);
+    });
+
+    it('should add root prefab instances to SceneRoots when the scene uses SceneRoots', () => {
+        const temp_dir = mkdtempSync(join(tmpdir(), 'uat-sceneroots-'));
+        const temp_path = join(temp_dir, 'SceneRootsPrefab.unity');
+        writeFileSync(temp_path, `%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!29 &1
+OcclusionCullingSettings:
+  m_SceneGUID: 00000000000000000000000000000000
+--- !u!1 &10
+GameObject:
+  m_Component:
+  - component: {fileID: 11}
+  m_Name: ExistingRoot
+--- !u!4 &11
+Transform:
+  m_GameObject: {fileID: 10}
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 0
+--- !u!1660057539 &9223372036854775807
+SceneRoots:
+  m_ObjectHideFlags: 0
+  m_Roots:
+  - {fileID: 11}
+`, 'utf-8');
+
+        try {
+            const result = createPrefabInstance({
+                scene_path: temp_path,
+                prefab_path: sourcePrefab,
+            });
+
+            expect(result.success).toBe(true);
+
+            const doc = UnityDocument.from_file(temp_path);
+            const sceneRoots = doc.find_by_class_id(1660057539)[0];
+            expect(sceneRoots.raw).toContain(`- {fileID: ${result.transform_id}}`);
+
+            const piBlock = doc.find_by_file_id(result.prefab_instance_id!);
+            expect(piBlock).toBeDefined();
+            expect(piBlock!.raw).toContain('propertyPath: m_RootOrder');
+            expect(piBlock!.raw).toContain('value: 1');
+        } finally {
+            rmSync(temp_dir, { recursive: true, force: true });
+        }
     });
 
     it('should add exactly 3 blocks to the scene', () => {
@@ -4910,7 +4959,7 @@ describe('editComponentByFileId - stripped/variant detection', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('stripped');
-        expect(result.error).toContain('update override');
+        expect(result.error).toContain('UnityAgenticTools.Update.Prefabs PrefabOverride');
     });
 
     it('should hint about prefab instances when fileID not found in variant file', () => {
@@ -4923,7 +4972,7 @@ describe('editComponentByFileId - stripped/variant detection', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('prefab instances');
-        expect(result.error).toContain('update override');
+        expect(result.error).toContain('UnityAgenticTools.Update.Prefabs PrefabOverride');
     });
 });
 
@@ -5067,7 +5116,7 @@ describe('duplicateGameObject - PrefabInstance error', () => {
         expect(result.success).toBe(false);
         expect(result.error).toContain('PrefabInstance');
         expect(result.error).toContain('700000');
-        expect(result.error).toContain('update prefab');
+        expect(result.error).toContain('UnityAgenticTools.Update.Prefabs PrefabUnpack');
     });
 });
 

@@ -5,6 +5,7 @@ import { mkdtempSync, writeFileSync, existsSync, rmSync, cpSync, readFileSync, m
 import { tmpdir } from 'os';
 import { create_temp_fixture } from './test-utils';
 import { isNativeModuleAvailable } from '../src/scanner';
+import { addRemovedComponent, addRemovedGameObject, addComponent, createGameObject } from '../src/editor';
 
 const repo_root = resolve(__dirname, '..');
 const fixtures_dir = resolve(__dirname, 'fixtures');
@@ -29,6 +30,18 @@ function run_cli(args: string[], cwd: string = repo_root): string {
         cwd,
         encoding: 'utf-8'
     });
+}
+
+function expect_unknown_command(args: string[], cwd: string = repo_root): void {
+    try {
+        run_cli(args, cwd);
+        expect.unreachable('Expected unknown command failure');
+    } catch (err: unknown) {
+        const execErr = err as { status: number; stdout?: string; stderr?: string };
+        expect(execErr.status).toBeTruthy();
+        const output = `${execErr.stdout ?? ''}\n${execErr.stderr ?? ''}`;
+        expect(output).toContain('unknown command');
+    }
 }
 
 describeIfNative('CLI', () => {
@@ -230,767 +243,49 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('update gameobject command', () => {
-        it('should edit a property on a temp copy', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                const result = run_cli([
-                    'update', 'gameobject',
-                    temp_fixture.temp_path,
-                    'Player',
-                    'm_IsActive',
-                    'false',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json).toHaveProperty('file_path', temp_fixture.temp_path);
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
-        });
-    });
-
-    describe('create gameobject command', () => {
-        it('should create a new GameObject', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                const result = run_cli([
-                    'create', 'gameobject',
-                    temp_fixture.temp_path,
-                    'NewObject',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json).toHaveProperty('game_object_id');
-                expect(json).toHaveProperty('transform_id');
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
+    describe('migrated scene mutation commands', () => {
+        it('removes top-level create scene graph commands', () => {
+            expect_unknown_command(['create', 'scene', 'Assets/Scenes/New.unity']);
+            expect_unknown_command(['create', 'prefab-variant', 'Assets/Prefabs/Base.prefab', 'Assets/Prefabs/BaseVariant.prefab']);
+            expect_unknown_command(['create', 'scriptable-object', 'Assets/Data/Test.asset', 'TestType']);
+            expect_unknown_command(['create', 'meta', '/tmp/TestScript.cs']);
+            expect_unknown_command(['create', 'build', 'Assets/Scenes/Main.unity']);
+            expect_unknown_command(['create', 'material', 'Assets/Materials/Test.mat']);
+            expect_unknown_command(['create', 'package', 'com.test.package', '1.0.0']);
+            expect_unknown_command(['create', 'input-actions', 'Assets/Input/Test.inputactions', 'TestActions']);
+            expect_unknown_command(['create', 'animation', 'Assets/Animations/Test.anim', 'Test']);
+            expect_unknown_command(['create', 'animator', 'Assets/Animators/Test.controller', 'Test']);
+            expect_unknown_command(['create', 'prefab', 'Assets/Prefabs/Test.prefab', 'Test']);
+            expect_unknown_command(['create', 'gameobject', 'Scene.unity', 'Root']);
+            expect_unknown_command(['create', 'component', 'Scene.unity', 'Player', 'Rigidbody']);
+            expect_unknown_command(['create', 'component-copy', 'Scene.unity', '12345', 'Player']);
+            expect_unknown_command(['create', 'prefab-instance', 'Scene.unity', 'Assets/Prefabs/AppRoot.prefab']);
         });
 
-        it('should create a child GameObject with --parent', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                const result = run_cli([
-                    'create', 'gameobject',
-                    temp_fixture.temp_path,
-                    'ChildObject',
-                    '--parent', 'Player',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json).toHaveProperty('game_object_id');
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
-        });
-    });
-
-    describe('update transform command', () => {
-        it('should edit transform with valid vector', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                // Player's Transform fileID is known from the fixture
-                const listResult = JSON.parse(run_cli([
-                    'read', 'scene', temp_fixture.temp_path, '--json'
-                ]));
-                const player = listResult.gameobjects.find((g: GameObjectEntry) => g.name === 'Player');
-                const transformId = player.components.find((c: ComponentEntry) => c.type === 'Transform').fileId;
-
-                const result = run_cli([
-                    'update', 'transform',
-                    temp_fixture.temp_path,
-                    transformId,
-                    '--position', '1,2,3',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
+        it('removes top-level update scene graph commands', () => {
+            expect_unknown_command(['update', 'gameobject', 'Scene.unity', 'Player', 'm_IsActive', 'false']);
+            expect_unknown_command(['update', 'component', 'Scene.unity', '12345', 'm_LocalPosition.x', '10']);
+            expect_unknown_command(['update', 'transform', 'Scene.unity', 'Player', '--position', '1,2,3']);
+            expect_unknown_command(['update', 'parent', 'Scene.unity', 'Child', 'Parent']);
+            expect_unknown_command(['update', 'array', 'Scene.unity', '12345', 'm_Component', 'append', '{"value":"1"}']);
+            expect_unknown_command(['update', 'batch', 'Scene.unity', '[]']);
+            expect_unknown_command(['update', 'batch-components', 'Scene.unity', '[]']);
+            expect_unknown_command(['update', 'sibling-index', 'Scene.unity', 'Player', '0']);
+            expect_unknown_command(['update', 'managed-reference', 'Scene.unity', '12345', 'field', 'Namespace.Type']);
         });
 
-        it('should fail with invalid vector format', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                run_cli([
-                    'update', 'transform',
-                    temp_fixture.temp_path,
-                    '999999',
-                    '--position', 'not,a,vector',
-                    '--json'
-                ]);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                const execErr = err as { status: number };
-                // CLI exits with error for invalid vector
-                expect(execErr.status).toBeTruthy();
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
-        });
-    });
-
-    describe('create component command', () => {
-        it('should add a component to a GameObject', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                const result = run_cli([
-                    'create', 'component',
-                    temp_fixture.temp_path,
-                    'Player',
-                    'Rigidbody',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json).toHaveProperty('component_id');
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
+        it('removes top-level update prefab mutation commands', () => {
+            expect_unknown_command(['update', 'prefab', 'override', 'Scene.unity', 'AppRoot', 'm_Name', 'AppRoot']);
+            expect_unknown_command(['update', 'prefab', 'remove-override', 'Scene.unity', 'AppRoot', 'm_Name']);
         });
 
-        it('should fail for nonexistent GameObject', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                try {
-                    run_cli([
-                        'create', 'component',
-                        temp_fixture.temp_path,
-                        'NonexistentObject',
-                        'Rigidbody',
-                        '--json'
-                    ]);
-                    throw new Error('Expected non-zero exit code');
-                } catch (err: unknown) {
-                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
-                    const execErr = err as { status: number; stdout: string };
-                    expect(execErr.status).toBe(1);
-                    const json = JSON.parse(execErr.stdout);
-                    expect(json.success).toBe(false);
-                }
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
-        });
-
-        it('should reject MonoBehaviour as component type', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                try {
-                    run_cli([
-                        'create', 'component',
-                        temp_fixture.temp_path,
-                        'Player',
-                        'MonoBehaviour',
-                        '--json'
-                    ]);
-                    throw new Error('Expected non-zero exit code');
-                } catch (err: unknown) {
-                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
-                    const execErr = err as { status: number; stdout: string };
-                    expect(execErr.status).toBe(1);
-                    const json = JSON.parse(execErr.stdout);
-                    expect(json.success).toBe(false);
-                    expect(json.error).toContain('base class');
-                }
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
-        });
-
-        it('should reject all-zero script GUID', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                try {
-                    run_cli([
-                        'create', 'component',
-                        temp_fixture.temp_path,
-                        'Player',
-                        '00000000000000000000000000000000',
-                        '--json'
-                    ]);
-                    throw new Error('Expected non-zero exit code');
-                } catch (err: unknown) {
-                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
-                    const execErr = err as { status: number; stdout: string };
-                    expect(execErr.status).toBe(1);
-                    const json = JSON.parse(execErr.stdout);
-                    expect(json.success).toBe(false);
-                    expect(json.error).toContain('all-zero GUID');
-                }
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
-        });
-
-        it('should reject abstract MonoBehaviour script', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-            const projectDir = mkdtempSync(join(tmpdir(), 'uat-abstract-script-'));
-            const scriptsDir = join(projectDir, 'Assets', 'Scripts');
-            const scriptPath = join(scriptsDir, 'AbstractActor.cs');
-
-            mkdirSync(scriptsDir, { recursive: true });
-            writeFileSync(scriptPath, 'public abstract class AbstractActor : MonoBehaviour { }', 'utf-8');
-            writeFileSync(scriptPath + '.meta', 'fileFormatVersion: 2\nguid: 1234567890abcdef1234567890abcdef\n', 'utf-8');
-
-            try {
-                try {
-                    run_cli([
-                        'create', 'component',
-                        temp_fixture.temp_path,
-                        'Player',
-                        scriptPath,
-                        '--project', projectDir,
-                        '--json'
-                    ]);
-                    throw new Error('Expected non-zero exit code');
-                } catch (err: unknown) {
-                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
-                    const execErr = err as { status: number; stdout: string };
-                    expect(execErr.status).toBe(1);
-                    const json = JSON.parse(execErr.stdout);
-                    expect(json.success).toBe(false);
-                    expect(json.error).toContain('abstract');
-                }
-            } finally {
-                temp_fixture.cleanup_fn();
-                rmSync(projectDir, { recursive: true, force: true });
-            }
-        });
-
-        it('should resolve Grid as built-in when GridManager script exists', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-            const projectDir = mkdtempSync(join(tmpdir(), 'uat-grid-built-in-'));
-            const cacheDir = join(projectDir, '.unity-agentic');
-            const cachePath = join(cacheDir, 'guid-cache.json');
-
-            mkdirSync(cacheDir, { recursive: true });
-            writeFileSync(cachePath, JSON.stringify({
-                ['11111111111111111111111111111111']: 'Assets/Scripts/GridManager.cs'
-            }), 'utf-8');
-
-            try {
-                const result = run_cli([
-                    'create', 'component',
-                    temp_fixture.temp_path,
-                    'Player',
-                    'Grid',
-                    '--project', projectDir,
-                    '--json'
-                ]);
-
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json.script_guid).toBeUndefined();
-            } finally {
-                temp_fixture.cleanup_fn();
-                rmSync(projectDir, { recursive: true, force: true });
-            }
-        });
-
-        it('should add a script by name from the type registry', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-            const projectDir = mkdtempSync(join(tmpdir(), 'uat-registry-script-'));
-            const cacheDir = join(projectDir, '.unity-agentic');
-            const registryPath = join(cacheDir, 'type-registry.json');
-            const playerControllerGuid = 'cafebabe12345678cafebabe12345678';
-
-            mkdirSync(cacheDir, { recursive: true });
-            writeFileSync(registryPath, JSON.stringify([
-                {
-                    name: 'PlayerController',
-                    kind: 'class',
-                    namespace: null,
-                    filePath: 'Assets/Scripts/PlayerController.cs',
-                    guid: playerControllerGuid
-                }
-            ]), 'utf-8');
-
-            try {
-                const result = run_cli([
-                    'create', 'component',
-                    temp_fixture.temp_path,
-                    'Player',
-                    'PlayerController',
-                    '--project', projectDir,
-                    '--json'
-                ]);
-
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json.script_guid).toBe(playerControllerGuid);
-                expect(json.script_path).toBe('Assets/Scripts/PlayerController.cs');
-            } finally {
-                temp_fixture.cleanup_fn();
-                rmSync(projectDir, { recursive: true, force: true });
-            }
-        });
-
-        it('should prefer a custom script when its short name collides with a non-component Unity type', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-            const projectDir = mkdtempSync(join(tmpdir(), 'uat-audiomanager-script-'));
-            const cacheDir = join(projectDir, '.unity-agentic');
-            const registryPath = join(cacheDir, 'type-registry.json');
-            const audioManagerGuid = '22222222222222222222222222222222';
-
-            mkdirSync(cacheDir, { recursive: true });
-            writeFileSync(registryPath, JSON.stringify([
-                {
-                    name: 'AudioManager',
-                    kind: 'class',
-                    namespace: null,
-                    filePath: 'Assets/Scripts/AudioManager.cs',
-                    guid: audioManagerGuid
-                }
-            ]), 'utf-8');
-
-            try {
-                const result = run_cli([
-                    'create', 'component',
-                    temp_fixture.temp_path,
-                    'Player',
-                    'AudioManager',
-                    '--project', projectDir,
-                    '--json'
-                ]);
-
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json.script_guid).toBe(audioManagerGuid);
-                expect(json.script_path).toBe('Assets/Scripts/AudioManager.cs');
-            } finally {
-                temp_fixture.cleanup_fn();
-                rmSync(projectDir, { recursive: true, force: true });
-            }
-        });
-
-        it('should not fall back to GUID cache when a type registry entry cannot be materialized', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-            const projectDir = mkdtempSync(join(tmpdir(), 'uat-registry-primary-'));
-            const cacheDir = join(projectDir, '.unity-agentic');
-            const cachePath = join(cacheDir, 'guid-cache.json');
-            const registryPath = join(cacheDir, 'type-registry.json');
-            const staleGuid = '88888888888888888888888888888888';
-
-            mkdirSync(cacheDir, { recursive: true });
-            writeFileSync(cachePath, JSON.stringify({
-                [staleGuid]: 'Assets/Scripts/GameplayManagerRenamed.cs'
-            }), 'utf-8');
-            writeFileSync(registryPath, JSON.stringify([
-                {
-                    name: 'GameManager',
-                    kind: 'class',
-                    namespace: 'Gameplay',
-                    filePath: 'Assets/Scripts/GameplayManagerRenamed.cs',
-                    guid: null
-                }
-            ]), 'utf-8');
-
-            try {
-                try {
-                    run_cli([
-                        'create', 'component',
-                        temp_fixture.temp_path,
-                        'Player',
-                        'GameManager',
-                        '--project', projectDir,
-                        '--json'
-                    ]);
-                    throw new Error('Expected non-zero exit code');
-                } catch (err: unknown) {
-                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
-                    const execErr = err as { status: number; stdout: string };
-                    expect(execErr.status).toBe(1);
-                    const json = JSON.parse(execErr.stdout);
-                    expect(json.success).toBe(false);
-                    expect(json.error).toContain('Component or script not found: "GameManager"');
-                }
-            } finally {
-                temp_fixture.cleanup_fn();
-                rmSync(projectDir, { recursive: true, force: true });
-            }
-        });
-
-        it('should prefer the DLL registry entry when a matching source GUID exists', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-            const projectDir = mkdtempSync(join(tmpdir(), 'uat-dll-registry-entry-'));
-            const cacheDir = join(projectDir, '.unity-agentic');
-            const registryPath = join(cacheDir, 'type-registry.json');
-            const scriptGuid = '12121212121212121212121212121212';
-            const dllPath = 'Library/ScriptAssemblies/UnityEngine.UIElementsModule.dll';
-
-            mkdirSync(cacheDir, { recursive: true });
-            writeFileSync(registryPath, JSON.stringify([
-                {
-                    name: 'UIDocument',
-                    kind: 'class',
-                    namespace: 'UnityEngine.UIElements',
-                    filePath: 'Packages/com.unity.ui/Runtime/UIElements/UIDocument.cs',
-                    guid: scriptGuid
-                },
-                {
-                    name: 'UIDocument',
-                    kind: 'class',
-                    namespace: 'UnityEngine.UIElements',
-                    filePath: dllPath,
-                    guid: null
-                }
-            ]), 'utf-8');
-
-            try {
-                const result = run_cli([
-                    'create', 'component',
-                    temp_fixture.temp_path,
-                    'Player',
-                    'UnityEngine.UIElements.UIDocument',
-                    '--project', projectDir,
-                    '--json'
-                ]);
-
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json.script_guid).toBe(scriptGuid);
-                expect(json.script_path).toBe(dllPath);
-            } finally {
-                temp_fixture.cleanup_fn();
-                rmSync(projectDir, { recursive: true, force: true });
-            }
-        });
-
-        it('should not resolve script names from GUID cache when the type registry is missing', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-            const projectDir = mkdtempSync(join(tmpdir(), 'uat-missing-registry-'));
-            const cacheDir = join(projectDir, '.unity-agentic');
-            const cachePath = join(cacheDir, 'guid-cache.json');
-
-            mkdirSync(cacheDir, { recursive: true });
-            writeFileSync(cachePath, JSON.stringify({
-                ['aaaa000000000000000000000000aaaa']: 'Assets/Scripts/ArenaCampStateMgr.cs',
-                ['bbbb000000000000000000000000bbbb']: 'Assets/Scripts/CampStateMgr.cs'
-            }), 'utf-8');
-
-            try {
-                try {
-                    run_cli([
-                        'create', 'component',
-                        temp_fixture.temp_path,
-                        'Player',
-                        'CampStateMgr',
-                        '--project', projectDir,
-                        '--json'
-                    ]);
-                    throw new Error('Expected non-zero exit code');
-                } catch (err: unknown) {
-                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
-                    const execErr = err as { status: number; stdout: string };
-                    expect(execErr.status).toBe(1);
-                    const json = JSON.parse(execErr.stdout);
-                    expect(json.success).toBe(false);
-                    expect(json.error).toContain('Component or script not found: "CampStateMgr"');
-                    expect(json.error).toContain('Type registry not found');
-                }
-            } finally {
-                temp_fixture.cleanup_fn();
-                rmSync(projectDir, { recursive: true, force: true });
-            }
-        });
-
-        it('should resolve UnityEngine.Grid as the built-in component when Grid.cs exists', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-            const projectDir = mkdtempSync(join(tmpdir(), 'uat-grid-namespaced-'));
-            const cacheDir = join(projectDir, '.unity-agentic');
-            const registryPath = join(cacheDir, 'type-registry.json');
-            const gridGuid = '55555555555555555555555555555555';
-
-            mkdirSync(cacheDir, { recursive: true });
-            writeFileSync(registryPath, JSON.stringify([
-                {
-                    name: 'Grid',
-                    kind: 'class',
-                    namespace: null,
-                    filePath: 'Assets/Scripts/Grid.cs',
-                    guid: gridGuid
-                }
-            ]), 'utf-8');
-
-            try {
-                const result = run_cli([
-                    'create', 'component',
-                    temp_fixture.temp_path,
-                    'Player',
-                    'UnityEngine.Grid',
-                    '--project', projectDir,
-                    '--json'
-                ]);
-
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json.script_guid).toBeUndefined();
-            } finally {
-                temp_fixture.cleanup_fn();
-                rmSync(projectDir, { recursive: true, force: true });
-            }
-        });
-
-        it('should return ambiguity error for short names with multiple qualified type-registry matches', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-            const projectDir = mkdtempSync(join(tmpdir(), 'uat-qualified-short-name-ambiguity-'));
-            const cacheDir = join(projectDir, '.unity-agentic');
-            const registryPath = join(cacheDir, 'type-registry.json');
-            const gameManagerGuid = '66666666666666666666666666666666';
-
-            mkdirSync(cacheDir, { recursive: true });
-            writeFileSync(registryPath, JSON.stringify([
-                {
-                    name: 'GameManager',
-                    kind: 'class',
-                    namespace: 'Unity',
-                    filePath: 'Assets/Scripts/GameManager.cs',
-                    guid: gameManagerGuid
-                },
-                {
-                    name: 'GameManager',
-                    kind: 'class',
-                    namespace: 'Alias',
-                    filePath: 'Assets/Scripts/GameManager.cs',
-                    guid: gameManagerGuid
-                }
-            ]), 'utf-8');
-
-            try {
-                try {
-                    run_cli([
-                        'create', 'component',
-                        temp_fixture.temp_path,
-                        'Player',
-                        'GameManager',
-                        '--project', projectDir,
-                        '--json'
-                    ]);
-                    throw new Error('Expected non-zero exit code');
-                } catch (err: unknown) {
-                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
-                    const execErr = err as { status: number; stdout: string };
-                    expect(execErr.status).toBe(1);
-                    const json = JSON.parse(execErr.stdout);
-                    expect(json.success).toBe(false);
-                    expect(json.error).toContain('Ambiguous type "GameManager"');
-                    expect(json.error).toContain('Unity.GameManager');
-                    expect(json.error).toContain('Alias.GameManager');
-                    expect(json.error).toContain('Specify which GameManager to use');
-                }
-            } finally {
-                temp_fixture.cleanup_fn();
-                rmSync(projectDir, { recursive: true, force: true });
-            }
-        });
-
-        it('should return ambiguity error for duplicate unqualified registry matches', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-            const projectDir = mkdtempSync(join(tmpdir(), 'uat-strict-ambiguity-'));
-            const cacheDir = join(projectDir, '.unity-agentic');
-            const registryPath = join(cacheDir, 'type-registry.json');
-
-            mkdirSync(cacheDir, { recursive: true });
-            writeFileSync(registryPath, JSON.stringify([
-                {
-                    name: 'Foo',
-                    kind: 'class',
-                    namespace: null,
-                    filePath: 'Assets/Scripts/Foo.cs',
-                    guid: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-                },
-                {
-                    name: 'Foo',
-                    kind: 'class',
-                    namespace: null,
-                    filePath: 'Packages/com.test/Foo.cs',
-                    guid: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
-                }
-            ]), 'utf-8');
-
-            try {
-                try {
-                    run_cli([
-                        'create', 'component',
-                        temp_fixture.temp_path,
-                        'Player',
-                        'Foo',
-                        '--project', projectDir,
-                        '--json'
-                    ]);
-                    throw new Error('Expected non-zero exit code');
-                } catch (err: unknown) {
-                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
-                    const execErr = err as { status: number; stdout: string };
-                    expect(execErr.status).toBe(1);
-                    const json = JSON.parse(execErr.stdout);
-                    expect(json.success).toBe(false);
-                    expect(json.error).toContain('Ambiguous type "Foo"');
-                    expect(json.error).toContain('found 2 matches');
-                    expect(json.error).toContain('Assets/Scripts/Foo.cs');
-                    expect(json.error).toContain('Packages/com.test/Foo.cs');
-                }
-            } finally {
-                temp_fixture.cleanup_fn();
-                rmSync(projectDir, { recursive: true, force: true });
-            }
-        });
-
-        it('should add variant component and expose structured added_components in read overrides', () => {
-            const fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SamplePrefabVariant.prefab')
-            );
-
-            try {
-                const create_result = run_cli([
-                    'create', 'component',
-                    fixture.temp_path,
-                    'EnemyVariant',
-                    'AudioSource',
-                    '--json'
-                ]);
-                const create_json = JSON.parse(create_result);
-                expect(create_json).toHaveProperty('success', true);
-                expect(create_json).toHaveProperty('component_id');
-
-                const overrides_result = run_cli([
-                    'read', 'overrides',
-                    fixture.temp_path,
-                    '5765656985498706500',
-                    '--json'
-                ]);
-                const overrides_json = JSON.parse(overrides_result);
-
-                expect(Array.isArray(overrides_json.added_components)).toBe(true);
-                expect(overrides_json.added_components.length).toBe(1);
-                expect(overrides_json.added_components[0]).toMatchObject({
-                    target_corresponding_source_object: {
-                        file_id: '100000',
-                        guid: 'a1b2c3d4e5f6789012345678abcdef12',
-                        type: 3,
-                    },
-                    insert_index: -1,
-                    added_object: {
-                        file_id: create_json.component_id,
-                    },
-                });
-
-                const content = readFileSync(fixture.temp_path, 'utf-8');
-                expect(content).toContain('m_AddedComponents:\n    - targetCorrespondingSourceObject: {fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}\n      insertIndex: -1');
-            } finally {
-                fixture.cleanup_fn();
-            }
-        });
-    });
-
-    describe('update component command', () => {
-        it('should edit component by file ID', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                // Get a component file ID from Player
-                const listResult = JSON.parse(run_cli([
-                    'read', 'scene', temp_fixture.temp_path, '--json'
-                ]));
-                const player = listResult.gameobjects.find((g: GameObjectEntry) => g.name === 'Player');
-                const transformId = player.components.find((c: ComponentEntry) => c.type === 'Transform').fileId;
-
-                const result = run_cli([
-                    'update', 'component',
-                    temp_fixture.temp_path,
-                    transformId,
-                    'm_LocalPosition.x',
-                    '10',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
-        });
-
-        it('should fail for invalid file ID', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                try {
-                    run_cli([
-                        'update', 'component',
-                        temp_fixture.temp_path,
-                        '999999999',
-                        'm_LocalPosition.x',
-                        '10',
-                        '--json'
-                    ]);
-                    throw new Error('Expected non-zero exit code');
-                } catch (err: unknown) {
-                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
-                    const execErr = err as { status: number; stdout: string };
-                    expect(execErr.status).toBe(1);
-                    const json = JSON.parse(execErr.stdout);
-                    expect(json.success).toBe(false);
-                }
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
+        it('removes top-level structural asset update commands', () => {
+            expect_unknown_command(['update', 'tag', 'add', 'MyTag']);
+            expect_unknown_command(['update', 'sorting-layer', 'add', 'MyLayer']);
+            expect_unknown_command(['update', 'build', 'Assets/Scenes/Main.unity', '--disable']);
+            expect_unknown_command(['update', 'input-actions', 'Assets/Input/Test.inputactions', '--add-map', 'Gameplay']);
+            expect_unknown_command(['update', 'animation-curves', 'Assets/Animations/Test.anim', '--add-curve', '{"type":"float","path":"Body","attribute":"m_Alpha","classID":23,"keyframes":[{"time":0,"value":1}]}']);
+            expect_unknown_command(['update', 'animator-state', 'Assets/Animators/Test.controller', '--add-state', 'Run']);
         });
     });
 
@@ -1001,139 +296,27 @@ describeIfNative('CLI', () => {
             );
 
             try {
-                // First add a component, then remove it
-                const addResult = JSON.parse(run_cli([
-                    'create', 'component',
-                    temp_fixture.temp_path,
-                    'Player',
-                    'Rigidbody',
-                    '--json'
+                const listResult = JSON.parse(run_cli([
+                    'read', 'scene', temp_fixture.temp_path, '--json'
                 ]));
-                expect(addResult.success).toBe(true);
+                const mainCamera = listResult.gameobjects.find((g: GameObjectEntry) => g.name === 'Main Camera');
+                const cameraId = mainCamera.components.find((c: ComponentEntry) => c.type === 'Camera').fileId;
 
                 const result = run_cli([
                     'delete', 'component',
                     temp_fixture.temp_path,
-                    addResult.component_id,
+                    cameraId,
                     '--json'
                 ]);
                 const json = JSON.parse(result);
                 expect(json).toHaveProperty('success', true);
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
-        });
-
-        it('should remove a custom script by type name when it collides with a non-component Unity type', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-            const projectDir = mkdtempSync(join(tmpdir(), 'uat-gamemanager-script-'));
-            const cacheDir = join(projectDir, '.unity-agentic');
-            const registryPath = join(cacheDir, 'type-registry.json');
-            const gameManagerGuid = '33333333333333333333333333333333';
-
-            mkdirSync(cacheDir, { recursive: true });
-            writeFileSync(registryPath, JSON.stringify([
-                {
-                    name: 'GameManager',
-                    kind: 'class',
-                    namespace: null,
-                    filePath: 'Assets/Scripts/GameManager.cs',
-                    guid: gameManagerGuid
-                }
-            ]), 'utf-8');
-
-            try {
-                const addResult = JSON.parse(run_cli([
-                    'create', 'component',
-                    temp_fixture.temp_path,
-                    'Player',
-                    'GameManager',
-                    '--project', projectDir,
-                    '--json'
+                const refreshed = JSON.parse(run_cli([
+                    'read', 'scene', temp_fixture.temp_path, '--json'
                 ]));
-                expect(addResult.success).toBe(true);
-
-                const result = run_cli([
-                    'delete', 'component',
-                    temp_fixture.temp_path,
-                    'GameManager',
-                    '--on', 'Player',
-                    '--project', projectDir,
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json.removed_file_id).toBe(String(addResult.component_id));
+                const refreshedCamera = refreshed.gameobjects.find((g: GameObjectEntry) => g.name === 'Main Camera');
+                expect(refreshedCamera.components.some((c: ComponentEntry) => c.type === 'Camera')).toBe(false);
             } finally {
                 temp_fixture.cleanup_fn();
-                rmSync(projectDir, { recursive: true, force: true });
-            }
-        });
-
-        it('should surface qualified short-name ambiguity when deleting by component type', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-            const projectDir = mkdtempSync(join(tmpdir(), 'uat-delete-qualified-short-name-ambiguity-'));
-            const cacheDir = join(projectDir, '.unity-agentic');
-            const registryPath = join(cacheDir, 'type-registry.json');
-            const gameManagerGuid = '77777777777777777777777777777777';
-
-            mkdirSync(cacheDir, { recursive: true });
-            writeFileSync(registryPath, JSON.stringify([
-                {
-                    name: 'GameManager',
-                    kind: 'class',
-                    namespace: 'Unity',
-                    filePath: 'Assets/Scripts/GameManager.cs',
-                    guid: gameManagerGuid
-                },
-                {
-                    name: 'GameManager',
-                    kind: 'class',
-                    namespace: 'Alias',
-                    filePath: 'Assets/Scripts/GameManager.cs',
-                    guid: gameManagerGuid
-                }
-            ]), 'utf-8');
-
-            try {
-                const addResult = JSON.parse(run_cli([
-                    'create', 'component',
-                    temp_fixture.temp_path,
-                    'Player',
-                    'Unity.GameManager',
-                    '--project', projectDir,
-                    '--json'
-                ]));
-                expect(addResult.success).toBe(true);
-
-                try {
-                    run_cli([
-                        'delete', 'component',
-                        temp_fixture.temp_path,
-                        'GameManager',
-                        '--on', 'Player',
-                        '--project', projectDir,
-                        '--json'
-                    ]);
-                    throw new Error('Expected non-zero exit code');
-                } catch (err: unknown) {
-                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
-                    const execErr = err as { status: number; stdout: string };
-                    expect(execErr.status).toBe(1);
-                    const json = JSON.parse(execErr.stdout);
-                    expect(json.success).toBe(false);
-                    expect(json.error).toContain('Ambiguous type "GameManager"');
-                    expect(json.error).toContain('Unity.GameManager');
-                    expect(json.error).toContain('Alias.GameManager');
-                    expect(json.error).toContain('Specify which GameManager to use');
-                }
-            } finally {
-                temp_fixture.cleanup_fn();
-                rmSync(projectDir, { recursive: true, force: true });
             }
         });
     });
@@ -1167,31 +350,8 @@ describeIfNative('CLI', () => {
     });
 
     describe('create component-copy command', () => {
-        it('should copy a component to another GameObject', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                // Get Camera component from Main Camera
-                const listResult = JSON.parse(run_cli([
-                    'read', 'scene', temp_fixture.temp_path, '--json'
-                ]));
-                const camera = listResult.gameobjects.find((g: GameObjectEntry) => g.name === 'Main Camera');
-                const cameraComp = camera.components.find((c: ComponentEntry) => c.type === 'Camera');
-
-                const result = run_cli([
-                    'create', 'component-copy',
-                    temp_fixture.temp_path,
-                    cameraComp.fileId,
-                    'Player',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
+        it('is removed from the top-level CLI', () => {
+            expect_unknown_command(['create', 'component-copy', 'Scene.unity', '12345', 'Player']);
         });
     });
 
@@ -1217,120 +377,18 @@ describeIfNative('CLI', () => {
     });
 
     describe('update parent command', () => {
-        it('should reparent a GameObject under another', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                const result = run_cli([
-                    'update', 'parent',
-                    temp_fixture.temp_path,
-                    'GameManager',
-                    'Player',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
-        });
-
-        it('should not write PrefabInstance IDs into m_Children for no-stripped prefab reparent', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'Track1.unity')
-            );
-
-            try {
-                const result = run_cli([
-                    'update', 'parent',
-                    temp_fixture.temp_path,
-                    '206181830',
-                    '208971438',
-                    '--by-id',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-
-                const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-                const parentTransformBlock = content.match(/--- !u!4 &208971439[\s\S]*?(?=--- !u!|$)/);
-                expect(parentTransformBlock).not.toBeNull();
-                expect(parentTransformBlock![0]).not.toContain('- {fileID: 206181830}');
-
-                const childPiBlock = content.match(/--- !u!1001 &206181830[\s\S]*?(?=--- !u!|$)/);
-                expect(childPiBlock).not.toBeNull();
-                expect(childPiBlock![0]).toContain('m_TransformParent: {fileID: 208971439}');
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
+        it('is removed from the top-level CLI', () => {
+            expect_unknown_command(['update', 'parent', 'Scene.unity', 'Child', 'Parent']);
         });
     });
 
-    describe('create meta command', () => {
-        it('should generate a .meta file for a script', () => {
-            const temp_dir = mkdtempSync(join(tmpdir(), 'cli-meta-'));
-
-            try {
-                const scriptPath = join(temp_dir, 'TestScript.cs');
-                writeFileSync(scriptPath, 'using UnityEngine;\npublic class TestScript : MonoBehaviour { }');
-
-                const result = run_cli([
-                    'create', 'meta',
-                    scriptPath,
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(existsSync(scriptPath + '.meta')).toBe(true);
-            } finally {
-                rmSync(temp_dir, { recursive: true, force: true });
-            }
-        });
-    });
-
-    describe('create scene command', () => {
-        it('should create a minimal scene', () => {
-            const temp_dir = mkdtempSync(join(tmpdir(), 'cli-scene-'));
-
-            try {
-                const scenePath = join(temp_dir, 'New.unity');
-                const result = run_cli([
-                    'create', 'scene',
-                    scenePath,
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(existsSync(scenePath)).toBe(true);
-
-                const content = readFileSync(scenePath, 'utf-8');
-                expect(content.startsWith('%YAML 1.1')).toBe(true);
-            } finally {
-                rmSync(temp_dir, { recursive: true, force: true });
-            }
+    describe('removed top-level create commands', () => {
+        it('removes create meta', () => {
+            expect_unknown_command(['create', 'meta', '/tmp/TestScript.cs']);
         });
 
-        it('should create a scene with defaults (camera + light)', () => {
-            const temp_dir = mkdtempSync(join(tmpdir(), 'cli-scene-'));
-
-            try {
-                const scenePath = join(temp_dir, 'WithDefaults.unity');
-                const result = run_cli([
-                    'create', 'scene',
-                    scenePath,
-                    '--defaults',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-
-                const content = readFileSync(scenePath, 'utf-8');
-                expect(content).toContain('Camera');
-            } finally {
-                rmSync(temp_dir, { recursive: true, force: true });
-            }
+        it('removes create scene', () => {
+            expect_unknown_command(['create', 'scene', '/tmp/New.unity']);
         });
     });
 
@@ -1345,33 +403,6 @@ describeIfNative('CLI', () => {
             const json = JSON.parse(result);
             expect(json).toHaveProperty('success', true);
             expect(json.data).toHaveProperty('tags');
-        });
-
-        it('should add a tag via update tag', () => {
-            // Copy fixtures to temp to avoid mutating originals
-            const temp_dir = mkdtempSync(join(tmpdir(), 'cli-settings-'));
-            const settingsDir = join(temp_dir, 'ProjectSettings');
-            cpSync(join(external_fixtures, 'ProjectSettings'), settingsDir, { recursive: true });
-
-            try {
-                const result = run_cli([
-                    'update', 'tag',
-                    '--project', temp_dir,
-                    'add',
-                    'CLITestTag',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-
-                // Verify the tag was added
-                const readResult = JSON.parse(run_cli([
-                    'read', 'settings', '--project', temp_dir, '--setting', 'tags', '--json'
-                ]));
-                expect(readResult.data.tags).toContain('CLITestTag');
-            } finally {
-                rmSync(temp_dir, { recursive: true, force: true });
-            }
         });
 
         it('should set a layer via update layer', () => {
@@ -1403,30 +434,6 @@ describeIfNative('CLI', () => {
             const json = JSON.parse(result);
             expect(json).toHaveProperty('success', true);
             expect(json).toHaveProperty('project_path', external_fixtures);
-        });
-
-        it('should default update tag to cwd project', () => {
-            const temp_dir = mkdtempSync(join(tmpdir(), 'cli-settings-cwd-'));
-            const settingsDir = join(temp_dir, 'ProjectSettings');
-            cpSync(join(external_fixtures, 'ProjectSettings'), settingsDir, { recursive: true });
-
-            try {
-                const result = run_cli([
-                    'update', 'tag',
-                    'add',
-                    'CLITestTagCwd',
-                    '--json'
-                ], temp_dir);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-
-                const readResult = JSON.parse(run_cli([
-                    'read', 'settings', '--setting', 'tags', '--json'
-                ], temp_dir));
-                expect(readResult.data.tags).toContain('CLITestTagCwd');
-            } finally {
-                rmSync(temp_dir, { recursive: true, force: true });
-            }
         });
 
         it('should default update layer to cwd project', () => {
@@ -1470,109 +477,8 @@ describeIfNative('CLI', () => {
     });
 
     describe('update transform by name', () => {
-        it('should resolve GameObject name to transform fileID', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                const result = run_cli([
-                    'update', 'transform',
-                    temp_fixture.temp_path,
-                    'Player',
-                    '--position', '10,20,30',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-
-                // Verify the position was actually written
-                const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-                expect(content).toContain('m_LocalPosition: {x: 10, y: 20, z: 30}');
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
-        });
-
-        it('should return error for nonexistent GameObject name', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                try {
-                    run_cli([
-                        'update', 'transform',
-                        temp_fixture.temp_path,
-                        'NonExistentObject',
-                        '--position', '1,2,3',
-                        '--json'
-                    ]);
-                    throw new Error('Expected non-zero exit code');
-                } catch (err: unknown) {
-                    if (err instanceof Error && err.message === 'Expected non-zero exit code') throw err;
-                    const execErr = err as { status: number; stdout: string };
-                    expect(execErr.status).toBe(1);
-                    const json = JSON.parse(execErr.stdout);
-                    expect(json.success).toBe(false);
-                    expect(json.error).toContain('Could not resolve');
-                }
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
-        });
-
-        it('should support --by-id for transform updates', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                // Player Transform fileID in SampleScene fixture
-                const result = run_cli([
-                    'update', 'transform',
-                    temp_fixture.temp_path,
-                    '1847675924',
-                    '--by-id',
-                    '--position', '11,22,33',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-
-                const content = readFileSync(temp_fixture.temp_path, 'utf-8');
-                expect(content).toContain('m_LocalPosition: {x: 11, y: 22, z: 33}');
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
-        });
-
-        it('should reject non-numeric identifier with update transform --by-id', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                try {
-                    run_cli([
-                        'update', 'transform',
-                        temp_fixture.temp_path,
-                        'Player',
-                        '--by-id',
-                        '--position', '1,2,3',
-                        '--json'
-                    ]);
-                    expect.unreachable('Should have thrown');
-                } catch (err: unknown) {
-                    const execErr = err as { status: number; stdout: string };
-                    expect(execErr.status).toBe(1);
-                    const json = JSON.parse(execErr.stdout);
-                    expect(json.success).toBe(false);
-                    expect(json.error).toContain('Invalid fileID');
-                }
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
+        it('is removed from the top-level CLI', () => {
+            expect_unknown_command(['update', 'transform', 'Scene.unity', 'Player', '--position', '10,20,30']);
         });
     });
 
@@ -1717,13 +623,12 @@ describeIfNative('CLI', () => {
             );
 
             try {
-                run_cli([
-                    'update', 'prefab', 'remove-component',
-                    fixture.temp_path,
-                    '700000',
-                    '{fileID: 11400000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
-                    '--json'
-                ]);
+                const mutate_result = addRemovedComponent({
+                    file_path: fixture.temp_path,
+                    prefab_instance: '700000',
+                    component_ref: '{fileID: 11400000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
+                });
+                expect(mutate_result.success).toBe(true);
 
                 const result = run_cli([
                     'read', 'overrides',
@@ -1751,13 +656,12 @@ describeIfNative('CLI', () => {
             );
 
             try {
-                run_cli([
-                    'update', 'prefab', 'remove-gameobject',
-                    fixture.temp_path,
-                    '700000',
-                    '{fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
-                    '--json'
-                ]);
+                const mutate_result = addRemovedGameObject({
+                    file_path: fixture.temp_path,
+                    prefab_instance: '700000',
+                    component_ref: '{fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
+                });
+                expect(mutate_result.success).toBe(true);
 
                 const result = run_cli([
                     'read', 'overrides',
@@ -1975,188 +879,28 @@ describeIfNative('CLI', () => {
     });
 
     describe('update array command', () => {
-        it('should append to array', () => {
-            const fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                // Use -- to stop Commander option parsing before the value that starts with '-'
-                const result = run_cli([
-                    'update', 'array',
-                    fixture.temp_path,
-                    '508316491',
-                    'm_Component',
-                    'append',
-                    '--json',
-                    '--',
-                    '- component: {fileID: 999999}',
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json).toHaveProperty('file_path', fixture.temp_path);
-                expect(json).toHaveProperty('action', 'append');
-
-                // Verify the file was actually modified
-                const content = readFileSync(fixture.temp_path, 'utf-8');
-                expect(content).toContain('fileID: 999999');
-            } finally {
-                fixture.cleanup_fn();
-            }
-        });
-
-        it('should remove from array by index', () => {
-            const fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-
-            try {
-                const result = run_cli([
-                    'update', 'array',
-                    fixture.temp_path,
-                    '508316491',
-                    'm_Component',
-                    'remove',
-                    '--index', '0',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json).toHaveProperty('action', 'remove');
-            } finally {
-                fixture.cleanup_fn();
-            }
+        it('is removed from the top-level CLI', () => {
+            expect_unknown_command(['update', 'array', 'Scene.unity', '12345', 'm_Component', 'append', '{"value":"1"}']);
         });
     });
 
     describe('update prefab remove-override command', () => {
-        it('should remove prefab override', () => {
-            const fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SceneWithPrefab.unity')
-            );
-
-            try {
-                const result = run_cli([
-                    'update', 'prefab', 'remove-override',
-                    fixture.temp_path,
-                    '700000',
-                    'm_LocalPosition.x',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json).toHaveProperty('property_path', 'm_LocalPosition.x');
-
-                // Verify the override was actually removed from the file
-                const content = readFileSync(fixture.temp_path, 'utf-8');
-                // The m_LocalPosition.x override should be gone
-                const lines = content.split('\n');
-                let found_removed = false;
-                for (let i = 0; i < lines.length; i++) {
-                    if (lines[i].includes('propertyPath: m_LocalPosition.x')) {
-                        found_removed = true;
-                    }
-                }
-                expect(found_removed).toBe(false);
-            } finally {
-                fixture.cleanup_fn();
-            }
+        it('is removed from the top-level CLI', () => {
+            expect_unknown_command(['update', 'prefab', 'remove-override', 'Scene.unity', 'AppRoot', 'm_LocalPosition.x']);
         });
     });
 
     describe('update prefab remove-component command', () => {
-        it('should add component to m_RemovedComponents with valid YAML shape', () => {
-            const fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SceneWithPrefab.unity')
-            );
-
-            try {
-                const result = run_cli([
-                    'update', 'prefab', 'remove-component',
-                    fixture.temp_path,
-                    '700000',
-                    '{fileID: 12345, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-
-                // Verify the component ref was added to m_RemovedComponents
-                const content = readFileSync(fixture.temp_path, 'utf-8');
-                expect(content).toContain('fileID: 12345');
-                expect(content).toContain('m_RemovedComponents:\n    - {fileID: 12345, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}');
-            } finally {
-                fixture.cleanup_fn();
-            }
-        });
-
-        it('should restore component and collapse list back to []', () => {
-            const fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SceneWithPrefab.unity')
-            );
-
-            try {
-                run_cli([
-                    'update', 'prefab', 'remove-component',
-                    fixture.temp_path,
-                    '700000',
-                    '{fileID: 12345, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
-                    '--json'
-                ]);
-
-                const restoreResult = run_cli([
-                    'update', 'prefab', 'restore-component',
-                    fixture.temp_path,
-                    '700000',
-                    '{fileID: 12345, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
-                    '--json'
-                ]);
-                const json = JSON.parse(restoreResult);
-                expect(json).toHaveProperty('success', true);
-
-                const content = readFileSync(fixture.temp_path, 'utf-8');
-                expect(content).toContain('m_RemovedComponents: []');
-                expect(content).not.toContain('m_RemovedComponents:\n');
-            } finally {
-                fixture.cleanup_fn();
-            }
+        it('is removed from the top-level CLI', () => {
+            expect_unknown_command(['update', 'prefab', 'remove-component', 'Scene.unity', 'AppRoot', 'Camera']);
+            expect_unknown_command(['update', 'prefab', 'restore-component', 'Scene.unity', 'AppRoot', 'Camera']);
         });
     });
 
     describe('update prefab remove-gameobject command', () => {
-        it('should add and restore removed GameObject with valid YAML shape', () => {
-            const fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SceneWithPrefab.unity')
-            );
-
-            try {
-                const removeResult = run_cli([
-                    'update', 'prefab', 'remove-gameobject',
-                    fixture.temp_path,
-                    '700000',
-                    '{fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
-                    '--json'
-                ]);
-                expect(JSON.parse(removeResult)).toHaveProperty('success', true);
-
-                let content = readFileSync(fixture.temp_path, 'utf-8');
-                expect(content).toContain('m_RemovedGameObjects:\n    - {fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}');
-
-                const restoreResult = run_cli([
-                    'update', 'prefab', 'restore-gameobject',
-                    fixture.temp_path,
-                    '700000',
-                    '{fileID: 100000, guid: a1b2c3d4e5f6789012345678abcdef12, type: 3}',
-                    '--json'
-                ]);
-                expect(JSON.parse(restoreResult)).toHaveProperty('success', true);
-
-                content = readFileSync(fixture.temp_path, 'utf-8');
-                expect(content).toContain('m_RemovedGameObjects: []');
-                expect(content).not.toContain('m_RemovedGameObjects:\n');
-            } finally {
-                fixture.cleanup_fn();
-            }
+        it('is removed from the top-level CLI', () => {
+            expect_unknown_command(['update', 'prefab', 'remove-gameobject', 'Scene.unity', 'AppRoot/Child']);
+            expect_unknown_command(['update', 'prefab', 'restore-gameobject', 'Scene.unity', 'AppRoot/Child']);
         });
     });
 
@@ -2287,82 +1031,6 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('update animation --add-event / --remove-event (Gap P5.2)', () => {
-        it('should add an event to an animation', () => {
-            const fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'keyframe-test.anim')
-            );
-
-            try {
-                const result = run_cli([
-                    'update', 'animation',
-                    fixture.temp_path,
-                    '--add-event', '0.75,OnFootstep,step_data',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-
-                // Verify the event was added
-                const content = readFileSync(fixture.temp_path, 'utf-8');
-                expect(content).toContain('functionName: OnFootstep');
-                expect(content).toContain('data: step_data');
-            } finally {
-                fixture.cleanup_fn();
-            }
-        });
-
-        it('should add multiple events with repeated --add-event flags', () => {
-            const fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'keyframe-test.anim')
-            );
-
-            try {
-                const result = run_cli([
-                    'update', 'animation',
-                    fixture.temp_path,
-                    '--add-event', '0.1,EventA',
-                    '--add-event', '0.5,EventB,extra',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json.changes.length).toBeGreaterThanOrEqual(2);
-
-                const content = readFileSync(fixture.temp_path, 'utf-8');
-                expect(content).toContain('functionName: EventA');
-                expect(content).toContain('functionName: EventB');
-                expect(content).toContain('data: extra');
-            } finally {
-                fixture.cleanup_fn();
-            }
-        });
-
-        it('should remove an event by index', () => {
-            const fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'events-test.anim')
-            );
-
-            try {
-                const result = run_cli([
-                    'update', 'animation',
-                    fixture.temp_path,
-                    '--remove-event', '0',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-
-                // Verify first event was removed, second remains
-                const content = readFileSync(fixture.temp_path, 'utf-8');
-                expect(content).not.toContain('OnHalfway');
-                expect(content).toContain('OnComplete');
-            } finally {
-                fixture.cleanup_fn();
-            }
-        });
-    });
-
     describe('read material (Gap P2.1)', () => {
         it('should parse material properties', () => {
             const matFile = resolve(external_fixtures,
@@ -2462,78 +1130,13 @@ describeIfNative('CLI', () => {
         });
     });
 
-    describe('create animator', () => {
-        it('should create a valid .controller file', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'unity-create-animator-'));
-            const file = join(tmp, 'New.controller');
-            try {
-                const result = run_cli(['create', 'animator', file, '--json']);
-                const json = JSON.parse(result);
-                expect(json.success).toBe(true);
-                expect(json.name).toBe('New');
-                expect(json.layer).toBe('Base Layer');
-                expect(existsSync(file)).toBe(true);
-                expect(existsSync(`${file}.meta`)).toBe(true);
-
-                const content = readFileSync(file, 'utf-8');
-                expect(content).toContain('AnimatorController:');
-                expect(content).toContain('AnimatorStateMachine:');
-
-                const readResult = run_cli(['read', 'animator', file, '--json']);
-                const readJson = JSON.parse(readResult);
-                expect(readJson.name).toBe('New');
-                expect(readJson.layers).toEqual(['Base Layer']);
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+    describe('removed top-level create asset commands', () => {
+        it('removes create animator', () => {
+            expect_unknown_command(['create', 'animator', '/tmp/New.controller']);
         });
 
-        it('should reject non-.controller extension', () => {
-            try {
-                run_cli(['create', 'animator', '/tmp/bad.anim', '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { stdout: string };
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('.controller');
-            }
-        });
-    });
-
-    describe('create prefab', () => {
-        it('should create a valid .prefab file', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'unity-create-prefab-'));
-            const file = join(tmp, 'Enemy.prefab');
-            try {
-                const result = run_cli(['create', 'prefab', file, '--json']);
-                const json = JSON.parse(result);
-                expect(json.success).toBe(true);
-                expect(json.name).toBe('Enemy');
-                expect(existsSync(file)).toBe(true);
-                expect(existsSync(`${file}.meta`)).toBe(true);
-
-                const content = readFileSync(file, 'utf-8');
-                expect(content).toContain('GameObject:');
-                expect(content).toContain('Transform:');
-                expect(content).toContain('m_Name: Enemy');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
-        });
-
-        it('should reject non-.prefab extension', () => {
-            try {
-                run_cli(['create', 'prefab', '/tmp/bad.unity', '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { stdout: string };
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('.prefab');
-            }
+        it('removes create prefab', () => {
+            expect_unknown_command(['create', 'prefab', '/tmp/Enemy.prefab']);
         });
     });
 
@@ -2668,21 +1271,17 @@ describeIfNative('CLI', () => {
             );
 
             try {
-                const added_go = JSON.parse(run_cli([
-                    'create', 'gameobject',
-                    fixture.temp_path,
-                    'VariantExtra',
-                    '--json'
-                ]));
+                const added_go = createGameObject({
+                    file_path: fixture.temp_path,
+                    name: 'VariantExtra',
+                });
                 expect(added_go.success).toBe(true);
 
-                const added_component = JSON.parse(run_cli([
-                    'create', 'component',
-                    fixture.temp_path,
-                    'MyEnemy',
-                    'AudioSource',
-                    '--json'
-                ]));
+                const added_component = addComponent({
+                    file_path: fixture.temp_path,
+                    game_object_name: 'MyEnemy',
+                    component_type: 'AudioSource',
+                });
                 expect(added_component.success).toBe(true);
 
                 const delete_result = JSON.parse(run_cli([
@@ -2805,74 +1404,9 @@ describe('CLI - New Features', () => {
         });
     });
 
-    describe('create/delete package round-trip', () => {
-        it('should add and remove a package', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'pkg-cli-'));
-            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
-
-            try {
-                // Create
-                const create_result = run_cli([
-                    'create', 'package',
-                    'com.unity.cinemachine', '2.9.7',
-                    '--project', tmp,
-                    '--json'
-                ]);
-                const cj = JSON.parse(create_result);
-                expect(cj).toHaveProperty('success', true);
-                expect(cj.action).toBe('added');
-
-                // Verify it's in the manifest
-                const list_result = run_cli(['read', 'manifest', '--project', tmp, '--search', 'cinemachine', '--json']);
-                expect(JSON.parse(list_result).count).toBe(1);
-
-                // Delete
-                const delete_result = run_cli([
-                    'delete', 'package',
-                    'com.unity.cinemachine',
-                    '--project', tmp,
-                    '--json'
-                ]);
-                const dj = JSON.parse(delete_result);
-                expect(dj).toHaveProperty('success', true);
-
-                // Verify it's gone
-                const list_result2 = run_cli(['read', 'manifest', '--project', tmp, '--search', 'cinemachine', '--json']);
-                expect(JSON.parse(list_result2).count).toBe(0);
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
-        });
-
-        it('should add and remove a package using cwd project default', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'pkg-cli-cwd-'));
-            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
-
-            try {
-                const create_result = run_cli([
-                    'create', 'package',
-                    'com.unity.timeline', '1.8.0',
-                    '--json'
-                ], tmp);
-                const cj = JSON.parse(create_result);
-                expect(cj).toHaveProperty('success', true);
-
-                const list_result = run_cli(['read', 'manifest', '--search', 'timeline', '--json'], tmp);
-                expect(JSON.parse(list_result).count).toBe(1);
-
-                const delete_result = run_cli([
-                    'delete', 'package',
-                    'com.unity.timeline',
-                    '--json'
-                ], tmp);
-                const dj = JSON.parse(delete_result);
-                expect(dj).toHaveProperty('success', true);
-
-                const list_result2 = run_cli(['read', 'manifest', '--search', 'timeline', '--json'], tmp);
-                expect(JSON.parse(list_result2).count).toBe(0);
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+    describe('removed top-level create package command', () => {
+        it('removes create package', () => {
+            expect_unknown_command(['create', 'package', 'com.unity.cinemachine', '2.9.7']);
         });
     });
 
@@ -2903,581 +1437,84 @@ describe('CLI - New Features', () => {
         });
     });
 
-    describe('create input-actions', () => {
-        it('should create a blank .inputactions file', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'ia-cli-'));
-            const out = join(tmp, 'NewActions.inputactions');
-
-            try {
-                const result = run_cli(['create', 'input-actions', out, 'NewActions', '--json']);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json).toHaveProperty('guid');
-                expect(existsSync(out)).toBe(true);
-                expect(existsSync(out + '.meta')).toBe(true);
-
-                // Verify content
-                const content = JSON.parse(readFileSync(out, 'utf-8'));
-                expect(content.name).toBe('NewActions');
-                expect(content.maps).toHaveLength(0);
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
-        });
-    });
-
-    describe('update input-actions', () => {
-        it('should add and remove a map', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'ia-cli-'));
-            const file = join(tmp, 'test.inputactions');
-            cpSync(resolve(fixtures_dir, 'test-input-actions.inputactions'), file);
-
-            try {
-                // Add map
-                const add_result = run_cli(['update', 'input-actions', file, '--add-map', 'UI', '--json']);
-                expect(JSON.parse(add_result).success).toBe(true);
-
-                // Verify
-                const read_result = run_cli(['read', 'input-actions', file, '--maps', '--json']);
-                expect(JSON.parse(read_result).maps).toHaveLength(2);
-
-                // Remove map
-                const rm_result = run_cli(['update', 'input-actions', file, '--remove-map', 'UI', '--json']);
-                expect(JSON.parse(rm_result).success).toBe(true);
-
-                // Verify
-                const read_result2 = run_cli(['read', 'input-actions', file, '--maps', '--json']);
-                expect(JSON.parse(read_result2).maps).toHaveLength(1);
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
-        });
-    });
-
-    // ========== Animation creation ==========
-    describe('create animation', () => {
-        it('should create a blank .anim file', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'anim-cli-'));
-            const out = join(tmp, 'NewAnim.anim');
-
-            try {
-                const result = run_cli(['create', 'animation', out, 'NewAnim', '--loop', '--sample-rate', '60', '--json']);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json).toHaveProperty('guid');
-                expect(json.loop_time).toBe(true);
-                expect(json.sample_rate).toBe(60);
-                expect(existsSync(out)).toBe(true);
-                expect(existsSync(out + '.meta')).toBe(true);
-
-                // Verify YAML content
-                const content = readFileSync(out, 'utf-8');
-                expect(content).toContain('m_Name: NewAnim');
-                expect(content).toContain('m_LoopTime: 1');
-                expect(content).toContain('m_SampleRate: 60');
-                expect(content).toContain('m_FloatCurves: []');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
-        });
-    });
-
-    // ========== Animation curve editing ==========
-    describe('update animation-curves', () => {
-        it('should add and remove a curve', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'anim-curve-'));
-            const file = join(tmp, 'test.anim');
-            cpSync(resolve(fixtures_dir, 'keyframe-test.anim'), file);
-
-            try {
-                // Add a float curve
-                const curve_spec = JSON.stringify({
-                    type: 'float',
-                    path: 'NewPath',
-                    attribute: 'm_Enabled',
-                    classID: 23,
-                    keyframes: [{ time: 0, value: 1 }, { time: 1, value: 0 }]
-                });
-                const add_result = run_cli(['update', 'animation-curves', file, '--add-curve', curve_spec, '--json']);
-                const aj = JSON.parse(add_result);
-                expect(aj.success).toBe(true);
-                expect(aj.changes[0]).toContain('added float curve');
-
-                // Verify it was added
-                const content = readFileSync(file, 'utf-8');
-                expect(content).toContain('path: NewPath');
-                expect(content).toContain('attribute: m_Enabled');
-
-                // Remove it
-                const rm_result = run_cli(['update', 'animation-curves', file, '--remove-curve', 'NewPath:m_Enabled', '--json']);
-                const rj = JSON.parse(rm_result);
-                expect(rj.success).toBe(true);
-                expect(rj.changes[0]).toContain('removed curve');
-
-                // Verify it was removed
-                const content2 = readFileSync(file, 'utf-8');
-                expect(content2).not.toContain('path: NewPath');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
-        });
-    });
-
-    // ========== Animator state/transition authoring ==========
-    describe('update animator-state', () => {
-        it('should add a state', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'animator-'));
-            const file = join(tmp, 'test.controller');
-            cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
-
-            try {
-                const result = run_cli(['update', 'animator-state', file, '--add-state', 'Run', '--speed', '1.5', '--json']);
-                const json = JSON.parse(result);
-                expect(json.success).toBe(true);
-                expect(json.changes[0]).toContain('added state "Run"');
-
-                // Verify in file
-                const content = readFileSync(file, 'utf-8');
-                expect(content).toContain('m_Name: Run');
-                expect(content).toContain('m_Speed: 1.5');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+    describe('removed top-level create/update structural asset commands', () => {
+        it('removes create input-actions', () => {
+            expect_unknown_command(['create', 'input-actions', '/tmp/NewActions.inputactions', 'NewActions']);
         });
 
-        it('should add a transition', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'animator-'));
-            const file = join(tmp, 'test.controller');
-            cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
-
-            try {
-                const result = run_cli([
-                    'update', 'animator-state', file,
-                    '--add-transition', 'Idle:Walk',
-                    '--condition', 'Speed,greater,0.1',
-                    '--duration', '0.25',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json.success).toBe(true);
-                expect(json.changes[0]).toContain('Idle -> Walk');
-
-                // Verify in file
-                const content = readFileSync(file, 'utf-8');
-                expect(content).toContain('m_ConditionEvent: Speed');
-                expect(content).toContain('m_TransitionDuration: 0.25');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+        it('removes update input-actions', () => {
+            expect_unknown_command(['update', 'input-actions', '/tmp/test.inputactions', '--add-map', 'UI']);
         });
 
-        it('should add a transition with layer-qualified names (R5 Bug #7)', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'animator-'));
-            const file = join(tmp, 'test.controller');
-            cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
-
-            try {
-                const result = run_cli([
-                    'update', 'animator-state', file,
-                    '--add-transition', 'Base Layer.Idle:Base Layer.Walk',
-                    '--duration', '0.3',
-                    '--json'
-                ]);
-                const json = JSON.parse(result);
-                expect(json.success).toBe(true);
-                expect(json.changes[0]).toContain('Idle -> Walk');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+        it('removes create animation', () => {
+            expect_unknown_command(['create', 'animation', '/tmp/NewAnim.anim', 'NewAnim']);
         });
 
-        it('should remove a state', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'animator-'));
-            const file = join(tmp, 'test.controller');
-            cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
-
-            try {
-                const result = run_cli(['update', 'animator-state', file, '--remove-state', 'Walk', '--json']);
-                const json = JSON.parse(result);
-                expect(json.success).toBe(true);
-                expect(json.changes[0]).toContain('removed state "Walk"');
-
-                // Verify Walk is gone
-                const content = readFileSync(file, 'utf-8');
-                expect(content).not.toContain('m_Name: Walk');
-                // Idle should still be there
-                expect(content).toContain('m_Name: Idle');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+        it('removes update animation-curves', () => {
+            expect_unknown_command(['update', 'animation-curves', '/tmp/test.anim', '--add-curve', '{"type":"float","path":"NewPath","attribute":"m_Enabled","classID":23,"keyframes":[{"time":0,"value":1}]}']);
         });
 
-        it('should set default state', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'animator-'));
-            const file = join(tmp, 'test.controller');
-            cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
-
-            try {
-                const result = run_cli(['update', 'animator-state', file, '--set-default-state', 'Walk', '--json']);
-                const json = JSON.parse(result);
-                expect(json.success).toBe(true);
-
-                // Verify default state changed
-                const content = readFileSync(file, 'utf-8');
-                expect(content).toContain('m_DefaultState: {fileID: 1102000030}');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+        it('removes update animator-state', () => {
+            expect_unknown_command(['update', 'animator-state', '/tmp/test.controller', '--add-state', 'Run']);
         });
     });
 
     // ========== Sibling ordering ==========
     describe('update sibling-index', () => {
-        it('should reorder siblings', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'sibling-'));
-            const scene_fixture = resolve(fixtures_dir, 'external', 'SampleScene.unity');
-
-            // Only run if external fixture exists
-            if (!existsSync(scene_fixture)) {
-                return;
-            }
-
-            const file = join(tmp, 'SampleScene.unity');
-            cpSync(scene_fixture, file);
-
-            try {
-                const result = run_cli(['update', 'sibling-index', file, 'Main Camera', '0', '--json']);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-                expect(json.new_index).toBe(0);
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+        it('is removed from the top-level CLI', () => {
+            expect_unknown_command(['update', 'sibling-index', 'Scene.unity', 'Main Camera', '0']);
         });
     });
 
     // ========== Bug fix regression tests ==========
     describe('bug fixes', () => {
-        it('Bug 1: should reject invalid package version', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'pkg-bug1-'));
-            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
-            try {
-                run_cli(['create', 'package', 'com.test.bad', 'not-a-version', '--project', tmp, '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('Invalid version');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+        it('Edge 1: removed create component command should fail as unknown command', () => {
+            expect_unknown_command(['create', 'component', resolve(fixtures_dir, 'SampleScene.unity'), 'Main Camera', '']);
         });
 
-        it('Bug 2: should reject duplicate map name', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'ia-bug2-'));
-            const file = join(tmp, 'test.inputactions');
-            cpSync(resolve(fixtures_dir, 'test-input-actions.inputactions'), file);
-            try {
-                // "Player" already exists in fixture
-                run_cli(['update', 'input-actions', file, '--add-map', 'Player', '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('already exists');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+        it('Edge 2: removed create package command should fail as unknown command', () => {
+            expect_unknown_command(['create', 'package', 'com.test.bad', '1.0.0']);
         });
 
-        it('Bug 4: should reject duplicate curve', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'anim-bug4-'));
-            const file = join(tmp, 'test.anim');
-            cpSync(resolve(fixtures_dir, 'keyframe-test.anim'), file);
-            try {
-                // Body/Mesh:m_Alpha already exists in the fixture
-                const spec = JSON.stringify({
-                    type: 'float', path: 'Body/Mesh', attribute: 'm_Alpha',
-                    classID: 23, keyframes: [{ time: 0, value: 999 }]
-                });
-                run_cli(['update', 'animation-curves', file, '--add-curve', spec, '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('already exists');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+        it('Edge 3: removed structural animation command should fail as unknown command', () => {
+            expect_unknown_command(['update', 'animation-curves', '/tmp/test.anim', '--add-curve', '{"type":"float","path":"Body","attribute":"m_Alpha","classID":23,"keyframes":[{"time":0,"value":1}]}']);
         });
 
-        it('Bug 5: should error on missing required fields in --add-curve', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'anim-bug5-'));
-            const file = join(tmp, 'test.anim');
-            cpSync(resolve(fixtures_dir, 'keyframe-test.anim'), file);
-            try {
-                run_cli(['update', 'animation-curves', file, '--add-curve', '{"type":"float","path":"Body"}', '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('Missing required field');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+        it('Edge 4: removed structural animator command should fail as unknown command', () => {
+            expect_unknown_command(['update', 'animator-state', '/tmp/test.controller', '--add-transition', 'Idle:Walk']);
         });
 
-        it('Bug 6: should give specific error for non-existent curve removal', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'anim-bug6-'));
-            const file = join(tmp, 'test.anim');
-            cpSync(resolve(fixtures_dir, 'keyframe-test.anim'), file);
-            try {
-                run_cli(['update', 'animation-curves', file, '--remove-curve', 'NonExistent:m_Foo', '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('not found');
-                expect(json.error).toContain('NonExistent');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+        it('Edge 5: removed create animation command should fail as unknown command', () => {
+            expect_unknown_command(['create', 'animation', '/tmp/edge5-test.anim', 'Test']);
         });
 
-        it('Bug 7: should reject non-.anim file for animation-curves', () => {
-            try {
-                run_cli([
-                    'update', 'animation-curves',
-                    resolve(fixtures_dir, 'test-animator.controller'),
-                    '--add-curve', '{"type":"float","path":"Body","attribute":"m_Alpha","classID":23,"keyframes":[{"time":0,"value":0}]}',
-                    '--json'
-                ]);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('.anim');
-            }
+        it('Edge 6: removed structural input-actions command should fail as unknown command', () => {
+            expect_unknown_command(['update', 'input-actions', '/tmp/test.inputactions', '--add-map', 'Gameplay']);
         });
 
-        it('Bug 3: --set-keyframes should accept single JSON argument', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'anim-bug3-'));
-            const file = join(tmp, 'test.anim');
-            cpSync(resolve(fixtures_dir, 'keyframe-test.anim'), file);
-            try {
-                const spec = JSON.stringify({
-                    curve: 'Body:m_LocalPosition.x',
-                    keyframes: [{ time: 0, value: 10 }, { time: 1, value: 20 }]
-                });
-                const result = run_cli(['update', 'animation-curves', file, '--set-keyframes', spec, '--json']);
-                const json = JSON.parse(result);
-                expect(json.success).toBe(true);
-                expect(json.changes).toContain('set keyframes on Body:m_LocalPosition.x');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
-        });
-
-        it('Bug 8: should reject duplicate state name', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'anim-bug8-'));
+        it('Edge 7: animator set-default should skip unknown parameters cleanly', () => {
+            const tmp = mkdtempSync(join(tmpdir(), 'ctrl-edge7-'));
             const file = join(tmp, 'test.controller');
             cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
             try {
-                // "Idle" already exists in fixture
-                run_cli(['update', 'animator-state', file, '--add-state', 'Idle', '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('already exists');
+                const result = run_cli(['update', 'animator', file, '--set-default', 'MissingParam=2', '--json']);
+                const json = JSON.parse(result);
+                expect(json.success).toBe(true);
+                expect(json.changes.some((c: string) => c.includes('not found (skipped)'))).toBe(true);
             } finally {
                 rmSync(tmp, { recursive: true, force: true });
             }
         });
 
-        it('Edge 1: should reject empty component name', () => {
-            try {
-                run_cli(['create', 'component', resolve(fixtures_dir, 'SampleScene.unity'), 'Main Camera', '', '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('Component name must not be empty');
-            }
-        });
-
-        it('Edge 2: should reject empty package name', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'pkg-edge2-'));
-            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
-            try {
-                run_cli(['create', 'package', '', '1.0.0', '--project', tmp, '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('must not be empty');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
-        });
-
-        it('Edge 3: should reject package name with spaces', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'pkg-edge3-'));
-            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
-            try {
-                run_cli(['create', 'package', 'com.test package', '1.0.0', '--project', tmp, '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('must not contain spaces');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
-        });
-
-        it('Edge 4: should reject NaN keyframe time', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'anim-edge4-'));
-            const file = join(tmp, 'test.anim');
-            cpSync(resolve(fixtures_dir, 'keyframe-test.anim'), file);
-            try {
-                const spec = JSON.stringify({ curve: 'Body:m_LocalPosition.x', keyframes: [{ time: 'NaN', value: 0 }] });
-                run_cli(['update', 'animation-curves', file, '--set-keyframes', spec, '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('finite number');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
-        });
-
-        it('Edge 5: should reject boolean keyframe values', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'anim-edge5-'));
-            const file = join(tmp, 'test.anim');
-            cpSync(resolve(fixtures_dir, 'keyframe-test.anim'), file);
-            try {
-                const spec = JSON.stringify({ curve: 'Body:m_LocalPosition.x', keyframes: [{ time: true, value: false }] });
-                run_cli(['update', 'animation-curves', file, '--set-keyframes', spec, '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('finite number');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
-        });
-
-        it('Edge 6: should reject non-numeric sample-rate', () => {
-            try {
-                run_cli(['create', 'animation', '/tmp/edge6-test.anim', 'Test', '--sample-rate', 'abc', '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('sample-rate');
-            }
-        });
-
-        it('Edge 7: should give specific error for empty map name', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'ia-edge7-'));
-            const file = join(tmp, 'test.inputactions');
-            cpSync(resolve(fixtures_dir, 'test-input-actions.inputactions'), file);
-            try {
-                run_cli(['update', 'input-actions', file, '--add-map', '', '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('must not be empty');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
-        });
-
-        it('Edge 8: should reject condition on non-existent parameter', () => {
+        it('Edge 8: animator set-default should skip trigger parameters cleanly', () => {
             const tmp = mkdtempSync(join(tmpdir(), 'ctrl-edge8-'));
             const file = join(tmp, 'test.controller');
-            cpSync(resolve(fixtures_dir, 'test-animator.controller'), file);
+            cpSync(resolve(external_fixtures, 'Assets/dog/Animations/sr.controller'), file);
             try {
-                run_cli(['update', 'animator-state', file, '--add-transition', 'Idle:Walk', '--condition', 'FakeParam,Greater,0.5', '--json']);
-                expect.unreachable('Should have thrown');
-            } catch (err: unknown) {
-                if (err instanceof Error && err.message === 'Should have thrown') throw err;
-                const execErr = err as { status: number; stdout: string };
-                expect(execErr.status).toBeTruthy();
-                const json = JSON.parse(execErr.stdout);
-                expect(json.success).toBe(false);
-                expect(json.error).toContain('FakeParam');
-                expect(json.error).toContain('not found');
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
-        });
-
-        it('Bug 9: --add-parameter should report skipped on malformed controller', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'ctrl-bug9-'));
-            const file = join(tmp, 'test.controller');
-            writeFileSync(file, [
-                '%YAML 1.1',
-                '%TAG !u! tag:unity3d.com,2011:',
-                '--- !u!91 &9100000',
-                'AnimatorController:',
-                '  m_Name: Malformed',
-                '  m_AnimatorParameters:',
-                '  - m_Name: Existing',
-                '    m_Type: 1',
-                '',
-            ].join('\n'));
-            try {
-                const result = run_cli(['update', 'animator', file, '--add-parameter', 'Speed', '--type', 'float', '--json']);
+                const result = run_cli(['update', 'animator', file, '--set-default', 'jump=1', '--json']);
                 const json = JSON.parse(result);
                 expect(json.success).toBe(true);
-                expect(json.changes.some((c: string) => c.includes('(skipped)'))).toBe(true);
+                expect(json.changes.some((c: string) => c.includes('trigger parameters have no default value'))).toBe(true);
             } finally {
                 rmSync(tmp, { recursive: true, force: true });
             }
@@ -3499,21 +1536,8 @@ describe('CLI - New Features', () => {
     });
 
     describe('error suggestions', () => {
-        it('create gameobject --name flag should work as alias', () => {
-            const temp_fixture = create_temp_fixture(
-                resolve(fixtures_dir, 'SampleScene.unity')
-            );
-            try {
-                const result = run_cli([
-                    'create', 'gameobject',
-                    temp_fixture.temp_path,
-                    '--name', 'TestNameFlag',
-                ]);
-                const json = JSON.parse(result);
-                expect(json.success).toBe(true);
-            } finally {
-                temp_fixture.cleanup_fn();
-            }
+        it('removed create gameobject alias now fails as an unknown command', () => {
+            expect_unknown_command(['create', 'gameobject', 'Scene.unity', '--name', 'TestNameFlag']);
         });
 
         it('read scripts --filter should work as alias for --name', () => {
@@ -3528,46 +1552,12 @@ describe('CLI - New Features', () => {
     });
 
     describe('project path default behavior', () => {
-        it('should default create build to cwd project', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'build-create-cwd-'));
-            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
-            cpSync(join(external_fixtures, 'ProjectSettings', 'ProjectVersion.txt'), join(tmp, 'ProjectSettings', 'ProjectVersion.txt'));
-            cpSync(join(external_fixtures, 'ProjectSettings', 'EditorBuildSettings.asset'), join(tmp, 'ProjectSettings', 'EditorBuildSettings.asset'));
-            cpSync(join(external_fixtures, 'Assets', 'Scenes'), join(tmp, 'Assets', 'Scenes'), { recursive: true });
-            cpSync(join(tmp, 'Assets', 'Scenes', 'Menu.unity'), join(tmp, 'Assets', 'Scenes', 'NewScene.unity'));
-            cpSync(join(tmp, 'Assets', 'Scenes', 'Menu.unity.meta'), join(tmp, 'Assets', 'Scenes', 'NewScene.unity.meta'));
-
-            try {
-                const result = run_cli([
-                    'create', 'build',
-                    'Assets/Scenes/NewScene.unity',
-                    '--json'
-                ], tmp);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+        it('should reject removed create build at cwd project', () => {
+            expect_unknown_command(['create', 'build', 'Assets/Scenes/NewScene.unity']);
         });
 
-        it('should default update build to cwd project', () => {
-            const tmp = mkdtempSync(join(tmpdir(), 'build-update-cwd-'));
-            cpSync(resolve(fixtures_dir, 'test-manifest'), tmp, { recursive: true });
-            cpSync(join(external_fixtures, 'ProjectSettings', 'ProjectVersion.txt'), join(tmp, 'ProjectSettings', 'ProjectVersion.txt'));
-            cpSync(join(external_fixtures, 'ProjectSettings', 'EditorBuildSettings.asset'), join(tmp, 'ProjectSettings', 'EditorBuildSettings.asset'));
-
-            try {
-                const result = run_cli([
-                    'update', 'build',
-                    'Assets/Scenes/Menu.unity',
-                    '--disable',
-                    '--json'
-                ], tmp);
-                const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
-            } finally {
-                rmSync(tmp, { recursive: true, force: true });
-            }
+        it('should reject removed update build at cwd project', () => {
+            expect_unknown_command(['update', 'build', 'Assets/Scenes/Menu.unity', '--disable']);
         });
 
         it('should default delete build to cwd project', () => {

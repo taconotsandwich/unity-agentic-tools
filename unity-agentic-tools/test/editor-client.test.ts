@@ -503,6 +503,65 @@ describe('editor-client', () => {
             expect(response.result).toEqual({ success: true });
         });
 
+        test('UnityAgenticTools.Util.PlayMode.GetState invoke gets transition-tolerant retries during play-mode transition', async () => {
+            install_mock_websocket({
+                53785: {
+                    reachable_sequence: [false, false, false, true, true, true],
+                    bridge_info: {
+                        port: 53785,
+                        pid: 2222,
+                        version: '0.1.0',
+                        project_path: tmp_dir,
+                        project_name: 'editor-client-test',
+                    },
+                    rpc_result: { success: true },
+                },
+            });
+
+            const response = await call_editor({
+                project_path: tmp_dir,
+                method: 'editor.invoke',
+                params: {
+                    type: 'UnityAgenticTools.Util.PlayMode',
+                    member: 'GetState',
+                },
+                timeout: 100,
+            });
+
+            expect(response.error).toBeUndefined();
+            expect(response.result).toEqual({ success: true });
+        });
+
+        test('UnityAgenticTools.Util.PlayMode.GetState invoke retries clean socket closes during play-mode transition', async () => {
+            const config_dir = join(tmp_dir, '.unity-agentic');
+            mkdirSync(config_dir, { recursive: true });
+            writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({
+                port: 53785,
+                pid: process.pid,
+                version: '0.1.0',
+            }), 'utf-8');
+
+            install_mock_websocket({
+                53785: {
+                    close_before_response_sequence: [false, true, false, false],
+                    rpc_result: { success: true },
+                },
+            });
+
+            const response = await call_editor({
+                project_path: tmp_dir,
+                method: 'editor.invoke',
+                params: {
+                    type: 'UnityAgenticTools.Util.PlayMode',
+                    member: 'GetState',
+                },
+                timeout: 100,
+            });
+
+            expect(response.error).toBeUndefined();
+            expect(response.result).toEqual({ success: true });
+        });
+
         test('discover_editor_config does not return an unreachable cached project bridge', async () => {
             const config_dir = join(tmp_dir, '.unity-agentic');
             mkdirSync(config_dir, { recursive: true });

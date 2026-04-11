@@ -610,6 +610,18 @@ function appendToAddedComponents(
   return appendToAddedOverrideArray(doc, piId, 'm_AddedComponents', targetSourceRef, newComponentId);
 }
 
+function createPrefabRootOrderOverride(
+  rootTransformFileId: string,
+  sourceGuid: string,
+  rootOrder: number,
+): string {
+  return `    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+      propertyPath: m_RootOrder
+      value: ${rootOrder}
+      objectReference: {fileID: 0}
+`;
+}
+
 /** Full YAML templates for built-in components that are sensitive to missing fields. */
 const COMPONENT_FULL_TEMPLATES: Record<number, (gameObjectId: string) => string> = {
   65: (gameObjectId: string) => `  m_GameObject: {fileID: ${gameObjectId}}
@@ -1659,6 +1671,7 @@ export function createPrefabInstance(options: CreatePrefabInstanceOptions): Crea
     const prefabInstanceId = doc.generate_file_id();
     const strippedGoId = doc.generate_file_id();
     const strippedTransformId = doc.generate_file_id();
+    const rootOrder = doc.calculate_root_order(parentTransformIdStr);
 
     const instanceName = name || path.basename(prefab_path, '.prefab');
     const pos = position ?? { x: 0, y: 0, z: 0 };
@@ -1666,17 +1679,7 @@ export function createPrefabInstance(options: CreatePrefabInstanceOptions): Crea
     const rootGoFileId = rootInfo.game_object.file_id;
     const rootTransformFileId = rootInfo.transform.file_id;
 
-    const yaml = `--- !u!1 &${strippedGoId} stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: ${rootGoFileId}, guid: ${sourceGuid}, type: 3}
-  m_PrefabInstance: {fileID: ${prefabInstanceId}}
-  m_PrefabAsset: {fileID: 0}
---- !u!4 &${strippedTransformId} stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
-  m_PrefabInstance: {fileID: ${prefabInstanceId}}
-  m_PrefabAsset: {fileID: 0}
---- !u!1001 &${prefabInstanceId}
+    const yaml = `--- !u!1001 &${prefabInstanceId}
 PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
@@ -1716,7 +1719,7 @@ PrefabInstance:
       propertyPath: m_LocalRotation.z
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+${createPrefabRootOrderOverride(rootTransformFileId, sourceGuid, rootOrder)}    - target: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
       propertyPath: m_LocalEulerAnglesHint.x
       value: 0
       objectReference: {fileID: 0}
@@ -1733,12 +1736,24 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: ${sourceGuid}, type: 3}
+--- !u!4 &${strippedTransformId} stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: ${rootTransformFileId}, guid: ${sourceGuid}, type: 3}
+  m_PrefabInstance: {fileID: ${prefabInstanceId}}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &${strippedGoId} stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: ${rootGoFileId}, guid: ${sourceGuid}, type: 3}
+  m_PrefabInstance: {fileID: ${prefabInstanceId}}
+  m_PrefabAsset: {fileID: 0}
 `;
 
     doc.append_raw(yaml);
 
     if (parentTransformIdStr !== '0') {
         doc.add_child_to_parent(parentTransformIdStr, strippedTransformId);
+    } else {
+        doc.add_root_to_scene_roots(strippedTransformId);
     }
 
     try {

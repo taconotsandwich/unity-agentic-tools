@@ -419,8 +419,21 @@ function is_play_mode_transition_invoke(method: string, params?: Record<string, 
         return false;
     }
 
-    return params.type === 'UnityEditor.EditorApplication' &&
-        params.member === 'isPlaying';
+    if (params.type === 'UnityEditor.EditorApplication' &&
+        params.member === 'isPlaying') {
+        return true;
+    }
+
+    if (params.type === 'UnityAgenticTools.Util.PlayMode' &&
+        typeof params.member === 'string') {
+        return params.member === 'Enter' ||
+            params.member === 'Exit' ||
+            params.member === 'Pause' ||
+            params.member === 'Step' ||
+            params.member === 'GetState';
+    }
+
+    return false;
 }
 
 function should_retry_response(response: RpcResponse, semantics: EditorActionSemantics): boolean {

@@ -3,7 +3,6 @@ import { program } from 'commander';
 import { UnityScanner, isNativeModuleAvailable, getNativeModuleError } from './scanner';
 import { setup } from './setup';
 import { cleanup } from './cleanup';
-import { build_create_command } from './cmd-create';
 import { build_read_command } from './cmd-read';
 import { build_update_command } from './cmd-update';
 import { build_delete_command } from './cmd-delete';
@@ -48,7 +47,6 @@ program
   .version(VERSION);
 
 // CRUD command groups
-program.addCommand(build_create_command());
 program.addCommand(build_read_command(getScanner));
 program.addCommand(build_update_command(getScanner));
 program.addCommand(build_delete_command());

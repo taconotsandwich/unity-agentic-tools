@@ -1,5 +1,5 @@
 using NUnit.Framework;
-using UnityAgenticTools.Server;
+using UnityAgenticTools.Bridge.Transport;
 using UnityEngine;
 
 namespace UnityAgenticTools.Tests

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEditor.SceneManagement;
+using UnityAgenticTools;
 using UnityEngine;
 
 namespace UnityAgenticTools.Refs
