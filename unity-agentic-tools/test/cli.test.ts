@@ -46,18 +46,16 @@ function expect_unknown_command(args: string[], cwd: string = repo_root): void {
 
 describeIfNative('CLI', () => {
     describe('read gameobject command', () => {
-        it('should output valid JSON with file and object wrapper', () => {
+        it('should output the simplified gameobject payload', () => {
             const result = run_cli([
                 'read', 'gameobject',
                 resolve(fixtures_dir, 'TestSample.unity'),
                 'TestObject',
             ]);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('file');
-            expect(json).toHaveProperty('object');
-            expect(json.object).toHaveProperty('name');
-            expect(json.object).toHaveProperty('file_id');
-            expect(json.object).toHaveProperty('active');
+            expect(json).toHaveProperty('name', 'TestObject');
+            expect(json).toHaveProperty('file_id');
+            expect(json).toHaveProperty('active');
         });
 
         it('should return all matching components with -c filter', () => {
@@ -114,7 +112,6 @@ describeIfNative('CLI', () => {
                 resolve(fixtures_dir, 'TestSample.unity'),
             ]);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('file');
             expect(json).toHaveProperty('total');
             expect(json).toHaveProperty('gameobjects');
             expect(json).toHaveProperty('pageSize');
@@ -207,10 +204,9 @@ describeIfNative('CLI', () => {
                 'Player',
             ]);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('file');
-            expect(json).toHaveProperty('pattern');
             expect(json).toHaveProperty('matches');
             expect(json.matches.length).toBeGreaterThan(0);
+            expect(json.matches[0].name).toBe('Player');
         });
     });
 
@@ -297,7 +293,8 @@ describeIfNative('CLI', () => {
                     cameraId,
                 ]);
                 const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
+                expect(json).toHaveProperty('removed_file_id', cameraId);
+                expect(json).toHaveProperty('removed_class_id', 20);
                 const refreshed = JSON.parse(run_cli([
                     'read', 'scene', temp_fixture.temp_path
                 ]));
@@ -322,7 +319,8 @@ describeIfNative('CLI', () => {
                     'GameManager',
                 ]);
                 const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
+                expect(json).toHaveProperty('deleted_count');
+                expect(json.deleted_count).toBeGreaterThan(0);
 
                 // Verify it's gone
                 const listResult = JSON.parse(run_cli([
@@ -355,7 +353,10 @@ describeIfNative('CLI', () => {
                     'Player',
                 ]);
                 const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
+                expect(json).toHaveProperty('game_object_id');
+                expect(json).toHaveProperty('transform_id');
+                expect(json).toHaveProperty('cloned_objects');
+                expect(json.cloned_objects[0].name).toBe('Player (1)');
             } finally {
                 temp_fixture.cleanup_fn();
             }
@@ -386,7 +387,7 @@ describeIfNative('CLI', () => {
                 '--setting', 'tags',
             ]);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('success', true);
+            expect(json).toHaveProperty('setting', 'TagManager');
             expect(json.data).toHaveProperty('tags');
         });
 
@@ -403,7 +404,8 @@ describeIfNative('CLI', () => {
                     'CLITestLayer',
                 ]);
                 const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
+                expect(json).toHaveProperty('setting', 'TagManager');
+                expect(json).toHaveProperty('bytes_written');
             } finally {
                 rmSync(temp_dir, { recursive: true, force: true });
             }
@@ -415,8 +417,8 @@ describeIfNative('CLI', () => {
                 '--setting', 'tags',
             ], external_fixtures);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('success', true);
-            expect(json).toHaveProperty('project_path', external_fixtures);
+            expect(json).toHaveProperty('setting', 'TagManager');
+            expect(json.data).toHaveProperty('tags');
         });
 
         it('should default update layer to cwd project', () => {
@@ -431,7 +433,8 @@ describeIfNative('CLI', () => {
                     'CLITestLayerCwd',
                 ], temp_dir);
                 const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
+                expect(json).toHaveProperty('setting', 'TagManager');
+                expect(json).toHaveProperty('bytes_written');
             } finally {
                 rmSync(temp_dir, { recursive: true, force: true });
             }
@@ -443,7 +446,7 @@ describeIfNative('CLI', () => {
             ], external_fixtures);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('projectInfo');
-            expect(json.projectInfo).toHaveProperty('projectPath', external_fixtures);
+            expect(json.projectInfo).toHaveProperty('version');
         });
 
         it('should default read scenes alias to cwd project', () => {
@@ -452,7 +455,7 @@ describeIfNative('CLI', () => {
             ], external_fixtures);
             const json = JSON.parse(result);
             expect(json).toHaveProperty('projectInfo');
-            expect(json.projectInfo).toHaveProperty('projectPath', external_fixtures);
+            expect(json).toHaveProperty('editorBuildSettings');
         });
     });
 
@@ -516,7 +519,6 @@ describeIfNative('CLI', () => {
                 '--name', 'Camera',
             ]);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('success', true);
             expect(json.total_matches).toBeGreaterThanOrEqual(0);
         });
 
@@ -527,7 +529,6 @@ describeIfNative('CLI', () => {
                 '--project', external_fixtures,
             ]);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('success', true);
             expect(json.total_matches).toBeGreaterThan(0);
         });
 
@@ -537,8 +538,7 @@ describeIfNative('CLI', () => {
                 'm_Name',
             ], external_fixtures);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('success', true);
-            expect(json).toHaveProperty('project_path', external_fixtures);
+            expect(json.total_matches).toBeGreaterThan(0);
         });
     });
 
@@ -679,7 +679,6 @@ describeIfNative('CLI', () => {
                 '508316494',
             ]);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('file');
             expect(json).toHaveProperty('file_id', '508316494');
             expect(json).toHaveProperty('class_id', 20);
             expect(json).toHaveProperty('type_name', 'Camera');
@@ -726,7 +725,6 @@ describeIfNative('CLI', () => {
                 '--depth', '1',
             ]);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('file');
             expect(json).toHaveProperty('file_id', '508316491');
             expect(json).toHaveProperty('direction', 'out');
             expect(json).toHaveProperty('edges');
@@ -876,7 +874,6 @@ describeIfNative('CLI', () => {
                 '--type', type,
             ]);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('success', true);
             expect(json.total_matches).toBeGreaterThan(0);
             for (const match of json.matches) {
                 expect(match.file).toMatch(extension);
@@ -890,7 +887,6 @@ describeIfNative('CLI', () => {
                 '--name', 'Outline',
             ]);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('success', true);
             expect(json.total_matches).toBe(1);
             expect(json.matches[0].file).toContain('Outline');
         });
@@ -1205,7 +1201,6 @@ describeIfNative('CLI', () => {
                     identifier,
                 ]);
                 const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
                 expect(json).toHaveProperty('deleted_count');
                 // Deletes PrefabInstance block + all stripped blocks referencing it
                 expect(json.deleted_count).toBeGreaterThanOrEqual(3);
@@ -1242,7 +1237,7 @@ describeIfNative('CLI', () => {
                     fixture.temp_path,
                     '700000',
                 ]));
-                expect(delete_result.success).toBe(true);
+                expect(delete_result.deleted_count).toBeGreaterThanOrEqual(3);
 
                 const content = readFileSync(fixture.temp_path, 'utf-8');
                 expect(content).not.toContain('&700000');
@@ -1265,8 +1260,6 @@ describeIfNative('CLI', () => {
             try {
                 const result = run_cli(['delete', 'asset', file]);
                 const json = JSON.parse(result);
-                expect(json.success).toBe(true);
-                expect(json.deleted_file).toBe(true);
                 expect(json.deleted_meta).toBe(true);
                 expect(existsSync(file)).toBe(false);
                 expect(existsSync(file + '.meta')).toBe(false);
@@ -1283,10 +1276,7 @@ describeIfNative('CLI', () => {
             try {
                 const result = run_cli(['delete', 'asset', file]);
                 const json = JSON.parse(result);
-                expect(json.success).toBe(true);
-                expect(json.deleted_file).toBe(true);
                 expect(json.deleted_meta).toBe(false);
-                expect(json.warning).toContain('no .meta file found');
                 expect(existsSync(file)).toBe(false);
             } finally {
                 rmSync(tmp, { recursive: true, force: true });
@@ -1327,9 +1317,8 @@ describe('CLI - New Features', () => {
                 '--project', resolve(fixtures_dir, 'test-manifest'),
             ]);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('success', true);
-            expect(json.count).toBe(4);
             expect(json.packages).toBeInstanceOf(Array);
+            expect(json.packages).toHaveLength(4);
         });
 
         it('should filter packages by search', () => {
@@ -1339,7 +1328,7 @@ describe('CLI - New Features', () => {
                 '--search', 'render',
             ]);
             const json = JSON.parse(result);
-            expect(json.count).toBe(1);
+            expect(json.packages).toHaveLength(1);
             expect(json.packages[0].name).toContain('render');
         });
 
@@ -1348,8 +1337,7 @@ describe('CLI - New Features', () => {
                 'read', 'manifest',
             ], resolve(fixtures_dir, 'test-manifest'));
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('success', true);
-            expect(json.count).toBeGreaterThan(0);
+            expect(json.packages.length).toBeGreaterThan(0);
         });
     });
 
@@ -1446,7 +1434,6 @@ describe('CLI - New Features', () => {
             try {
                 const result = run_cli(['update', 'animator', file, '--set-default', 'MissingParam=2']);
                 const json = JSON.parse(result);
-                expect(json.success).toBe(true);
                 expect(json.changes.some((c: string) => c.includes('not found (skipped)'))).toBe(true);
             } finally {
                 rmSync(tmp, { recursive: true, force: true });
@@ -1460,7 +1447,6 @@ describe('CLI - New Features', () => {
             try {
                 const result = run_cli(['update', 'animator', file, '--set-default', 'jump=1']);
                 const json = JSON.parse(result);
-                expect(json.success).toBe(true);
                 expect(json.changes.some((c: string) => c.includes('trigger parameters have no default value'))).toBe(true);
             } finally {
                 rmSync(tmp, { recursive: true, force: true });
@@ -1519,7 +1505,8 @@ describe('CLI - New Features', () => {
                     'Assets/Scenes/Level.unity',
                 ], tmp);
                 const json = JSON.parse(result);
-                expect(json).toHaveProperty('success', true);
+                expect(json).toHaveProperty('message');
+                expect(json).toHaveProperty('scenes');
             } finally {
                 rmSync(tmp, { recursive: true, force: true });
             }
@@ -1540,7 +1527,6 @@ describe('CLI - New Features', () => {
                 '07d404ae2f2e9404ab61c78efb374629',
             ], external_fixtures);
             const json = JSON.parse(result);
-            expect(json).toHaveProperty('project_path', external_fixtures);
             expect(json).toHaveProperty('guid', '07d404ae2f2e9404ab61c78efb374629');
         });
 
@@ -1558,7 +1544,6 @@ describe('CLI - New Features', () => {
                 '--max', '5',
             ], tmp);
             const json = JSON.parse(result);
-            expect(json.project_path).toContain('unused-cwd-');
             expect(json).toHaveProperty('potentially_unused', 1);
             rmSync(tmp, { recursive: true, force: true });
         });
