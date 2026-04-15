@@ -4,7 +4,7 @@ This document provides essential guidelines for agentic coding tools working in 
 
 ## Project Overview
 
-TypeScript CLI + native Rust backend providing token-efficient Unity file manipulation utilities. 125 commands across 4 CRUD groups (`create`, `read`, `update`, `delete`), a live editor bridge (49 subcommands), and 8 top-level utilities.
+TypeScript CLI + native Rust backend providing token-efficient Unity file manipulation utilities. 79 commands across 3 command groups (`read`, `update`, `delete`), a live editor bridge (37 subcommands), and 8 top-level utilities.
 
 ## Quick Setup
 
@@ -47,7 +47,7 @@ unity-package/             Unity Editor bridge (C# UPM package)
 ```
 
 - Workspaces: root package.json has `"workspaces": ["rust-core", "unity-agentic-tools", "doc-indexer"]`
-- CRUD groups built in `cmd-create.ts`, `cmd-read.ts`, `cmd-update.ts`, `cmd-delete.ts`
+- Groups built in `cmd-read.ts`, `cmd-update.ts`, `cmd-delete.ts`
 - Editor bridge: `cmd-editor.ts` (CLI) + `editor-client.ts` (WebSocket transport)
 - Scanner: `scanner.ts` tries `../native/index.js` first, falls back to workspace `require('unity-file-tools')`
 

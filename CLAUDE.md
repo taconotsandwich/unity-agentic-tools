@@ -52,21 +52,19 @@ unity-package/      Unity Editor bridge (C# UPM package)
 
 ## CLI Structure
 
-- CLI uses 4 CRUD group commands: `create`, `read`, `update`, `delete` (each with noun subcommands)
-- Group commands built in separate files: `cmd-create.ts`, `cmd-read.ts`, `cmd-update.ts`, `cmd-delete.ts`
+- CLI uses 3 command groups: `read`, `update`, `delete` (each with noun subcommands)
+- Group commands built in separate files: `cmd-read.ts`, `cmd-update.ts`, `cmd-delete.ts`
 - Each exports a `build_<verb>_command()` returning a Commander.Command, wired via `program.addCommand()`
 - `getScanner` passed as callback to `read` and `update` commands (lazy init stays in cli.ts)
 - Non-CRUD utilities stay top-level: `search`, `grep`, `clone`, `docs`, `version`, `setup`, `cleanup`, `status`
-- `update prefab` is a nested command group with 9 subcommands: `unpack`, `override`, `batch-overrides`, `managed-reference`, `remove-override`, `remove-component`, `restore-component`, `remove-gameobject`, `restore-gameobject`
 - `editor` is a live bridge command group with 43 subcommands, built in `cmd-editor.ts`
 
-### Command Counts (117 total)
+### Command Counts
 
 - **Top-level**: clone, search, grep, version, docs, setup, cleanup, status (8)
-- **create**: gameobject, scene, prefab-variant, prefab-instance, scriptable-object, meta, component, component-copy, build, material, package, input-actions, animation, animator, prefab (15)
 - **read**: scene, gameobject, asset, material, dependencies, dependents, unused, settings, build, overrides, component, reference, target, script, scripts, log, meta, animation, animator, manifest, input-actions (21)
-- **update**: gameobject, component, transform, scriptable-object, settings, tag, layer, sorting-layer, parent, build, array, batch, batch-components, material, meta, animation, animator, sibling-index, input-actions, animation-curves, animator-state, managed-reference + prefab subgroup (9) (31)
-- **delete**: gameobject, component, build, prefab, package (5)
+- **update**: scriptable-object, settings, layer, material, meta, animation, animator (7)
+- **delete**: gameobject, component, build, prefab, asset, package (6)
 - **editor**: status, play, stop, pause, step, play-state, save, scene-open, console-logs, console-clear, console-follow, screenshot, tests-run, install, uninstall, hierarchy-snapshot, ui-snapshot, input-map, get (text/value/active/position/component), ui-click, ui-fill, ui-type, ui-toggle, ui-slider, ui-select, ui-scroll, ui-focus, input-key, input-mouse, input-touch, input-action, wait, invoke (37)
 
 ### Setting Aliases
@@ -128,19 +126,13 @@ unity-package/      Unity Editor bridge (C# UPM package)
 
 ## Skills
 
-- Skills are split into 5 directories under `skills/`:
-  - `unity-agentic-tools` (umbrella: setup/routing/read/utilities)
-  - `unity-agentic-create`
-  - `unity-agentic-update`
-  - `unity-agentic-delete`
-  - `unity-agentic-editor`
+- Skills are split into 2 directories under `skills/`:
+  - `unity-agentic-tools` (umbrella: setup/routing/read/update/delete/utilities)
+  - `unity-agentic-editor` (editor operations and scene/prefab mutations)
 - **Single source of truth**: no fallback docs; each command group is documented in exactly one skill.
-- **Sync to global install**: `bun run sync-skill` copies all 5 skills (SKILL.md, `reference/`, `scripts/`) to `~/.claude/skills/`.
+- **Sync to global install**: `bun run sync-skill` copies the skills (SKILL.md, `reference/`, `scripts/`) to `~/.claude/skills/`.
 - **Verification**:
   - `node skills/unity-agentic-tools/scripts/check-setup.mjs`
-  - `node skills/unity-agentic-create/scripts/check-setup.mjs`
-  - `node skills/unity-agentic-update/scripts/check-setup.mjs`
-  - `node skills/unity-agentic-delete/scripts/check-setup.mjs`
   - `node skills/unity-agentic-editor/scripts/check-setup.mjs`
 
 ## Code Style
