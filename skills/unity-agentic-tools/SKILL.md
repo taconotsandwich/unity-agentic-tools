@@ -46,8 +46,11 @@ Core usage:
 | `read component <file> <file_id>` | One component by fileID |
 | `read asset <file>` | Generic Unity YAML asset read |
 | `read material <file>` | Material summary/properties |
+| `read reference <file> <file_id>` | Trace fileID references |
 | `read dependencies <file>` | Outbound GUID dependencies |
 | `read dependents <guid>` | Reverse dependency lookup |
+| `read unused` | Assets with zero inbound GUID references |
+| `read target <file> <name> [type]` | Build reference string for overrides |
 | `read settings` | Project settings by alias/name |
 | `read build` / `read scenes` | Build settings scene list |
 | `read overrides <file> <prefab_instance>` | Prefab overrides |

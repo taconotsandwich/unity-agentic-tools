@@ -7,9 +7,6 @@ DEST_ROOT="$HOME/.claude/skills"
 
 SKILLS=(
     "unity-agentic-tools"
-    "unity-agentic-create"
-    "unity-agentic-update"
-    "unity-agentic-delete"
     "unity-agentic-editor"
 )
 
