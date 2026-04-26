@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, statSync } from 'fs';
 import { join, relative, resolve } from 'path';
 import { getNativeBuildGuidCache, getNativeBuildTypeRegistry, getNativeBuildPackageGuidCache, getNativeBuildLocalPackageGuidCache, isNativeModuleAvailable } from './scanner';
+import { ensure_gitignore_ignores_agentic_dir } from './gitignore';
 
 // Version is inlined at build time by bun's bundler (no runtime path resolution)
 const VERSION: string = (require('../package.json') as { version: string }).version;
@@ -63,6 +64,7 @@ export function setup(options: SetupOptions = {}): SetupResult {
   if (!existsSync(configPath)) {
     mkdirSync(configPath, { recursive: true });
   }
+  ensure_gitignore_ignores_agentic_dir(projectPath);
 
   // Create config.json
   const config = {

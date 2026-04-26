@@ -8,6 +8,8 @@ namespace UnityAgenticTools.Bridge.Transport
     {
         private const string DirName = ".unity-agentic";
         private const string FileName = "editor.json";
+        private const string GitignoreFileName = ".gitignore";
+        private const string GitignoreEntry = ".unity-agentic/";
 
         private static string _lockfilePath;
 
@@ -31,6 +33,7 @@ namespace UnityAgenticTools.Bridge.Transport
                     Directory.CreateDirectory(dirPath);
                 }
 
+                EnsureGitignoreEntry(projectPath);
                 _lockfilePath = Path.Combine(dirPath, FileName);
 
                 var json = $"{{\n  \"port\": {port},\n  \"pid\": {pid},\n  \"version\": \"0.1.0\"\n}}\n";
@@ -40,6 +43,57 @@ namespace UnityAgenticTools.Bridge.Transport
             {
                 Debug.LogError($"[UnityAgenticTools] Failed to write lockfile: {ex.Message}");
             }
+        }
+
+        private static void EnsureGitignoreEntry(string projectPath)
+        {
+            try
+            {
+                var gitignorePath = Path.Combine(projectPath, GitignoreFileName);
+                if (!File.Exists(gitignorePath))
+                {
+                    File.WriteAllText(gitignorePath, GitignoreEntry + Environment.NewLine);
+                    return;
+                }
+
+                var content = File.ReadAllText(gitignorePath);
+                if (GitignoreIgnoresAgenticDir(content))
+                {
+                    return;
+                }
+
+                var separator = content.Length == 0 || content.EndsWith("\n", StringComparison.Ordinal)
+                    ? string.Empty
+                    : Environment.NewLine;
+                File.WriteAllText(gitignorePath, content + separator + GitignoreEntry + Environment.NewLine);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[UnityAgenticTools] Failed to update .gitignore: {ex.Message}");
+            }
+        }
+
+        private static bool GitignoreIgnoresAgenticDir(string content)
+        {
+            var lines = content.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var rawLine in lines)
+            {
+                var line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (line == ".unity-agentic" ||
+                    line == GitignoreEntry ||
+                    line == "/.unity-agentic" ||
+                    line == "/" + GitignoreEntry)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         public static void Remove()

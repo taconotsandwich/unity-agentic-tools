@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
+import { ensure_gitignore_ignores_agentic_dir } from './gitignore';
 import type {
     EditorConfig,
     EditorBridgeInfo,
@@ -676,6 +677,7 @@ function write_cached_editor_config(project_path: string, config: EditorConfig):
 
     try {
         mkdirSync(config_dir, { recursive: true });
+        ensure_gitignore_ignores_agentic_dir(project_path);
         writeFileSync(config_path, JSON.stringify({
             port: config.port,
             pid: config.pid,

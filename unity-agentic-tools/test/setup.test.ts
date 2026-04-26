@@ -60,6 +60,37 @@ describe('setup', () => {
         expect(existsSync(join(project.dir, '.unity-agentic'))).toBe(true);
     });
 
+    it('should add .unity-agentic/ to .gitignore when setup creates state', () => {
+        project = create_temp_unity_project();
+        const result = setup({ project: project.dir });
+
+        expect(result.success).toBe(true);
+        expect(readFileSync(join(project.dir, '.gitignore'), 'utf-8')).toBe('.unity-agentic/\n');
+    });
+
+    it('should append .unity-agentic/ to an existing .gitignore only once', () => {
+        project = create_temp_unity_project();
+        const gitignorePath = join(project.dir, '.gitignore');
+        writeFileSync(gitignorePath, 'Library/\nTemp/');
+
+        setup({ project: project.dir });
+        setup({ project: project.dir });
+
+        const gitignore = readFileSync(gitignorePath, 'utf-8');
+        expect(gitignore).toBe('Library/\nTemp/\n.unity-agentic/\n');
+        expect(gitignore.match(/\.unity-agentic\//g)?.length).toBe(1);
+    });
+
+    it('should not duplicate an existing rooted .unity-agentic ignore pattern', () => {
+        project = create_temp_unity_project();
+        const gitignorePath = join(project.dir, '.gitignore');
+        writeFileSync(gitignorePath, '/.unity-agentic\nLibrary/\n');
+
+        setup({ project: project.dir });
+
+        expect(readFileSync(gitignorePath, 'utf-8')).toBe('/.unity-agentic\nLibrary/\n');
+    });
+
     it('should create config.json with version, project_path, created_at', () => {
         project = create_temp_unity_project();
         setup({ project: project.dir });

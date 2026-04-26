@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync, mkdirSync, rmSync, unlinkSync } from 'fs';
+import { existsSync, mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { call_editor, discover_editor_config, ping_editor, read_editor_config } from '../src/editor-client';
@@ -285,6 +285,7 @@ describe('editor-client', () => {
                 expect(result.project_path).toBe(tmp_dir);
                 expect(result.source).toBe('discovered');
             }
+            expect(readFileSync(join(tmp_dir, '.gitignore'), 'utf-8')).toBe('.unity-agentic/\n');
         });
 
         test('falls back to a discovered port when editor.json points to a dead port', async () => {
