@@ -92,6 +92,26 @@ namespace UnityAgenticTools.Tests
             Assert.That(response, Does.Contain("\"result\""));
         }
 
+        [Test]
+        public async Task Dispatch_InvokeCommandRegistryRun_CallsOverloadedRawStaticMethod()
+        {
+            MessageDispatcher.Reset();
+
+            var request = BuildInvokeRequest(
+                "registry-run-overload-1",
+                "UnityAgenticTools.Commands.Registry",
+                "Run",
+                "UnityEditor.AssetDatabase.FindAssets",
+                "[\"t:Scene\"]");
+
+            var response = await MessageDispatcher.Dispatch(request);
+
+            Assert.That(response, Does.Contain("\"id\":\"registry-run-overload-1\""));
+            Assert.That(response, Does.Contain("\"success\":true"));
+            Assert.That(response, Does.Contain("\"result\""));
+            Assert.That(response, Does.Not.Contain("AmbiguousMatchException"));
+        }
+
         private static string BuildInvokeRequest(string id, string typeName, string memberName, params string[] args)
         {
             return "{"

@@ -519,7 +519,8 @@ namespace UnityAgenticTools.Commands
 
         private static bool HasPublicStaticMember(Type type, string memberName)
         {
-            return type.GetMethod(memberName, BindingFlags.Public | BindingFlags.Static) != null ||
+            return type.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .Any(method => method.Name == memberName && !method.IsGenericMethodDefinition) ||
                 type.GetProperty(memberName, BindingFlags.Public | BindingFlags.Static) != null;
         }
 

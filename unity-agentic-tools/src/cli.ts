@@ -78,6 +78,25 @@ function output_rpc_response(response: RpcResponse): void {
     }
 
     console.log(JSON.stringify(response.result, null, 2));
+    if (payload_reports_failure(response.result)) {
+        process.exitCode = 1;
+    }
+}
+
+function payload_reports_failure(payload: unknown): boolean {
+    if (!is_record(payload)) {
+        return false;
+    }
+
+    if (payload.success === false) {
+        return true;
+    }
+
+    return payload_reports_failure(payload.result);
+}
+
+function is_record(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function event_matches_topic(event: RpcEvent, topic: string, type_filter?: string): boolean {

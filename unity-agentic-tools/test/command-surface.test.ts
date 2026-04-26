@@ -157,4 +157,52 @@ describe('command runner surface', () => {
             server.stop(true);
         }
     });
+
+    it('exits non-zero when the invoked command result reports failure', async () => {
+        const server = Bun.serve({
+            port: 0,
+            fetch(req, server) {
+                if (server.upgrade(req)) {
+                    return undefined;
+                }
+
+                return new Response('Expected WebSocket upgrade', { status: 400 });
+            },
+            websocket: {
+                message(ws, message) {
+                    const request = JSON.parse(String(message)) as RpcRequestLike;
+                    ws.send(JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: request.id,
+                        result: {
+                            success: true,
+                            result: {
+                                success: false,
+                                error: 'Asset not found at Assets/Missing.asset.',
+                            },
+                        },
+                    }));
+                },
+            },
+        });
+
+        try {
+            const result = await run_cli_async([
+                'run',
+                'delete.asset',
+                'Assets/Missing.asset',
+                '--port',
+                String(server.port),
+                '--timeout',
+                '1000',
+            ]);
+            expect(result.code).toBe(1);
+            expect(result.stderr).toBe('');
+            const json = JSON.parse(result.stdout) as { result?: { success?: boolean; error?: string } };
+            expect(json.result?.success).toBe(false);
+            expect(json.result?.error).toContain('Asset not found');
+        } finally {
+            server.stop(true);
+        }
+    });
 });
