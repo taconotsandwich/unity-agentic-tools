@@ -4959,7 +4959,7 @@ describe('editComponentByFileId - stripped/variant detection', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('stripped');
-        expect(result.error).toContain('UnityAgenticTools.Update.Prefabs PrefabOverride');
+        expect(result.error).toContain('unity-agentic-tools run update.prefab.override');
     });
 
     it('should hint about prefab instances when fileID not found in variant file', () => {
@@ -4972,7 +4972,7 @@ describe('editComponentByFileId - stripped/variant detection', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('prefab instances');
-        expect(result.error).toContain('UnityAgenticTools.Update.Prefabs PrefabOverride');
+        expect(result.error).toContain('unity-agentic-tools run update.prefab.override');
     });
 });
 
@@ -5116,7 +5116,7 @@ describe('duplicateGameObject - PrefabInstance error', () => {
         expect(result.success).toBe(false);
         expect(result.error).toContain('PrefabInstance');
         expect(result.error).toContain('700000');
-        expect(result.error).toContain('UnityAgenticTools.Update.Prefabs PrefabUnpack');
+        expect(result.error).toContain('unity-agentic-tools run update.prefab.unpack');
     });
 });
 

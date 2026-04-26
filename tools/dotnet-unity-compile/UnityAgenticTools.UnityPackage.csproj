@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <NoWarn>$(NoWarn);0649</NoWarn>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <UnityEditorVersion Condition="'$(UnityEditorVersion)' == ''">6000.4.0f1</UnityEditorVersion>
+    <UnityApp Condition="'$(UnityApp)' == ''">/Applications/Unity/Hub/Editor/$(UnityEditorVersion)/Unity.app</UnityApp>
+    <UnityManagedDir>$(UnityApp)/Contents/Resources/Scripting/Managed</UnityManagedDir>
+    <UnityTemplateCacheDir>$(UnityApp)/Contents/Resources/PackageManager/ProjectTemplates/libcache</UnityTemplateCacheDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../unity-package/Editor/**/*.cs" />
+    <Compile Include="../../unity-package/Tests/Editor/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <UnityReference Include="$(UnityManagedDir)/*.dll" />
+    <UnityReference Include="$(UnityManagedDir)/UnityEngine/*.dll" />
+    <UnityReference Include="$(UnityApp)/Contents/Resources/PackageManager/BuiltInPackages/com.unity.ext.nunit/net40/unity-custom/nunit.framework.dll" />
+    <UnityReference Include="$(UnityTemplateCacheDir)/**/ScriptAssemblies/UnityEngine.UI.dll" />
+    <UnityReference Include="$(UnityTemplateCacheDir)/**/ScriptAssemblies/UnityEngine.TestRunner.dll" />
+    <UnityReference Include="$(UnityTemplateCacheDir)/**/ScriptAssemblies/UnityEditor.TestRunner.dll" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="@(UnityReference)">
+      <HintPath>%(UnityReference.FullPath)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <ReferencePath Include="@(UnityReference)" />
+  </ItemGroup>
+</Project>

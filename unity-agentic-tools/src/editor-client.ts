@@ -54,6 +54,20 @@ const TRANSITION_TOLERANT_READ_METHODS = new Set<string>([
     'editor.input.map',
 ]);
 
+const PLAY_MODE_RUN_TARGETS = new Set<string>([
+    'play.enter',
+    'play.exit',
+    'play.pause',
+    'play.step',
+    'play.state',
+    'UnityAgenticTools.Util.PlayMode.Enter',
+    'UnityAgenticTools.Util.PlayMode.Exit',
+    'UnityAgenticTools.Util.PlayMode.Pause',
+    'UnityAgenticTools.Util.PlayMode.Step',
+    'UnityAgenticTools.Util.PlayMode.GetState',
+    'UnityEditor.EditorApplication.isPlaying',
+]);
+
 const LAST_KNOWN_EDITOR_CONFIGS = new Map<string, EditorConfig>();
 
 /**
@@ -266,7 +280,7 @@ async function call_editor_once(options: CallEditorOptions, semantics: EditorAct
 }
 
 /**
- * Open a persistent WebSocket connection for streaming events (e.g., console-follow).
+ * Open a persistent WebSocket connection for streaming events (e.g., stream console).
  * Sends the initial RPC request, then calls on_event for each notification received.
  * Returns a cleanup function to close the connection.
  * Automatically reconnects when the server restarts (e.g., after domain reload).
@@ -433,7 +447,30 @@ function is_play_mode_transition_invoke(method: string, params?: Record<string, 
             params.member === 'GetState';
     }
 
+    if (params.type === 'UnityAgenticTools.Commands.Registry' &&
+        params.member === 'Run') {
+        const target = parse_registry_run_target(params.args);
+        return typeof target === 'string' && PLAY_MODE_RUN_TARGETS.has(target);
+    }
+
     return false;
+}
+
+function parse_registry_run_target(args: unknown): string | undefined {
+    if (typeof args !== 'string') {
+        return undefined;
+    }
+
+    try {
+        const parsed: unknown = JSON.parse(args);
+        if (Array.isArray(parsed) && typeof parsed[0] === 'string') {
+            return parsed[0];
+        }
+    } catch {
+        return undefined;
+    }
+
+    return undefined;
 }
 
 function should_retry_response(response: RpcResponse, semantics: EditorActionSemantics): boolean {

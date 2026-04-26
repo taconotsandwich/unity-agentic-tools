@@ -2,7 +2,7 @@
   "name": "unity-agentic-tools",
   "packageManager": "bun@latest",
   "version": "0.5.1",
-  "description": "Fast, token-efficient Unity YAML parser for AI agents",
+  "description": "Compact Unity Editor command runner for AI agents",
   "exports": {
     ".": {
       "import": "./dist/index.js",

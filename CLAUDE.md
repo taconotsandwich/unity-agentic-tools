@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Token-efficient CLI tools for parsing, analyzing, and editing Unity YAML files (scenes, prefabs, assets). Uses a native Rust backend (napi-rs) for high-performance parsing.
+Compact Unity command runner, native Rust package, and live Unity Editor bridge. The public CLI surface is `list`, `run`, `stream`, `install`, `uninstall`, and `status`.
 
 The Claude Code plugin (hooks, skills, manifest) lives in a separate repo: [unity-agentic-tools-claude-plugin](https://github.com/taconotsandwich/unity-agentic-tools-claude-plugin).
 
@@ -16,6 +16,7 @@ The Claude Code plugin (hooks, skills, manifest) lives in a separate repo: [unit
 bun install           # Install all deps (workspaces resolve native module)
 bun run build:rust    # Build Rust native module
 bun run build         # Build TypeScript
+bun run build:unity-package # Compile Unity C# bridge package with dotnet
 bun run test          # Unit tests (882 TS + 173 Rust)
 bun run test:integration  # CLI integration tests (bash)
 ```
@@ -30,9 +31,10 @@ cd unity-agentic-tools && npm link   # Register unity-agentic-tools CLI globally
 
 ```
 unity-agentic-tools/         TypeScript CLI + Vitest tests
-rust-core/          Native Rust module (napi-rs)
+rust-core/          Native Rust package (napi-rs)
 doc-indexer/        Documentation indexing module
 unity-package/      Unity Editor bridge (C# UPM package)
+tools/dotnet-unity-compile/ Dotnet compile harness for the Unity package
 ```
 
 - Workspaces: root package.json has `"workspaces": ["rust-core", "unity-agentic-tools", "doc-indexer"]`
@@ -40,36 +42,24 @@ unity-package/      Unity Editor bridge (C# UPM package)
 
 ## Key Design Patterns
 
-- **Native Module via npm**: Single package `unity-agentic-tools` published from `unity-agentic-tools/` directory. `files`: `["dist", "native", "README.md", "LICENSE"]`. `native/` directory created at publish time by CI — contains napi-rs loader (index.js) + platform .node binaries.
+- **Native Module via npm**: `rust-core` remains a workspace package and native build target for the npm side.
 - **Safe YAML Editing**: `editor.ts` preserves GUIDs, comments, class IDs. Uses temp files for atomic writes.
-- **GUID Cache**: `setup.ts` creates `.unity-agentic/` mapping script GUIDs to file paths.
 - **Token Efficiency**: `inspect` without `--properties` returns structure only. Use `--properties` when component values are needed.
-- **Scanner loading**: `scanner.ts` tries `../native/index.js` first (published npm), falls back to `require('unity-file-tools')` (workspace dev).
-- **Rust inspect API**: `inspect_all` returns NAPI struct (`SceneInspection`) — can't filter fields dynamically, must set to None before returning. `inspect` (single) returns `serde_json::Value` — flexible field filtering via `build_detail_output`. Properties always extracted in Rust (`extract_single_component_with_config`), stripped later if not needed.
+- **Scanner loading**: scanner internals are no longer registered as CLI commands.
 - **Unity YAML regex safety**: Always use `[ \t]*` (not `\s*`) between YAML keys and values — `\s` matches `\n` and causes cross-line capture bleed. Similarly, use `[^\n]*` (not `.*`) for value capture groups.
 - **`.Array` suffix handling**: Unity's API exposes arrays as `m_Foo.Array` but YAML contains `m_Foo:`. Strip `.Array` suffix before searching YAML content (see `unity-block.ts` array methods).
-- **Mesh binary decode**: `read_asset` with `decode_mesh=true` (default) auto-decodes Mesh assets (class 43). Replaces hex `_typelessdata` with structured `vertices` array and `IndexBuffer` with integer array. Supports multi-stream vertex layouts. Graceful fallback: sets `_mesh_decode_skipped` with reason if decode fails (e.g., external `.resource` storage). Use `--raw` flag to preserve hex.
 
 ## CLI Structure
 
-- CLI uses 3 command groups: `read`, `update`, `delete` (each with noun subcommands)
-- Group commands built in separate files: `cmd-read.ts`, `cmd-update.ts`, `cmd-delete.ts`
-- Each exports a `build_<verb>_command()` returning a Commander.Command, wired via `program.addCommand()`
-- `getScanner` passed as callback to `read` and `update` commands (lazy init stays in cli.ts)
-- Non-CRUD utilities stay top-level: `search`, `grep`, `clone`, `docs`, `version`, `setup`, `cleanup`, `status`
-- `editor` is a live bridge command group with 43 subcommands, built in `cmd-editor.ts`
-
-### Command Counts
-
-- **Top-level**: clone, search, grep, version, docs, setup, cleanup, status (8)
-- **read**: scene, gameobject, asset, material, dependencies, dependents, unused, settings, build, overrides, component, reference, target, script, scripts, log, meta, animation, animator, manifest, input-actions (21)
-- **update**: scriptable-object, settings, layer, material, meta, animation, animator (7)
-- **delete**: gameobject, component, build, prefab, asset, package (6)
-- **editor**: status, play, stop, pause, step, play-state, save, scene-open, console-logs, console-clear, console-follow, screenshot, tests-run, install, uninstall, hierarchy-snapshot, ui-snapshot, input-map, get (text/value/active/position/component), ui-click, ui-fill, ui-type, ui-toggle, ui-slider, ui-select, ui-scroll, ui-focus, input-key, input-mouse, input-touch, input-action, wait, invoke (37)
+- Public CLI uses a small top-level runner: `list`, `run`, `stream`, `install`, `uninstall`, `status`.
+- `list` and `run` call `UnityAgenticTools.Commands.Registry` through `editor.invoke`.
+- `stream` opens a persistent WebSocket subscription and filters topics client-side.
+- Command aliases and project `[AgenticCommand]` methods live on the C# side, not as new CLI subcommands.
+- The CLI does not register legacy `read`, `update`, `delete`, `editor`, `clone`, `search`, `grep`, `docs`, `version`, `setup`, or `cleanup` commands.
 
 ### Setting Aliases
 
-`read settings` and `update settings` accept these aliases via `SETTING_ALIASES` in `settings.ts`:
+Settings helpers still use these aliases internally via `SETTING_ALIASES` in `settings.ts`:
 - tags/tagmanager -> TagManager
 - physics/dynamics -> DynamicsManager
 - quality -> QualitySettings
@@ -96,7 +86,6 @@ unity-package/      Unity Editor bridge (C# UPM package)
 
 ## Gotchas
 
-- **`native/` dir shadows workspace builds**: If `unity-agentic-tools/native/` exists (CI publish artifact), `scanner.ts` strategy 1 loads from it instead of the workspace-linked `rust-core/`. After `build:rust`, copy updated `.node`/`index.js`/`index.d.ts` into `native/` or delete the dir.
 - `napi build --platform` regenerates index.js with ALL platforms (not just our 4) — this is expected, don't trim it
 - `tsc --noEmit` shows `import.meta` error for scanner.ts — this is expected (bun-only feature), doesn't block commits
 - Remote may have new commits — always `git pull --rebase` before push if rejected
@@ -116,7 +105,7 @@ unity-package/      Unity Editor bridge (C# UPM package)
 - **Main thread dispatch**: `RunOnMainThread<T>()` queues actions via `ConcurrentQueue`, pumped by `EditorApplication.update`
 - **Handler routing**: `IRequestHandler` interface with `MethodPrefix` property; `MessageDispatcher` does reflection-based discovery
 - **Event streaming**: `EventBroadcaster` + `UnityEventBridge` broadcast play mode changes and log messages to all connected clients
-- **Install**: `editor install` adds git URL to manifest.json (defaults project to cwd; use `--project <path>` when needed); for dev, copy `unity-package/` into project's `Packages/`
+- **Install**: `unity-agentic-tools install` adds git URL to manifest.json (defaults project to cwd; use `--project <path>` when needed); for dev, copy `unity-package/` into project's `Packages/`
 - **Transport**: `editor-client.ts` exports `call_editor()` (single request/response) and `stream_editor()` (persistent connection for events)
 - **Ref system**: `RefManager.cs` maintains `@hN` (hierarchy) and `@uN` (UI) ref registries. Refs created by `hierarchy-snapshot`/`ui-snapshot`, cleared on scene change, play mode transition, or domain reload
 - **UI walking**: `UIWalker.cs` walks both uGUI (Canvas/Selectable) and UI Toolkit (UIDocument/VisualElement) trees. TMP variants accessed via reflection to avoid hard dependency
@@ -127,9 +116,9 @@ unity-package/      Unity Editor bridge (C# UPM package)
 ## Skills
 
 - Skills are split into 2 directories under `skills/`:
-  - `unity-agentic-tools` (umbrella: setup/routing/read/update/delete/utilities)
-  - `unity-agentic-editor` (editor operations and scene/prefab mutations)
-- **Single source of truth**: no fallback docs; each command group is documented in exactly one skill.
+  - `unity-agentic-tools` (umbrella: compact command runner workflows)
+  - `unity-agentic-editor` (live bridge workflows through `list`, `run`, and `stream`)
+- **Single source of truth**: command runner docs only.
 - **Sync to global install**: `bun run sync-skill` copies the skills (SKILL.md, `reference/`, `scripts/`) to `~/.claude/skills/`.
 - **Verification**:
   - `node skills/unity-agentic-tools/scripts/check-setup.mjs`

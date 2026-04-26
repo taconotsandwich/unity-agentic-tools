@@ -146,7 +146,7 @@ The tool should make the safe path the default path.
 That means:
 
 - prefer editor-side mutations whenever Unity serialization is available
-- downgrade file-based YAML mutation to a controlled fallback
+- remove file-based YAML mutation from the default command surface
 - make risky write paths explicit and harder to reach
 - prevent lower-level models from selecting raw mutation paths by default
 
@@ -364,7 +364,7 @@ The current design still leans too hard on file editing.
 Target behavior:
 
 - if the editor is connected and a semantic editor mutation exists, use that path first
-- file mutation becomes fallback, not primary path, for editor-owned assets
+- file mutation is not exposed as the primary path for editor-owned assets
 
 Benefits:
 
@@ -468,7 +468,7 @@ Success criteria:
 
 - retry behavior is data-driven
 - stream/unary/artifact behavior is explicit
-- `editor invoke` remains an escape hatch, not the primary contract
+- raw `run <full.static.target>` remains an escape hatch, not the primary contract
 
 ### Phase 2. Split logical planes while keeping current transport if needed
 
@@ -535,7 +535,7 @@ Important:
 - Do not split CLI commands by "WebSocket commands" vs "gRPC commands".
 - Do not treat transport change as the fix for Unity reload behavior by itself.
 - Do not rely on a process-local cache as the main recovery mechanism for a short-lived CLI.
-- Do not make `editor invoke` the primary path for all future features.
+- Do not make raw static invocation the primary path for all future features.
 
 ## Near-Term Tasks
 
@@ -575,5 +575,5 @@ Long term:
 
 - move to a sidecar-owned session model
 - split control, stream, and artifact planes behind the semantic contract
-- move editor-owned mutations to editor serialization first, with file YAML mutation as controlled fallback
+- move editor-owned mutations to editor serialization through the semantic command runner
 - only change transport after the semantic contract and session model are clear

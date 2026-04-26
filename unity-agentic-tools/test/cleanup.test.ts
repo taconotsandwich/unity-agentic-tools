@@ -6,14 +6,23 @@ import { cleanup } from '../src/cleanup';
 
 /**
  * Create a temp Unity project with a .unity-agentic/ directory populated
- * with typical files (config.json, guid-cache.json, doc-index.json, editor.json, editor.last.json).
+ * with typical files.
  */
 function create_temp_project_with_agentic(files?: string[]): { dir: string; cleanup: () => void } {
     const dir = mkdtempSync(join(tmpdir(), 'cleanup-test-'));
     const agenticDir = join(dir, '.unity-agentic');
     mkdirSync(agenticDir, { recursive: true });
 
-    const defaultFiles = files || ['config.json', 'guid-cache.json', 'doc-index.json', 'editor.json', 'editor.last.json'];
+    const defaultFiles = files || [
+        'config.json',
+        'guid-cache.json',
+        'package-cache.json',
+        'local-package-cache.json',
+        'type-registry.json',
+        'doc-index.json',
+        'editor.json',
+        'editor.last.json',
+    ];
     for (const file of defaultFiles) {
         writeFileSync(join(agenticDir, file), '{}');
     }
@@ -43,26 +52,58 @@ describe('cleanup', () => {
         try {
             const result = cleanup({ project: dir });
             expect(result.success).toBe(true);
+            expect(result.modes).toEqual(['stale']);
             expect(result.files_removed).toEqual([]);
         } finally {
             cleanupDir();
         }
     });
 
-    it('should remove cache files but keep config.json on partial cleanup', () => {
+    it('should remove stale editor files by default and keep caches', () => {
         project = create_temp_project_with_agentic();
 
         const result = cleanup({ project: project.dir });
 
         expect(result.success).toBe(true);
-        expect(result.files_removed).toContain('guid-cache.json');
-        expect(result.files_removed).toContain('doc-index.json');
+        expect(result.modes).toEqual(['stale']);
         expect(result.files_removed).toContain('editor.json');
         expect(result.files_removed).toContain('editor.last.json');
-        // config.json should still exist
         expect(existsSync(join(project.dir, '.unity-agentic', 'config.json'))).toBe(true);
+        expect(existsSync(join(project.dir, '.unity-agentic', 'guid-cache.json'))).toBe(true);
+        expect(existsSync(join(project.dir, '.unity-agentic', 'package-cache.json'))).toBe(true);
         expect(existsSync(join(project.dir, '.unity-agentic', 'editor.json'))).toBe(false);
         expect(existsSync(join(project.dir, '.unity-agentic', 'editor.last.json'))).toBe(false);
+    });
+
+    it('should keep a live editor lock during stale cleanup', () => {
+        project = create_temp_project_with_agentic();
+        writeFileSync(join(project.dir, '.unity-agentic', 'editor.json'), JSON.stringify({ pid: process.pid }));
+
+        const result = cleanup({ project: project.dir, stale: true });
+
+        expect(result.success).toBe(true);
+        expect(result.files_removed).not.toContain('editor.json');
+        expect(result.files_removed).toContain('editor.last.json');
+        expect(existsSync(join(project.dir, '.unity-agentic', 'editor.json'))).toBe(true);
+        expect(existsSync(join(project.dir, '.unity-agentic', 'editor.last.json'))).toBe(false);
+    });
+
+    it('should remove rebuildable caches only when cache cleanup is requested', () => {
+        project = create_temp_project_with_agentic();
+
+        const result = cleanup({ project: project.dir, cache: true });
+
+        expect(result.success).toBe(true);
+        expect(result.modes).toEqual(['cache']);
+        expect(result.files_removed).toContain('guid-cache.json');
+        expect(result.files_removed).toContain('package-cache.json');
+        expect(result.files_removed).toContain('local-package-cache.json');
+        expect(result.files_removed).toContain('type-registry.json');
+        expect(result.files_removed).toContain('doc-index.json');
+        expect(result.files_removed).not.toContain('editor.json');
+        expect(existsSync(join(project.dir, '.unity-agentic', 'config.json'))).toBe(true);
+        expect(existsSync(join(project.dir, '.unity-agentic', 'editor.json'))).toBe(true);
+        expect(existsSync(join(project.dir, '.unity-agentic', 'guid-cache.json'))).toBe(false);
     });
 
     it('should remove entire directory on full cleanup (all: true)', () => {
@@ -71,6 +112,7 @@ describe('cleanup', () => {
         const result = cleanup({ project: project.dir, all: true });
 
         expect(result.success).toBe(true);
+        expect(result.modes).toEqual(['all']);
         expect(result.directory_removed).toBe(true);
         expect(existsSync(join(project.dir, '.unity-agentic'))).toBe(false);
     });

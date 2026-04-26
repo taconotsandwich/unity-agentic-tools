@@ -6,6 +6,7 @@
     "build:unity-agentic-tools": "cd unity-agentic-tools && bun run build",
     "build:doc-indexer": "cd doc-indexer && bun run build",
     "build:rust": "cd rust-core && bun run build",
+    "build:unity-package": "dotnet build tools/dotnet-unity-compile/UnityAgenticTools.UnityPackage.csproj --nologo",
     "build:all": "bun run build:rust || echo 'Rust build skipped' && bun run build",
     "test": "bun run test:unity-agentic-tools && bun run test:doc-indexer",
     "test:unity-agentic-tools": "cd unity-agentic-tools && bun run test",

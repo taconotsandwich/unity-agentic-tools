@@ -532,6 +532,36 @@ describe('editor-client', () => {
             expect(response.result).toEqual({ success: true });
         });
 
+        test('Registry play aliases get transition-tolerant retries during play-mode transition', async () => {
+            install_mock_websocket({
+                53785: {
+                    reachable_sequence: [false, false, false, true, true, true],
+                    bridge_info: {
+                        port: 53785,
+                        pid: 2222,
+                        version: '0.1.0',
+                        project_path: tmp_dir,
+                        project_name: 'editor-client-test',
+                    },
+                    rpc_result: { success: true },
+                },
+            });
+
+            const response = await call_editor({
+                project_path: tmp_dir,
+                method: 'editor.invoke',
+                params: {
+                    type: 'UnityAgenticTools.Commands.Registry',
+                    member: 'Run',
+                    args: JSON.stringify(['play.enter', '[]']),
+                },
+                timeout: 100,
+            });
+
+            expect(response.error).toBeUndefined();
+            expect(response.result).toEqual({ success: true });
+        });
+
         test('UnityAgenticTools.Util.PlayMode.GetState invoke retries clean socket closes during play-mode transition', async () => {
             const config_dir = join(tmp_dir, '.unity-agentic');
             mkdirSync(config_dir, { recursive: true });

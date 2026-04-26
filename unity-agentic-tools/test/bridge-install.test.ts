@@ -1,20 +1,19 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { Command } from 'commander';
 import { mkdtempSync, cpSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { add_package, remove_package } from '../src/packages';
-import { collect_command_entries, install_bridge_package } from '../src/cmd-editor';
+import { install_bridge_package } from '../src/bridge-install';
 
 const FIXTURE_DIR = join(__dirname, 'fixtures', 'test-manifest');
 const BRIDGE_PACKAGE_NAME = 'com.unity-agentic-tools.editor-bridge';
 const BRIDGE_PACKAGE_VERSION = 'https://github.com/taconotsandwich/unity-agentic-tools.git?path=unity-package';
 
-describe('cmd-editor', () => {
+describe('bridge install helpers', () => {
     let tmp_dir: string;
 
     beforeEach(() => {
-        tmp_dir = mkdtempSync(join(tmpdir(), 'cmd-editor-test-'));
+        tmp_dir = mkdtempSync(join(tmpdir(), 'bridge-install-test-'));
         cpSync(FIXTURE_DIR, tmp_dir, { recursive: true });
     });
 
@@ -91,7 +90,7 @@ describe('cmd-editor', () => {
 
     describe('install with missing manifest', () => {
         test('returns error when manifest.json not found', () => {
-            const empty_dir = mkdtempSync(join(tmpdir(), 'cmd-editor-empty-'));
+            const empty_dir = mkdtempSync(join(tmpdir(), 'bridge-install-empty-'));
             const result = add_package(empty_dir, BRIDGE_PACKAGE_NAME, BRIDGE_PACKAGE_VERSION);
             expect('error' in result).toBe(true);
             if ('error' in result) {
@@ -101,68 +100,4 @@ describe('cmd-editor', () => {
         });
     });
 
-    describe('collect_command_entries', () => {
-        test('returns compact output by default flags behavior', () => {
-            const root = new Command('unity-agentic-tools');
-            const read_cmd = new Command('read').description('Read data');
-            read_cmd.command('scene <file>').description('Read scene').option('--verbose', 'Verbose output');
-            root.addCommand(read_cmd);
-
-            const entries = collect_command_entries(root, {
-                scope: 'all',
-                show_options: false,
-                show_args: false,
-                show_desc: false,
-            });
-
-            expect(entries).toEqual([
-                { path: 'read' },
-                { path: 'read scene' },
-            ]);
-        });
-
-        test('includes options, args, and descriptions when enabled', () => {
-            const root = new Command('unity-agentic-tools');
-            const editor_cmd = new Command('editor').description('Editor bridge').option('--port <n>', 'Port override', '3000');
-            editor_cmd.command('invoke <type> <member> [args...]')
-                .description('Invoke method')
-                .option('--args <json>', 'Argument json');
-            root.addCommand(editor_cmd);
-
-            const entries = collect_command_entries(root, {
-                scope: 'editor',
-                show_options: true,
-                show_args: true,
-                show_desc: true,
-            });
-
-            expect(entries[0].path).toBe('editor');
-            expect(entries[0].description).toBe('Editor bridge');
-            expect(entries[0].options?.some((o) => o.long === '--port')).toBe(true);
-
-            const invoke_entry = entries.find((e) => e.path === 'editor invoke');
-            expect(invoke_entry).toBeTruthy();
-            expect(invoke_entry?.description).toBe('Invoke method');
-            expect(invoke_entry?.args?.map((a) => a.name)).toEqual(['type', 'member', 'args']);
-            expect(invoke_entry?.options?.some((o) => o.long === '--args')).toBe(true);
-        });
-
-        test('limits to top-level commands when scope is top', () => {
-            const root = new Command('unity-agentic-tools');
-            const read_cmd = new Command('read').description('Read things');
-            read_cmd.command('scene <file>').description('Read scene');
-            root.addCommand(read_cmd);
-            root.addCommand(new Command('editor').description('Editor bridge'));
-
-            const entries = collect_command_entries(root, {
-                scope: 'top',
-                show_options: false,
-                show_args: false,
-                show_desc: true,
-            });
-
-            expect(entries.map((e) => e.path)).toEqual(['read', 'editor']);
-            expect(entries.some((e) => e.path === 'read scene')).toBe(false);
-        });
-    });
 });

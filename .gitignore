@@ -18,6 +18,8 @@ yarn-error.log*
 
 # Build artifacts
 dist/
+bin/
+obj/
 *.tsbuildinfo
 *.map
 *.min.js

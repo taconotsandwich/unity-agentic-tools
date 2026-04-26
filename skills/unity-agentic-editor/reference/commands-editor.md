@@ -1,189 +1,228 @@
-# editor command reference
+# Unity bridge command reference
 
-Authoritative reference for `unity-agentic-tools editor ...`.
+Authoritative reference for live Unity workflows through the compact top-level CLI.
 
 ## Base usage
 
 ```bash
-unity-agentic-tools editor [options] <subcommand>
+unity-agentic-tools <command> [options]
 ```
 
-Base options:
+Bridge-related commands:
+
+| Command | Purpose |
+|---------|---------|
+| `status` | Report command runner and bridge reachability |
+| `install` | Install the bridge package into a Unity project |
+| `uninstall` | Remove the bridge package from a Unity project |
+| `cleanup` | Remove stale bridge state or rebuildable `.unity-agentic` caches |
+| `list [query]` | List built-in aliases, attributed project commands, and optional raw APIs |
+| `run <target> [args...]` | Execute a command alias or raw public static C# method/property |
+| `stream [topic]` | Stream real-time bridge events |
+
+Common options:
+
 - `-p, --project <path>`: Unity project path (default cwd)
-- `--timeout <ms>`: RPC timeout (default `10000`)
+- `--timeout <ms>`: RPC/WebSocket timeout
 - `--port <n>`: Override bridge port
 
 ## Required setup
 
-1. `unity-agentic-tools editor install -p <project>`
-2. Open project in Unity and wait for compile/import
-3. `unity-agentic-tools editor status -p <project>`
+1. `unity-agentic-tools install -p <project>`
+2. Open the project in Unity and wait for compile/import
+3. `unity-agentic-tools status -p <project>`
+4. `unity-agentic-tools list -p <project>`
 
-## Command matrix
-
-| Command | Purpose |
-|---------|---------|
-| `editor status` | Check bridge connection |
-| `editor list` | List available top/editor commands |
-| `editor invoke <type> <member> [args...]` | Invoke static method/property |
-| `editor console-follow` | Stream logs in real time |
-| `editor install` | Install bridge package |
-| `editor uninstall` | Remove bridge package |
-
-## Detailed usage
-
-### `editor status`
-
-No subcommand-specific options.
-
-### `editor list`
+## `list [query]`
 
 Options:
-- `--scope <scope>`: `all|editor|top` (default `all`)
-- `--show-options`: include option metadata
-- `--show-args`: include positional arg metadata
-- `--show-desc`: include descriptions
 
-### `editor invoke <type> <member> [args...]`
+- `--raw`: include raw public static methods/properties for matching types
+
+Examples:
+
+```bash
+unity-agentic-tools list -p <project>
+unity-agentic-tools list create -p <project>
+unity-agentic-tools list UnityEditor.AssetDatabase --raw -p <project>
+```
+
+Built-in alias groups:
+
+- `project.*`
+- `scene.*`
+- `query.*`
+- `create.*`
+- `update.*`
+- `delete.*`
+- `play.*`
+- `ui.*`
+- `input.*`
+- `screenshot.*`
+- `tests.*`
+
+## `run <target> [args...]`
 
 Options:
-- `--args <json>`: JSON array of arguments (overrides positional args)
-- `--set <value>`: set writable static property instead of reading/calling
+
+- `--args <json>`: JSON array of command arguments; use this when an argument itself is structured JSON
+- `--set <value>`: set a writable static property
 - `--no-wait`: return immediately
 
 Examples:
 
 ```bash
-unity-agentic-tools editor invoke UnityEditor.AssetDatabase Refresh
-unity-agentic-tools editor invoke UnityEditor.EditorApplication isCompiling
-unity-agentic-tools editor invoke UnityEditor.EditorApplication ExecuteMenuItem "File/Save"
+unity-agentic-tools run project.refresh -p <project>
+unity-agentic-tools run UnityEditor.AssetDatabase.Refresh -p <project>
+unity-agentic-tools run UnityEditor.EditorApplication.isCompiling -p <project>
+unity-agentic-tools run UnityEditor.EditorApplication.ExecuteMenuItem "File/Save" -p <project>
+unity-agentic-tools run UnityEditor.EditorApplication.isPaused --set true -p <project>
 ```
 
-### `editor console-follow`
+## `stream [topic]`
+
+Topics:
+
+| Topic | Events |
+|-------|--------|
+| `console` | Unity log events |
+| `events` | Console, editor, play mode, pause, and test events |
+| `playmode` | Play mode and pause state changes |
+| `tests` | Unity test runner events |
 
 Options:
-- `-t, --type <type>`: `Log|Warning|Error|Assert|Exception`
+
+- `-t, --type <type>`: console log type filter, one of `Log`, `Warning`, `Error`, `Assert`, `Exception`
 - `--duration <ms>`: auto-stop after duration (`0` means unlimited)
+- `--pretty`: pretty-print JSON events
 
-### `editor install`
-
-Options:
-- `-p, --project <path>`: target Unity project path
-
-### `editor uninstall`
-
-Options:
-- `-p, --project <path>`: target Unity project path
-
-## Ref and snapshot guidance
-
-For interactive UI and hierarchy workflows, use `editor invoke` against the built-in bridge APIs:
+Examples:
 
 ```bash
-unity-agentic-tools editor invoke UnityAgenticTools.Util.Hierarchy Snapshot "[99,false]"
-unity-agentic-tools editor invoke UnityAgenticTools.Util.UI Snapshot
+unity-agentic-tools stream console -p <project>
+unity-agentic-tools stream console --type Error --duration 5000 -p <project>
+unity-agentic-tools stream events --pretty -p <project>
+unity-agentic-tools stream playmode -p <project>
+unity-agentic-tools stream tests -p <project>
+```
+
+## Ref and Snapshot Guidance
+
+For interactive UI and hierarchy workflows, use built-in aliases:
+
+```bash
+unity-agentic-tools run scene.hierarchy -p <project>
+unity-agentic-tools run ui.snapshot -p <project>
 ```
 
 Snapshot-first pattern:
-- `editor invoke UnityAgenticTools.Util.Hierarchy Snapshot ...` -> `@hN`
-- `editor invoke UnityAgenticTools.Util.UI Snapshot` -> `@uN`
 
-Then query or interact through invoke calls such as:
-- `editor invoke UnityAgenticTools.Util.Hierarchy Query "[\"@h1\",\"active\"]"`
-- `editor invoke UnityAgenticTools.Util.UI Query "[\"@u1\",\"text\"]"`
-- `editor invoke UnityAgenticTools.Util.UI Interact "[\"@u1\",\"click\"]"`
+- `run scene.hierarchy` returns hierarchy refs such as `@hN`
+- `run ui.snapshot` returns UI refs such as `@uN`
+
+Then query or interact:
+
+```bash
+unity-agentic-tools run scene.query @h1 active -p <project>
+unity-agentic-tools run ui.query @u1 text -p <project>
+unity-agentic-tools run ui.interact @u1 click -p <project>
+```
 
 Re-snapshot after scene changes, play mode changes, or domain reload.
 
-## Editor-only scene / prefab mutation APIs
+## Create Commands
 
-Use these through `editor invoke` only. These belong under `unity-agentic-editor` because they require a reachable live editor bridge.
+Use command aliases instead of raw `UnityAgenticTools.Create.*` invocations when possible.
 
-### Create Namespaces
-
-Use `unity-agentic-tools editor invoke <type> <Member> --args '<json array>'` with the appropriate create type:
-- `UnityAgenticTools.Create.Scenes`
-- `UnityAgenticTools.Create.Prefabs`
-- `UnityAgenticTools.Create.Assets`
-- `UnityAgenticTools.Create.Project`
-
-Members:
-- `Scene(assetPath, includeDefaults = false)`
-- `PrefabVariant(sourcePrefabPath, outputPath, variantName = "")`
-- `ScriptableObject(assetPath, script, initialValuesJson = "")`
-- `Meta(scriptPath)`
-- `Build(scenePath, position = -1)`
-- `Material(assetPath, shaderGuid, materialName = "")`
-- `Package(name, version)`
-- `InputActions(assetPath, name)`
-- `Animation(assetPath, clipName = "", sampleRate = 60, loopTime = false)`
-- `Animator(assetPath, controllerName = "", layerName = "Base Layer")`
-- `Prefab(assetPath, name = "")`
-- `GameObject(assetPath, name, parentPath = "")`
-- `Component(assetPath, gameObjectPath, componentType)`
-- `ComponentCopy(assetPath, sourceGameObjectPath, sourceComponentType, sourceComponentIndex, targetGameObjectPath)`
-- `PrefabInstance(assetPath, prefabPath, parentPath = "", instanceName = "", localPosX = 0, localPosY = 0, localPosZ = 0)`
+| Alias | Backing API |
+|-------|-------------|
+| `create.scene` | `UnityAgenticTools.Create.Scenes.Scene` |
+| `create.gameobject` | `UnityAgenticTools.Create.Scenes.GameObject` |
+| `create.component` | `UnityAgenticTools.Create.Scenes.Component` |
+| `create.component-copy` | `UnityAgenticTools.Create.Scenes.ComponentCopy` |
+| `create.prefab` | `UnityAgenticTools.Create.Prefabs.Prefab` |
+| `create.prefab-instance` | `UnityAgenticTools.Create.Prefabs.PrefabInstance` |
+| `create.prefab-variant` | `UnityAgenticTools.Create.Prefabs.PrefabVariant` |
+| `create.scriptable-object` | `UnityAgenticTools.Create.Assets.ScriptableObject` |
+| `create.meta` | `UnityAgenticTools.Create.Assets.Meta` |
+| `create.material` | `UnityAgenticTools.Create.Assets.Material` |
+| `create.input-actions` | `UnityAgenticTools.Create.Assets.InputActions` |
+| `create.animation` | `UnityAgenticTools.Create.Assets.Animation` |
+| `create.animator` | `UnityAgenticTools.Create.Assets.Animator` |
+| `project.build.add` | `UnityAgenticTools.Create.Project.Build` |
+| `project.package.add` | `UnityAgenticTools.Create.Project.Package` |
 
 Examples:
 
 ```bash
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Scenes Scene --args '["Assets/Scenes/NewLevel.unity","false"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Prefabs PrefabVariant --args '["Assets/Prefabs/Base.prefab","Assets/Prefabs/BaseVariant.prefab","Base Variant"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Assets ScriptableObject --args '["Assets/Data/Enemy.asset","EnemyConfig","{\"health\":100}"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Assets Meta --args '["Assets/Scripts/TestScript.cs"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Project Build --args '["Assets/Scenes/Main.unity","0"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Assets Material --args '["Assets/Materials/Floor.mat","0000000000000000f000000000000000","Floor"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Project Package --args '["com.unity.cinemachine","2.9.7"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Assets InputActions --args '["Assets/Input/NewActions.inputactions","NewActions"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Assets Animation --args '["Assets/Animations/New.anim","NewAnim","60","true"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Assets Animator --args '["Assets/Animators/New.controller","NewController","Base Layer"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Prefabs Prefab --args '["Assets/Prefabs/Enemy.prefab","Enemy"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Scenes GameObject --args '["Assets/Scenes/Main.unity","EnemyRoot","Gameplay"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Scenes Component --args '["Assets/Scenes/Main.unity","EnemyRoot","BoxCollider"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Scenes ComponentCopy --args '["Assets/Scenes/Main.unity","Templates/Enemy","BoxCollider",0,"EnemyRoot"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Create.Prefabs PrefabInstance --args '["Assets/Scenes/Boot.unity","Assets/Prefabs/AppRoot.prefab","","AppRoot",0,0,0]'
+unity-agentic-tools run create.scene Assets/Scenes/NewLevel.unity false -p <project>
+unity-agentic-tools run create.gameobject Assets/Scenes/Main.unity EnemyRoot Gameplay -p <project>
+unity-agentic-tools run create.component Assets/Scenes/Main.unity EnemyRoot BoxCollider -p <project>
+unity-agentic-tools run create.prefab-instance Assets/Scenes/Boot.unity Assets/Prefabs/AppRoot.prefab "" AppRoot 0 0 0 -p <project>
+unity-agentic-tools run create.scriptable-object Assets/Data/Enemy.asset EnemyConfig '{"health":100}' -p <project>
 ```
 
-### Update Namespaces
+## Update Commands
 
-Use `unity-agentic-tools editor invoke <type> <Member> --args '<json array>'` with the appropriate update type:
-- `UnityAgenticTools.Update.Objects`
-- `UnityAgenticTools.Update.Serialized`
-- `UnityAgenticTools.Update.Prefabs`
-
-Members:
-- `GameObject(assetPath, gameObjectPath, propertyPath, value)`
-- `Component(assetPath, gameObjectPath, componentType, componentIndex, propertyPath, value)`
-- `Transform(assetPath, gameObjectPath, position = "", rotation = "", scale = "")`
-- `Parent(assetPath, gameObjectPath, newParentPath = "")`
-- `Array(assetPath, gameObjectPath, componentType, componentIndex, arrayProperty, action, payloadJson = "")`
-- `Batch(assetPath, editsJson)`
-- `BatchComponents(assetPath, editsJson)`
-- `SiblingIndex(assetPath, gameObjectPath, index)`
-- `ManagedReference(assetPath, gameObjectPath, componentType, componentIndex, fieldPath, typeName, initialValuesJson = "", append = false)`
-- `PrefabUnpack(assetPath, prefabInstancePath, mode = "OutermostRoot")`
-- `PrefabOverride(assetPath, gameObjectPath, componentType, componentIndex, propertyPath, value)`
-- `PrefabBatchOverrides(assetPath, editsJson)`
-- `PrefabManagedReference(assetPath, gameObjectPath, componentType, componentIndex, fieldPath, typeName, initialValuesJson = "", append = false)`
-- `PrefabRemoveOverride(assetPath, gameObjectPath, componentType, componentIndex, propertyPath)`
-- `PrefabRemoveComponent(assetPath, gameObjectPath, componentType, componentIndex)`
-- `PrefabRestoreComponent(assetPath, gameObjectPath, componentType, componentIndex)`
-- `PrefabRemoveGameObject(assetPath, gameObjectPath)`
-- `PrefabRestoreGameObject(assetPath, gameObjectPath)`
+| Alias | Purpose |
+|-------|---------|
+| `update.object` | Update a serialized GameObject property |
+| `update.component` | Update a serialized component property |
+| `update.transform` | Update position, rotation, or scale |
+| `update.parent` | Reparent a GameObject |
+| `update.sibling-index` | Set sibling order |
+| `update.array` | Edit a serialized array |
+| `update.batch` | Batch-edit GameObject properties |
+| `update.batch-components` | Batch-edit component properties |
+| `update.managed-reference` | Set or append a managed reference |
+| `update.prefab.*` | Prefab unpack, override, remove, and restore operations |
 
 Examples:
 
 ```bash
-unity-agentic-tools editor invoke UnityAgenticTools.Update.Objects Transform --args '["Assets/Scenes/Main.unity","Player","1,2,3","0,90,0","1,1,1"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Update.Serialized BatchComponents --args '["Assets/Scenes/Main.unity","[{\"gameObjectPath\":\"Player\",\"componentType\":\"BoxCollider\",\"componentIndex\":0,\"propertyPath\":\"m_IsTrigger\",\"value\":\"true\"}]"]'
-unity-agentic-tools editor invoke UnityAgenticTools.Update.Prefabs PrefabOverride --args '["Assets/Scenes/Boot.unity","AppRoot","Transform","0","m_LocalPosition.x","7"]'
+unity-agentic-tools run update.transform Assets/Scenes/Main.unity Player 1,2,3 0,90,0 1,1,1 -p <project>
+unity-agentic-tools run update.component Assets/Scenes/Main.unity Player Camera 0 m_FieldOfView 55 -p <project>
+unity-agentic-tools run update.batch-components --args '["Assets/Scenes/Main.unity","[{\"gameObjectPath\":\"Player\",\"componentType\":\"BoxCollider\",\"componentIndex\":0,\"propertyPath\":\"m_IsTrigger\",\"value\":\"true\"}]"]' -p <project>
+unity-agentic-tools run update.prefab.override Assets/Scenes/Boot.unity AppRoot Transform 0 m_LocalPosition.x 7 -p <project>
 ```
 
-### Targeting rules
+## Delete Commands
 
-- `assetPath` must be asset-relative, for example `Assets/Scenes/Main.unity` or `Assets/Prefabs/Enemy.prefab`
-- `gameObjectPath` and `parentPath` are slash-delimited hierarchy paths such as `Root/Child/Leaf`
-- component selection uses `gameObjectPath + componentType + componentIndex`
-- duplicate hierarchy paths fail explicitly; there is no best-effort guessing
-- batch methods accept a single JSON string because `editor invoke` arguments are scalar
-- `UnityAgenticTools.Create.*` / `UnityAgenticTools.Update.*` require a reachable live editor bridge. There is no file fallback
+```bash
+unity-agentic-tools run delete.gameobject Assets/Scenes/Main.unity EnemyRoot -p <project>
+unity-agentic-tools run delete.component Assets/Scenes/Main.unity EnemyRoot BoxCollider 0 -p <project>
+unity-agentic-tools run delete.asset Assets/Temp/Old.asset -p <project>
+```
+
+## Targeting Rules
+
+- `assetPath` must be asset-relative, for example `Assets/Scenes/Main.unity` or `Assets/Prefabs/Enemy.prefab`.
+- `gameObjectPath` and `parentPath` are slash-delimited hierarchy paths such as `Root/Child/Leaf`.
+- Component selection uses `gameObjectPath + componentType + componentIndex`.
+- Duplicate hierarchy paths fail explicitly; there is no best-effort guessing.
+- Batch methods accept a single JSON string; pass it through `--args`.
+- Live aliases require a reachable bridge.
+
+## Project Script Commands
+
+Add `[AgenticCommand]` to public static editor methods/properties to expose project-specific behavior:
+
+```csharp
+using UnityAgenticTools.Commands;
+
+public static class ProjectAutomation
+{
+    [AgenticCommand("qa.prepare-scene", "Prepare the current scene for QA.")]
+    public static object PrepareScene(string scenePath)
+    {
+        return new { success = true, scenePath };
+    }
+}
+```
+
+Then run:
+
+```bash
+unity-agentic-tools list qa -p <project>
+unity-agentic-tools run qa.prepare-scene Assets/Scenes/Main.unity -p <project>
+```

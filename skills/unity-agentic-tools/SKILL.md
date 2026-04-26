@@ -1,108 +1,99 @@
 ---
 name: unity-agentic-tools
-description: "Unity umbrella skill. Source of truth for all Unity Agentic Tools operations that do not require a reachable live editor bridge."
+description: "Unity Agentic Tools umbrella skill. Source of truth for the compact top-level CLI command runner."
 allowed-tools:
   - "Bash(unity-agentic-tools *)"
-argument-hint: "<non-editor command and args>"
+argument-hint: "<command and args>"
 ---
 
-# Unity Agentic Tools (Umbrella)
+# Unity Agentic Tools
 
 CLI: `unity-agentic-tools <command>`
 
-**CRITICAL: Use the CLI for ALL Unity operations. NEVER manually read, edit, write, or grep Unity files (.unity, .prefab, .asset, .mat, .anim, .controller, .meta, ProjectSettings/) using Read, Edit, Write, or Grep tools. NEVER manually edit Unity C# scripts or Editor bridge code. The CLI handles YAML parsing, GUID preservation, and safe editing. Manual file access will break things.**
+**CRITICAL: Use the CLI command runner for Unity operations. Do not manually mutate Unity serialized files (`.unity`, `.prefab`, `.asset`, `.mat`, `.anim`, `.controller`, `.meta`, `ProjectSettings/`) unless the user explicitly asks for raw file work.**
+
+The public command surface is intentionally small:
+
+| Command | What it does |
+|---------|-------------|
+| `list [query]` | Discover built-in aliases, attributed project commands, and optional raw static APIs |
+| `run <target> [args...]` | Execute a command alias or raw public static C# method/property through the Unity bridge |
+| `stream [topic]` | Watch real-time bridge events over WebSocket |
+| `install` | Install the Unity bridge package |
+| `uninstall` | Remove the Unity bridge package |
+| `cleanup` | Remove stale bridge state or rebuildable `.unity-agentic` caches |
+| `status` | Check command runner and bridge reachability |
 
 Commands emit structured JSON by default.
 
-## Single source of truth routing
+## Routing
 
-This umbrella skill is authoritative for operations that do not require a reachable live editor bridge:
-- `read ...`
-- small in-place `update ...` value edits
-- `delete ...`
-- top-level utilities: `search`, `grep`, `clone`, `docs`, `version`, `setup`, `cleanup`, `status`
+1. `unity-agentic-tools status -p <project>`
+2. `unity-agentic-tools list <query> -p <project>`
+3. `unity-agentic-tools run <target> ... -p <project>`
+4. `unity-agentic-tools stream console -p <project>` when live logs are useful
 
-If the operation requires a reachable live editor bridge, load `unity-agentic-editor` instead.
+Use `unity-agentic-editor` for live editor workflows and the same top-level `run`/`list`/`stream` bridge surface.
 
-## Boot sequence
+## Common Runner Examples
 
-Run `unity-agentic-tools setup -p <project>` before first use. Run `unity-agentic-tools status` to check readiness.
+```bash
+unity-agentic-tools list scene -p <project>
+unity-agentic-tools list create -p <project>
+unity-agentic-tools run project.refresh -p <project>
+unity-agentic-tools run query.scene Assets/Scenes/Main.unity -p <project>
+unity-agentic-tools run create.gameobject Assets/Scenes/Main.unity EnemyRoot Gameplay -p <project>
+unity-agentic-tools run update.transform Assets/Scenes/Main.unity Player 1,2,3 0,90,0 1,1,1 -p <project>
+unity-agentic-tools stream console --type Error -p <project>
+unity-agentic-tools cleanup --cache -p <project>
+```
 
-1. `unity-agentic-tools --help`
-2. `unity-agentic-tools status`
-3. If first run: `unity-agentic-tools setup -p <project>`
-4. Use this skill when the operation does not require a reachable live editor bridge. Load `unity-agentic-editor` when it does.
+Use `--args '<json array>'` when one argument is structured JSON:
 
-## Read commands (authoritative)
+```bash
+unity-agentic-tools run update.batch-components --args '["Assets/Scenes/Main.unity","[{\"gameObjectPath\":\"Player\",\"componentType\":\"BoxCollider\",\"componentIndex\":0,\"propertyPath\":\"m_IsTrigger\",\"value\":\"true\"}]"]' -p <project>
+```
 
-See `reference/commands-read.md` for full usage and options.
+Raw public static APIs can be called directly:
 
-Core usage:
+```bash
+unity-agentic-tools run UnityEditor.AssetDatabase.Refresh -p <project>
+unity-agentic-tools run UnityEditor.EditorApplication.isCompiling -p <project>
+unity-agentic-tools run UnityEditor.EditorApplication.ExecuteMenuItem "File/Save" -p <project>
+```
 
-| Command | What it does |
-|---------|-------------|
-| `read scene <file>` | Hierarchy view for `.unity` / `.prefab` |
-| `read gameobject <file> <object_id>` | One object, optional component filter |
-| `read component <file> <file_id>` | One component by fileID |
-| `read asset <file>` | Generic Unity YAML asset read |
-| `read material <file>` | Material summary/properties |
-| `read reference <file> <file_id>` | Trace fileID references |
-| `read dependencies <file>` | Outbound GUID dependencies |
-| `read dependents <guid>` | Reverse dependency lookup |
-| `read unused` | Assets with zero inbound GUID references |
-| `read target <file> <name> [type]` | Build reference string for overrides |
-| `read settings` | Project settings by alias/name |
-| `read build` / `read scenes` | Build settings scene list |
-| `read overrides <file> <prefab_instance>` | Prefab overrides |
-| `read script <file>` / `read scripts` | Type extraction + registry search |
-| `read meta <file>` | Importer settings |
-| `read animation <file>` / `read animator <file>` | Animation/Animator inspection |
-| `read manifest` | Package manifest inspection |
-| `read input-actions <file>` | InputActions inspection |
+## Project Script Commands
 
-## Update commands (authoritative)
+Expose project-specific behavior by adding `[AgenticCommand]` to public static methods/properties in Unity Editor C#:
 
-See `reference/commands-update.md` for full usage and options.
+```csharp
+using UnityAgenticTools.Commands;
 
-This section covers only `update` operations that do not require a reachable live editor bridge.
-Top-level `update` is intentionally limited to in-place value edits such as scalar, color, reference, importer, and default-value changes.
-Scene / prefab mutation moved to `unity-agentic-tools editor invoke UnityAgenticTools.Update.* ...` under `unity-agentic-editor`.
+public static class BuildCommands
+{
+    [AgenticCommand("build.addressables", "Build Addressables content.")]
+    public static object BuildAddressables(string profile)
+    {
+        return new { success = true, profile };
+    }
+}
+```
 
-## Delete commands (authoritative)
+Then use:
 
-See `reference/commands-delete.md` for full usage and options.
+```bash
+unity-agentic-tools list build -p <project>
+unity-agentic-tools run build.addressables Production -p <project>
+```
 
-## Utilities (authoritative)
+## References
 
-See `reference/commands-utilities.md` for full usage and options.
-
-| Command | What it does |
-|---------|-------------|
-| `search <path> [pattern]` | GameObject search in file or project |
-| `grep <pattern>` | Regex search across project files |
-| `clone <file> <object_name>` | Duplicate GameObject hierarchy |
-| `docs <query>` | Search indexed Unity docs |
-| `version` | Read Unity version |
-| `setup` | Initialize `.unity-agentic` state |
-| `cleanup` | Remove `.unity-agentic` state |
-| `status` | Health and configuration report |
-
-## Workflow rule
-
-Inspect before mutate:
-1. Read target state (`read ...`)
-2. Choose by dependency:
-   - if the operation does not require a reachable live editor bridge, use `unity-agentic-tools`
-   - if the operation does require a reachable live editor bridge, use `unity-agentic-editor`
-3. Re-read and verify (`read ...`)
-
-See `reference/workflows.md` for end-to-end checklists.
-
-`unity-agentic-editor` owns the invoke-based bridge surface: `editor status`, `editor invoke`, `editor console-follow`, `editor list`, `editor install`, `editor uninstall`.
+- `reference/workflows.md`: runner-first workflows
 
 ## Troubleshooting
 
-- **`get text/value @hN`**: `@hN` is hierarchy ref. `get text`/`get value` need UI refs (`@uN` from `ui-snapshot`). Use `get position`/`get active`/`get component` for hierarchy refs
-- **Editor bridge won't connect**: Ensure Unity is open, check `editor status`, re-run `editor install` (or `editor --project <path> install`)
-- **`scene-open` fails**: Use Assets-relative path (`Assets/Scenes/Main.unity`). Run `editor invoke UnityEditor.AssetDatabase Refresh` first for newly created scenes
-- **Loaded edit protection error**: If editor is connected and target `.unity`/`.prefab` is currently loaded/open, pass `--bypass-loaded-protection` to force file-based edits
+- **Bridge won't connect**: Run `unity-agentic-tools install -p <project>`, open Unity, wait for compile/import, then run `unity-agentic-tools status -p <project>`.
+- **Stale bridge state**: Run `unity-agentic-tools cleanup -p <project>` to clear stale lockfiles, or `cleanup --cache` for rebuildable caches.
+- **Need available commands**: Run `unity-agentic-tools list <query> -p <project>`.
+- **Need raw APIs**: Run `unity-agentic-tools list <type-or-namespace> --raw -p <project>`.
+- **Need console logs**: Run `unity-agentic-tools stream console --duration 5000 -p <project>`.

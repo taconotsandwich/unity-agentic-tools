@@ -1,9 +1,9 @@
 ---
 name: unity-agentic-editor
-description: "Unity Editor bridge skill. Source of truth for every Unity Agentic Tools operation that requires a reachable live editor bridge, including the `editor` command group and `UnityAgenticTools.Create.*` / `UnityAgenticTools.Update.*` scene/prefab mutations."
+description: "Unity Editor bridge skill. Source of truth for live Unity workflows through the top-level `list`, `run`, `stream`, `install`, `uninstall`, `cleanup`, and `status` commands."
 allowed-tools:
-  - "Bash(unity-agentic-tools editor *)"
-argument-hint: "<subcommand and args>"
+  - "Bash(unity-agentic-tools *)"
+argument-hint: "<bridge command and args>"
 ---
 
 # Unity Agentic Editor
@@ -12,28 +12,48 @@ Use this skill for any Unity Agentic Tools operation that requires a reachable l
 
 ## Rules
 
-- Use bridge commands only through CLI.
-- Most editor behaviors route through `editor invoke` and static APIs under `UnityAgenticTools.Create.*`, `UnityAgenticTools.Update.*`, and `UnityAgenticTools.Util.*`.
-- Use `UnityAgenticTools.Create.*` and `UnityAgenticTools.Update.*` here for scene/prefab mutations because they require the live editor bridge.
+- Use bridge behavior through the top-level CLI: `list`, `run`, `stream`, `install`, `uninstall`, `cleanup`, and `status`.
+- Prefer broad aliases such as `create.gameobject`, `update.transform`, `query.scene`, `ui.snapshot`, and `tests.run`.
+- Use raw public static C# targets only when no alias or `[AgenticCommand]` wrapper exists.
+- Do not add a new CLI command for each Unity operation; expose project-specific editor behavior with `[AgenticCommand]`.
 - Before UI interactions, run snapshots to obtain current refs:
-  - `editor invoke UnityAgenticTools.Util.Hierarchy Snapshot` -> `@hN`
-  - `editor invoke UnityAgenticTools.Util.UI Snapshot` -> `@uN`
+  - `run scene.hierarchy` -> `@hN`
+  - `run ui.snapshot` -> `@uN`
 - Re-snapshot after scene changes, play mode changes, or domain reload.
 
-## Usage index
+## Usage Index
 
-- `editor status`
-- `editor invoke <type> <member> [args...]`
-- `editor console-follow`
-- `editor install`
-- `editor uninstall`
-- `editor list`
-- `editor invoke UnityAgenticTools.Create.* ...`
-- `editor invoke UnityAgenticTools.Update.* ...`
+```bash
+unity-agentic-tools status -p <project>
+unity-agentic-tools install -p <project>
+unity-agentic-tools list <query> -p <project>
+unity-agentic-tools run <target> [args...] -p <project>
+unity-agentic-tools stream console -p <project>
+unity-agentic-tools uninstall -p <project>
+unity-agentic-tools cleanup -p <project>
+```
 
-Base options on editor group:
+Useful aliases:
+
+- `project.refresh`
+- `scene.open`, `scene.save`, `scene.hierarchy`, `scene.query`
+- `query.assets`, `query.asset`, `query.scene`, `query.object`
+- `create.*`
+- `update.*`
+- `delete.*`
+- `play.*`
+- `ui.*`
+- `input.*`
+- `screenshot.*`
+- `tests.*`
+
+Common options:
+
 - `-p, --project <path>`
 - `--timeout <ms>`
 - `--port <n>`
+- `--args <json>` on `run`
+- `--set <value>` on `run`
+- `--duration <ms>` on `stream`
 
-See `reference/commands-editor.md` for detailed usage, `UnityAgenticTools.Create.*` / `UnityAgenticTools.Update.*` targeting rules, and examples.
+See `reference/commands-editor.md` for detailed usage, targeting rules, and examples.

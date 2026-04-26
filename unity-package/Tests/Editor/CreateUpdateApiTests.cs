@@ -44,7 +44,7 @@ namespace UnityAgenticTools.Tests
             var scenePath = CreateScene("PrefabInstanceScene.unity");
             var prefabPath = CreatePrefab("AppRoot.prefab");
 
-            var result = Prefabs.PrefabInstance(scenePath, prefabPath) as System.Collections.Generic.Dictionary<string, object>;
+            var result = UnityAgenticTools.Create.Prefabs.PrefabInstance(scenePath, prefabPath) as System.Collections.Generic.Dictionary<string, object>;
 
             Assert.That(result, Is.Not.Null);
             Assert.That(result["success"], Is.EqualTo(true));

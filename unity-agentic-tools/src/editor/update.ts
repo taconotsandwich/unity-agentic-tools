@@ -525,7 +525,7 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
       return {
         success: false,
         file_path,
-        error: `Component with file ID ${file_id} not found. This file contains prefab instances — the fileID may be from the source prefab. Use \`unity-agentic-tools editor invoke UnityAgenticTools.Update.Prefabs PrefabOverride ...\` to edit variant properties.`
+        error: `Component with file ID ${file_id} not found. This file contains prefab instances — the fileID may be from the source prefab. Use \`unity-agentic-tools run update.prefab.override ...\` to edit variant properties.`
       };
     }
     return {
@@ -540,7 +540,7 @@ export function editComponentByFileId(options: EditComponentByFileIdOptions): Ed
     return {
       success: false,
       file_path,
-      error: `Component ${file_id} is a stripped reference in a prefab variant. Use \`unity-agentic-tools editor invoke UnityAgenticTools.Update.Prefabs PrefabOverride ...\` to modify overrides.`
+      error: `Component ${file_id} is a stripped reference in a prefab variant. Use \`unity-agentic-tools run update.prefab.override ...\` to modify overrides.`
     };
   }
 
@@ -988,7 +988,7 @@ export function editTransform(options: EditTransformOptions): EditResult {
     return {
       success: false,
       file_path,
-      error: `Transform ${transform_id} is a stripped reference in a prefab variant. Use \`unity-agentic-tools editor invoke UnityAgenticTools.Update.Prefabs PrefabOverride ...\` to modify transform overrides (for example, "m_LocalPosition.x").`
+      error: `Transform ${transform_id} is a stripped reference in a prefab variant. Use \`unity-agentic-tools run update.prefab.override ...\` to modify transform overrides (for example, "m_LocalPosition.x").`
     };
   }
 

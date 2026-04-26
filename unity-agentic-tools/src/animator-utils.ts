@@ -1,7 +1,5 @@
 /**
  * Shared utilities for reading and editing Unity AnimatorController files.
- *
- * Extracted from cmd-read.ts so both read and update commands can use them.
  */
 
 // ========== Types ==========

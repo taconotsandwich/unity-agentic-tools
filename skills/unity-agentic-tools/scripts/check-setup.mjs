@@ -6,7 +6,7 @@ let errors = [];
 
 // Check 1: unity-agentic-tools binary on PATH
 try {
-    execSync("unity-agentic-tools version --help", {
+    execSync("unity-agentic-tools --help", {
         encoding: "utf8",
         timeout: 10000,
         stdio: ["pipe", "pipe", "pipe"],
@@ -18,7 +18,7 @@ try {
     );
 }
 
-// Check 2: Native Rust module available
+// Check 2: command runner status works
 try {
     const output = execSync("unity-agentic-tools status", {
         encoding: "utf8",
@@ -26,13 +26,10 @@ try {
         stdio: ["pipe", "pipe", "pipe"],
     });
     const status = JSON.parse(output);
-    if (status.native_module === true) {
-        console.log("[ok] Native Rust module loaded");
+    if (status.runtime === "bun" && status.bridge) {
+        console.log("[ok] command runner status available");
     } else {
-        const reason = status.native_module_error || "unknown error";
-        errors.push(
-            `Native Rust module not available (${reason}). Rebuild with: bun run build:rust`
-        );
+        errors.push("unity-agentic-tools status returned unexpected JSON.");
     }
 } catch (e) {
     errors.push(

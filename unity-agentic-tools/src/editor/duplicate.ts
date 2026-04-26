@@ -53,7 +53,7 @@ export function duplicateGameObject(options: DuplicateGameObjectOptions): Duplic
     // Check if the name matches a PrefabInstance (via m_Modifications m_Name override)
     const piMatch = findPrefabInstanceByName(doc, object_name);
     if (piMatch) {
-      return { success: false, file_path, error: `"${object_name}" is a PrefabInstance (fileID: ${piMatch.id}). Cloning PrefabInstances is not yet supported. Consider unpacking it first with \`unity-agentic-tools editor invoke UnityAgenticTools.Update.Prefabs PrefabUnpack ...\`.` };
+      return { success: false, file_path, error: `"${object_name}" is a PrefabInstance (fileID: ${piMatch.id}). Cloning PrefabInstances is not yet supported. Consider unpacking it first with \`unity-agentic-tools run update.prefab.unpack ...\`.` };
     }
     return { success: false, file_path, error: goResult.error };
   }

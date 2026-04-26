@@ -14,7 +14,7 @@
 
 ### Bug 1 (fileID precision)
 - Changed `createGenericComponentYAML`, `createMonoBehaviourYAML`, `createGameObjectYAML` to accept `string` IDs
-- Removed all `parseInt` on fileIDs in `create.ts`, `update.ts`, `cmd-update.ts`
+- Removed all `parseInt` on fileIDs in `create.ts` and `update.ts`
 - Updated `types.ts` interfaces: `component_id`, `game_object_id`, `transform_id`, `prefab_instance_id` now `string`
 - Also fixed `ReparentGameObjectResult` and `EditTransformOptions` for consistency
 
@@ -22,8 +22,8 @@
 - Changed `FIELD_DECL_RE` regex in `rust-core/src/csharp/mod.rs`: `[;=]` to `(?:;|=[^>])` to exclude `=>`
 
 ### Bug 4 (managed reference)
-- Added `--managed-reference <id>` option to `update prefab override`
-- Added PPtr format validation warning on `--object-reference`
+- Added managed reference support for prefab override editing
+- Added PPtr format validation warning for object references
 - Both `editPrefabOverride` and `batchEditPrefabOverrides` support `managed_reference`
 
 ### Bug 7 (read target GUID)
@@ -33,8 +33,6 @@
 - `rust-core/src/csharp/mod.rs` (regex + test)
 - `unity-agentic-tools/src/editor/create.ts` (parseInt removal, string signatures)
 - `unity-agentic-tools/src/editor/update.ts` (managed_reference, parseInt removal)
-- `unity-agentic-tools/src/cmd-update.ts` (--managed-reference flag, validation, parseInt removal)
-- `unity-agentic-tools/src/cmd-read.ts` (variant source GUID)
 - `unity-agentic-tools/src/types.ts` (number to string, managed_reference fields)
 - `unity-agentic-tools/test/editor.test.ts` (assertion fixes + 4 new tests)
 - `unity-agentic-tools/test/fixtures/SamplePrefabVariant.prefab` (correct managed ref format)
