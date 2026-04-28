@@ -28,7 +28,7 @@ The CLI intentionally exposes seven broad commands:
 | `cleanup` | Remove stale bridge state or rebuildable `.unity-agentic` caches |
 | `status` | Check command runner and bridge reachability |
 
-There are no hidden file/CRUD commands.
+There are no hidden local serialized-file mutation commands or editor APIs.
 
 ## Examples
 

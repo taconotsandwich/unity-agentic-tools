@@ -46,14 +46,8 @@ describe('analyze_unity_log', () => {
 });
 
 describe('SCENARIO_NAMES', () => {
-    it('includes the file-safe validation matrix', () => {
+    it('includes scenarios that do not depend on removed local CLI mutation groups', () => {
         expect(SCENARIO_NAMES).toContain('baseline');
-        expect(SCENARIO_NAMES).toContain('update-layer');
-        expect(SCENARIO_NAMES).toContain('update-settings-time');
-        expect(SCENARIO_NAMES).toContain('update-material');
-        expect(SCENARIO_NAMES).toContain('update-meta-texture');
-        expect(SCENARIO_NAMES).toContain('update-animation');
-        expect(SCENARIO_NAMES).toContain('update-animator-defaults');
         expect(SCENARIO_NAMES).toContain('negative-harness');
         expect(new Set(SCENARIO_NAMES).size).toBe(SCENARIO_NAMES.length);
     });

@@ -4,9 +4,9 @@
  */
 
 export class ParamNormalizer {
-    private params: Record<string, any>;
+    private params: Record<string, unknown>;
 
-    constructor(params: Record<string, any>) {
+    constructor(params: Record<string, unknown>) {
         this.params = params || {};
     }
 
@@ -14,11 +14,11 @@ export class ParamNormalizer {
      * Get parameter with case-insensitive fallback.
      * Tries exact match first, then opposite case.
      */
-    get(key: string, defaultValue?: any): any {
-        if (key in this.params) return this.params[key];
+    get<T = unknown>(key: string, defaultValue?: T): T | undefined {
+        if (key in this.params) return this.params[key] as T;
 
         const alt = this.toOppositeCase(key);
-        if (alt in this.params) return this.params[alt];
+        if (alt in this.params) return this.params[alt] as T;
 
         return defaultValue;
     }
@@ -26,8 +26,8 @@ export class ParamNormalizer {
     /**
      * Get required parameter or throw descriptive error.
      */
-    getRequired(key: string, errorMsg?: string): any {
-        const value = this.get(key);
+    getRequired<T = unknown>(key: string, errorMsg?: string): T {
+        const value = this.get<T>(key);
         if (value === undefined || value === null || value === '') {
             throw new Error(errorMsg || `Required parameter '${key}' is missing`);
         }
@@ -64,7 +64,7 @@ export class ParamNormalizer {
     /**
      * Get raw value (for objects/arrays) with case fallback.
      */
-    getRaw(key: string): any {
+    getRaw(key: string): unknown {
         return this.get(key);
     }
 

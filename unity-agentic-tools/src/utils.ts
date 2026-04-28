@@ -269,12 +269,12 @@ export function validate_file_path(file_path: string, operation: 'read' | 'write
  * @param value - The value to validate as Vector3
  * @returns Error message if invalid, null if valid
  */
-export function validate_vector3(value: any): string | null {
+export function validate_vector3(value: unknown): string | null {
     if (typeof value !== 'object' || value === null) {
         return 'Vector3 must be an object with x, y, z properties';
     }
 
-    const { x, y, z } = value;
+    const { x, y, z } = value as Record<string, unknown>;
     if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number') {
         return 'Vector3 x, y, z must all be numbers';
     }

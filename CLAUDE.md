@@ -43,11 +43,10 @@ tools/dotnet-unity-compile/ Dotnet compile harness for the Unity package
 ## Key Design Patterns
 
 - **Native Module via npm**: `rust-core` remains a workspace package and native build target for the npm side.
-- **Safe YAML Editing**: `editor.ts` preserves GUIDs, comments, class IDs. Uses temp files for atomic writes.
+- **Bridge-first mutation**: Create/update/delete scene, prefab, asset, and GameObject operations run through Unity-side bridge commands, not local serialized-file mutation code.
 - **Token Efficiency**: `inspect` without `--properties` returns structure only. Use `--properties` when component values are needed.
 - **Scanner loading**: scanner internals are no longer registered as CLI commands.
 - **Unity YAML regex safety**: Always use `[ \t]*` (not `\s*`) between YAML keys and values — `\s` matches `\n` and causes cross-line capture bleed. Similarly, use `[^\n]*` (not `.*`) for value capture groups.
-- **`.Array` suffix handling**: Unity's API exposes arrays as `m_Foo.Array` but YAML contains `m_Foo:`. Strip `.Array` suffix before searching YAML content (see `unity-block.ts` array methods).
 
 ## CLI Structure
 
@@ -55,23 +54,7 @@ tools/dotnet-unity-compile/ Dotnet compile harness for the Unity package
 - `list` and `run` call `UnityAgenticTools.Commands.Registry` through `editor.invoke`.
 - `stream` opens a persistent WebSocket subscription and filters topics client-side.
 - Command aliases and project `[AgenticCommand]` methods live on the C# side, not as new CLI subcommands.
-- The CLI does not register legacy `read`, `update`, `delete`, `editor`, `clone`, `search`, `grep`, `docs`, `version`, `setup`, or `cleanup` commands.
-
-### Setting Aliases
-
-Settings helpers still use these aliases internally via `SETTING_ALIASES` in `settings.ts`:
-- tags/tagmanager -> TagManager
-- physics/dynamics -> DynamicsManager
-- quality -> QualitySettings
-- time -> TimeManager
-- input -> InputManager
-- audio -> AudioManager
-- editor -> EditorSettings
-- graphics -> GraphicsSettings
-- physics2d -> Physics2DSettings
-- player/project -> ProjectSettings
-- navmesh -> NavMeshAreas
-- build/editorbuild -> EditorBuildSettings
+- The CLI does not register legacy local file mutation command groups such as `read`, `create`, `update`, `delete`, `editor`, `clone`, `search`, `grep`, `docs`, `version`, or `setup`.
 
 ## CI / Release
 
@@ -90,7 +73,7 @@ Settings helpers still use these aliases internally via `SETTING_ALIASES` in `se
 - `tsc --noEmit` shows `import.meta` error for scanner.ts — this is expected (bun-only feature), doesn't block commits
 - Remote may have new commits — always `git pull --rebase` before push if rejected
 - TagManager layers regex MUST stop at `m_SortingLayers:` boundary — greedy regex bleeds into sorting layers
-- Build settings merged into unity-agentic-tools: `build-version.ts`, `build-settings.ts`, `build-editor.ts`
+- Build settings readers live in `build-version.ts` and `build-settings.ts`; local build-setting mutation helpers have been removed.
 - dist/ is gitignored at root level — dist files are NOT committed
 - **Regex `\s*` newline bleed**: In both Rust and TypeScript, `\s*` between YAML key and value will match newlines, causing the regex to capture data from subsequent lines. Always use `[ \t]*` for horizontal whitespace only. This caused critical bugs in tag extraction (`gameobject.rs`) and name extraction (`mod.rs`).
 

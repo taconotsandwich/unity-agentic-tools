@@ -1,6 +1,6 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
-import { execFileSync, spawn } from 'child_process';
-import { dirname, isAbsolute, join, resolve } from 'path';
+import { spawn } from 'child_process';
+import { isAbsolute, join, resolve } from 'path';
 
 export interface RunnerOptions {
     unity_bin: string;
@@ -21,7 +21,6 @@ interface ScenarioContext {
     project_path: string;
     unity_bin: string;
     timeout_ms: number;
-    bootstrapped: boolean;
 }
 
 interface ScenarioDefinition {
@@ -32,26 +31,15 @@ interface ScenarioDefinition {
 }
 
 const PACKAGE_ROOT = resolve(__dirname, '..');
-const REPO_ROOT = resolve(PACKAGE_ROOT, '..');
-const CLI_PATH = resolve(PACKAGE_ROOT, 'dist', 'cli.js');
 const FIXTURE_ROOT = resolve(__dirname, 'fixtures', 'headless-validation');
-const LOCAL_FIXTURES_ROOT = resolve(__dirname, 'fixtures');
-const EXTERNAL_FIXTURES_ROOT = resolve(REPO_ROOT, 'test', 'fixtures', 'external');
 const TEMP_ROOT = resolve(PACKAGE_ROOT, '.tmp');
 const MANIFEST_NAME = 'UATValidationTargets.json';
 const SCENE_ASSET_PATH = 'Assets/Scenes/ValidationScene.unity';
-const GENERATED_ASSET_DIR = 'Assets/Generated';
 const UNITY_EXECUTE_METHOD = 'UnityAgenticTools.Editor.HeadlessValidator.RunValidation';
 const DEFAULT_TIMEOUT_MS = 600_000;
 const COPY_EXCLUDES = new Set(['Library', 'Logs', 'Temp', '.DS_Store']);
 const LOG_POLL_INTERVAL_MS = 1_000;
 const PROCESS_KILL_GRACE_MS = 5_000;
-
-function ensure_cli_is_built(): void {
-    if (!existsSync(CLI_PATH)) {
-        throw new Error(`CLI build not found at ${CLI_PATH}. Run bun run build first.`);
-    }
-}
 
 function filter_fixture_copy(source_path: string): boolean {
     const segments = source_path.split(/[\\/]/);
@@ -134,15 +122,6 @@ Options:
   --help                       Show this help text`);
 }
 
-function run_cli_json(args: string[], cwd: string = PACKAGE_ROOT): Record<string, unknown> {
-    const stdout = execFileSync('bun', [CLI_PATH, ...args], {
-        cwd,
-        encoding: 'utf-8',
-    });
-
-    return JSON.parse(stdout) as Record<string, unknown>;
-}
-
 function copy_fixture_project(): string {
     mkdirSync(TEMP_ROOT, { recursive: true });
     const temp_dir = mkdtempSync(join(TEMP_ROOT, 'headless-validation-'));
@@ -156,178 +135,11 @@ function write_validation_manifest(project_path: string, targets: string[]): voi
     writeFileSync(manifest_path, JSON.stringify({ targets }, null, 2));
 }
 
-function copy_path_into_project(project_path: string, source_path: string, destination_relative_path: string): string {
-    const destination_path = join(project_path, destination_relative_path);
-    mkdirSync(dirname(destination_path), { recursive: true });
-    cpSync(source_path, destination_path, { recursive: true });
-    return destination_path;
-}
-
-function copy_local_fixture(project_path: string, source_relative_path: string, destination_relative_path: string): string {
-    return copy_path_into_project(
-        project_path,
-        resolve(LOCAL_FIXTURES_ROOT, source_relative_path),
-        destination_relative_path,
-    );
-}
-
-function copy_external_fixture(project_path: string, source_relative_path: string, destination_relative_path: string): string {
-    return copy_path_into_project(
-        project_path,
-        resolve(EXTERNAL_FIXTURES_ROOT, source_relative_path),
-        destination_relative_path,
-    );
-}
-
-function assert_cli_success(result: Record<string, unknown>, scenario_name: string): void {
-    if (result.success === false) {
-        throw new Error(`CLI scenario ${scenario_name} failed: ${String(result.error ?? result.message ?? 'unknown error')}`);
-    }
-}
-
-function read_scene_objects(scene_path: string): Array<Record<string, unknown>> {
-    const result = run_cli_json(['read', 'scene', scene_path]);
-    return Array.isArray(result.gameobjects) ? result.gameobjects as Array<Record<string, unknown>> : [];
-}
-
-function get_gameobject_entry(scene_path: string, object_name: string): Record<string, unknown> {
-    const gameobject = read_scene_objects(scene_path).find((entry) => entry.name === object_name);
-    if (!gameobject) {
-        throw new Error(`Could not find GameObject "${object_name}" in ${scene_path}`);
-    }
-    return gameobject;
-}
-
-function get_component_file_id(scene_path: string, object_name: string, component_type: string): string {
-    const gameobject = get_gameobject_entry(scene_path, object_name);
-    const components = Array.isArray(gameobject.components) ? gameobject.components as Array<Record<string, unknown>> : [];
-    const component = components.find((entry) => entry.type === component_type);
-
-    if (!component || typeof component.fileId !== 'string') {
-        throw new Error(`Could not find component "${component_type}" on GameObject "${object_name}"`);
-    }
-
-    return component.fileId;
-}
-
-function get_transform_file_id(scene_path: string, object_name: string): string {
-    return get_component_file_id(scene_path, object_name, 'Transform');
-}
-
-function require_result_string(result: Record<string, unknown>, key: string, scenario_name: string): string {
-    const value = result[key];
-    if (typeof value !== 'string') {
-        throw new Error(`CLI scenario ${scenario_name} did not return string field "${key}"`);
-    }
-    return value;
-}
-
-async function bootstrap_project(context: ScenarioContext): Promise<void> {
-    if (context.bootstrapped) {
-        return;
-    }
-
-    write_validation_manifest(context.project_path, [SCENE_ASSET_PATH]);
-    const result = await run_unity_validation(context.unity_bin, context.project_path, context.timeout_ms);
-
-    if (!result.success) {
-        throw new Error(`Failed to bootstrap Unity project state: ${format_result_message(result)}`);
-    }
-
-    context.bootstrapped = true;
-}
-
 const SCENARIOS: Record<string, ScenarioDefinition> = {
     baseline: {
         name: 'baseline',
         async run(_context, _scene_path, scene_asset_path) {
             return [scene_asset_path];
-        },
-    },
-    'update-layer': {
-        name: 'update-layer',
-        async run(context) {
-            await bootstrap_project(context);
-            assert_cli_success(
-                run_cli_json(['update', 'layer', '8', 'HeadlessLayer', '--project', context.project_path]),
-                'update-layer',
-            );
-            return ['ProjectSettings/TagManager.asset'];
-        },
-    },
-    'update-settings-time': {
-        name: 'update-settings-time',
-        async run(context) {
-            await bootstrap_project(context);
-            assert_cli_success(
-                run_cli_json([
-                    'update', 'settings',
-                    '--project', context.project_path,
-                    '--setting', 'time',
-                    '--property', 'fixed_timestep',
-                    '--value', '0.0333333',
-                ]),
-                'update-settings-time',
-            );
-            return ['ProjectSettings/TimeManager.asset'];
-        },
-    },
-    'update-animation': {
-        name: 'update-animation',
-        async run(context) {
-            const animation_asset_path = `${GENERATED_ASSET_DIR}/AnimationSettings.anim`;
-            const animation_path = copy_local_fixture(context.project_path, 'keyframe-test.anim', animation_asset_path);
-            assert_cli_success(
-                run_cli_json(['update', 'animation', animation_path, '--set', 'loop-time=1', '--set', 'sample-rate=30']),
-                'update-animation',
-            );
-            return [animation_asset_path];
-        },
-    },
-    'update-animator-defaults': {
-        name: 'update-animator-defaults',
-        async run(context) {
-            const animator_asset_path = `${GENERATED_ASSET_DIR}/AnimatorDefaults.controller`;
-            const animator_path = copy_local_fixture(context.project_path, 'test-animator.controller', animator_asset_path);
-            assert_cli_success(
-                run_cli_json(['update', 'animator', animator_path, '--set-default', 'Speed=1.5']),
-                'update-animator-defaults',
-            );
-            return [animator_asset_path];
-        },
-    },
-    'update-material': {
-        name: 'update-material',
-        async run(context) {
-            const material_asset_path = `${GENERATED_ASSET_DIR}/UpdatedMaterial.mat`;
-            const material_path = copy_external_fixture(
-                context.project_path,
-                'Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF - Outline.mat',
-                material_asset_path,
-            );
-            copy_external_fixture(
-                context.project_path,
-                'Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans SDF - Outline.mat.meta',
-                `${material_asset_path}.meta`,
-            );
-            assert_cli_success(
-                run_cli_json(['update', 'material', material_path, '--set', '_FaceDilate=0.3']),
-                'update-material',
-            );
-            return [material_asset_path];
-        },
-    },
-    'update-meta-texture': {
-        name: 'update-meta-texture',
-        async run(context) {
-            const texture_asset_path = `${GENERATED_ASSET_DIR}/Circle.png`;
-            copy_external_fixture(context.project_path, 'Assets/Prefabs/Circle.png', texture_asset_path);
-            copy_external_fixture(context.project_path, 'Assets/Prefabs/Circle.png.meta', `${texture_asset_path}.meta`);
-            assert_cli_success(
-                run_cli_json(['update', 'meta', join(context.project_path, texture_asset_path), '--read-write']),
-                'update-meta-texture',
-            );
-            return [texture_asset_path];
         },
     },
     'negative-harness': {
@@ -584,7 +396,6 @@ async function run_scenario(name: string, options: RunnerOptions): Promise<boole
         project_path,
         unity_bin: options.unity_bin,
         timeout_ms: options.timeout_ms,
-        bootstrapped: false,
     };
 
     let preserve_temp = options.keep_temp;
@@ -668,7 +479,6 @@ function resolve_requested_scenarios(requested_scenario: string): string[] {
 }
 
 async function main(): Promise<void> {
-    ensure_cli_is_built();
     const options = parse_args(process.argv.slice(2));
 
     if (!existsSync(options.unity_bin)) {

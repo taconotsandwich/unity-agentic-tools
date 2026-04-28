@@ -54,7 +54,7 @@ tools/dotnet-unity-compile/ Dotnet compile harness for Unity package
 - Workspaces: root package.json has `"workspaces": ["rust-core", "unity-agentic-tools", "doc-indexer"]`
 - Public runner built in `cli.ts` with bridge transport in `editor-client.ts`
 - Unity command discovery/execution lives in `unity-package/Editor/Commands`
-- The CLI does not register legacy file/CRUD command groups
+- The CLI does not register legacy local file mutation command groups
 
 ## Testing
 

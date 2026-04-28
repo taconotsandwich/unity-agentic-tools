@@ -9,6 +9,7 @@ A compact CLI and Unity Editor bridge for inspecting and changing Unity projects
 - **Live Editor Bridge** - WebSocket transport to a running Unity Editor for scene, prefab, UI, play mode, screenshots, tests, and console access.
 - **Project Editor Script Commands** - Add `[AgenticCommand]` to public static editor methods/properties and expose them without adding new CLI tools.
 - **Built-In Unity Operations** - Create, update, delete, and query scenes, prefabs, assets, GameObjects, components, UI refs, and test results through one runner.
+- **Bridge-First Mutation** - Unity project changes go through the Editor bridge; the npm package no longer ships local serialized-file mutation helpers.
 - **Real-Time Console Watch** - `stream console` follows Unity logs over WebSocket, with topic and log-type filtering.
 
 ## Installation
