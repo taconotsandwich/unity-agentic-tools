@@ -24,20 +24,10 @@ npm install -g unity-agentic-tools
 
 ```bash
 npx skills install taconotsandwich/unity-agentic-tools
-npx skills add "." --all -g --copy
-```
-
-Skill split:
-
-- `unity-agentic-tools` -> primary CLI runner workflows
-- `unity-agentic-editor` -> bridge-dependent `run`, `list`, `stream`, `install`, `uninstall`, and live Unity workflows
-
-Recommended install flow:
-
-```bash
 npx skills add "./skills/unity-agentic-tools" -g --copy
-npx skills add "./skills/unity-agentic-editor" -g --copy
 ```
+
+The repo ships one unified `unity-agentic-tools` skill for CLI setup, command discovery, bridge workflows, scene and prefab mutation, UI testing, screenshots, tests, logs, and troubleshooting. Run `bun run generate:agent-guidance` after changing Unity command aliases so the skill command reference stays in sync with `Registry.cs`.
 
 ### From Source
 

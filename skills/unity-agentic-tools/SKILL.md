@@ -1,6 +1,6 @@
 ---
 name: unity-agentic-tools
-description: "Unity Agentic Tools umbrella skill. Source of truth for the compact top-level CLI command runner."
+description: "Use for Unity project automation with unity-agentic-tools: install/status/list/run/stream, command discovery, bridge setup, and safe CLI-first Unity scene, prefab, asset, and editor workflows."
 allowed-tools:
   - "Bash(unity-agentic-tools *)"
 argument-hint: "<command and args>"
@@ -8,11 +8,11 @@ argument-hint: "<command and args>"
 
 # Unity Agentic Tools
 
-CLI: `unity-agentic-tools <command>`
+Use this skill for Unity Agentic Tools CLI setup, command discovery, command execution, live Editor bridge workflows, and high-level project automation.
 
 **CRITICAL: Use the CLI command runner for Unity operations. Do not manually mutate Unity serialized files (`.unity`, `.prefab`, `.asset`, `.mat`, `.anim`, `.controller`, `.meta`, `ProjectSettings/`) unless the user explicitly asks for raw file work.**
 
-The public command surface is intentionally small:
+## Command Surface
 
 | Command | What it does |
 |---------|-------------|
@@ -26,16 +26,15 @@ The public command surface is intentionally small:
 
 Commands emit structured JSON by default.
 
-## Routing
+## Default Route
 
 1. `unity-agentic-tools status -p <project>`
 2. `unity-agentic-tools list <query> -p <project>`
-3. `unity-agentic-tools run <target> ... -p <project>`
-4. `unity-agentic-tools stream console -p <project>` when live logs are useful
+3. Inspect current state with `query.*`, `scene.hierarchy`, `ui.snapshot`, or screenshots.
+4. `unity-agentic-tools run <target> ... -p <project>`
+5. Verify with the matching query, snapshot, screenshot, tests, or console stream.
 
-Use `unity-agentic-editor` for live editor workflows and the same top-level `run`/`list`/`stream` bridge surface.
-
-## Common Runner Examples
+## Examples
 
 ```bash
 unity-agentic-tools list scene -p <project>
@@ -48,13 +47,13 @@ unity-agentic-tools stream console --type Error -p <project>
 unity-agentic-tools cleanup --cache -p <project>
 ```
 
-Use `--args '<json array>'` when one argument is structured JSON:
+Use `--args '<json array>'` when one argument is structured JSON.
 
 ```bash
 unity-agentic-tools run update.batch-components --args '["Assets/Scenes/Main.unity","[{\"gameObjectPath\":\"Player\",\"componentType\":\"BoxCollider\",\"componentIndex\":0,\"propertyPath\":\"m_IsTrigger\",\"value\":\"true\"}]"]' -p <project>
 ```
 
-Raw public static APIs can be called directly:
+Raw public static APIs can be called directly when no alias or `[AgenticCommand]` wrapper exists.
 
 ```bash
 unity-agentic-tools run UnityEditor.AssetDatabase.Refresh -p <project>
@@ -62,7 +61,7 @@ unity-agentic-tools run UnityEditor.EditorApplication.isCompiling -p <project>
 unity-agentic-tools run UnityEditor.EditorApplication.ExecuteMenuItem "File/Save" -p <project>
 ```
 
-## Project Script Commands
+## Project Commands
 
 Expose project-specific behavior by adding `[AgenticCommand]` to public static methods/properties in Unity Editor C#:
 
@@ -88,7 +87,10 @@ unity-agentic-tools run build.addressables Production -p <project>
 
 ## References
 
-- `reference/workflows.md`: runner-first workflows
+- `reference/core.md`: command runner contract and routing
+- `reference/live-editor-workflows.md`: live Editor setup, mutation, UI, and batch workflows
+- `reference/command-reference.md`: generated alias reference from `Registry.cs`
+- `reference/troubleshooting.md`: bridge, refs, JSON args, and verification
 
 ## Troubleshooting
 

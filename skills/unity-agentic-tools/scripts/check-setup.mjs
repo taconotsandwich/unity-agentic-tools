@@ -1,12 +1,13 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
-let errors = [];
+const errors = [];
+const project = process.argv[2] || process.env.UNITY_PROJECT || process.cwd();
 
 // Check 1: unity-agentic-tools binary on PATH
 try {
-    execSync("unity-agentic-tools --help", {
+    execFileSync("unity-agentic-tools", ["--help"], {
         encoding: "utf8",
         timeout: 10000,
         stdio: ["pipe", "pipe", "pipe"],
@@ -20,7 +21,7 @@ try {
 
 // Check 2: command runner status works
 try {
-    const output = execSync("unity-agentic-tools status", {
+    const output = execFileSync("unity-agentic-tools", ["status", "-p", project], {
         encoding: "utf8",
         timeout: 10000,
         stdio: ["pipe", "pipe", "pipe"],
@@ -28,12 +29,17 @@ try {
     const status = JSON.parse(output);
     if (status.runtime === "bun" && status.bridge) {
         console.log("[ok] command runner status available");
+        if (status.bridge.reachable === true) {
+            console.log("[ok] Unity Editor bridge reachable");
+        } else {
+            console.log(`[info] Unity Editor bridge is not reachable for ${project}`);
+        }
     } else {
         errors.push("unity-agentic-tools status returned unexpected JSON.");
     }
-} catch (e) {
+} catch {
     errors.push(
-        "Could not run unity-agentic-tools status. Ensure the binary is installed and working."
+        `Could not run unity-agentic-tools status for ${project}. Ensure the binary is installed and working.`
     );
 }
 

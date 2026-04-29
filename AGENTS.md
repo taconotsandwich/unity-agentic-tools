@@ -4,7 +4,7 @@ This document provides essential guidelines for agentic coding tools working in 
 
 ## Project Overview
 
-TypeScript CLI + native Rust package + Unity Editor bridge. The public surface is a compact command runner: `list`, `run`, `stream`, `install`, `uninstall`, and `status`.
+TypeScript CLI + native Rust package + Unity Editor bridge. The public surface is a compact command runner: `list`, `run`, `diff`, `stream`, `install`, `uninstall`, `cleanup`, and `status`.
 
 ## Quick Setup
 
@@ -22,7 +22,7 @@ bun run build:unity-package
 bun run build:rust        # Rebuild Rust native module (after .rs changes)
 bun run build             # Build TypeScript
 bun run build:unity-package # Compile Unity C# bridge package with dotnet
-bun run test              # Unit tests (882 TS + 173 Rust)
+bun run test              # Unit tests
 bun run test:integration  # CLI integration tests
 bun run type-check        # tsc --noEmit
 ```
@@ -44,7 +44,7 @@ bun run type-check        # tsc --noEmit
 
 ```
 unity-agentic-tools/src/   TypeScript CLI source (Commander.js)
-unity-agentic-tools/test/  Vitest tests (882 tests)
+unity-agentic-tools/test/  Vitest tests
 rust-core/                 Native Rust package via napi-rs (173 tests)
 doc-indexer/               Documentation indexing module
 unity-package/             Unity Editor bridge (C# UPM package)

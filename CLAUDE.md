@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Compact Unity command runner, native Rust package, and live Unity Editor bridge. The public CLI surface is `list`, `run`, `stream`, `install`, `uninstall`, and `status`.
+Compact Unity command runner, native Rust package, and live Unity Editor bridge. The public CLI surface is `list`, `run`, `diff`, `stream`, `install`, `uninstall`, `cleanup`, and `status`.
 
 The Claude Code plugin (hooks, skills, manifest) lives in a separate repo: [unity-agentic-tools-claude-plugin](https://github.com/taconotsandwich/unity-agentic-tools-claude-plugin).
 
@@ -17,7 +17,7 @@ bun install           # Install all deps (workspaces resolve native module)
 bun run build:rust    # Build Rust native module
 bun run build         # Build TypeScript
 bun run build:unity-package # Compile Unity C# bridge package with dotnet
-bun run test          # Unit tests (882 TS + 173 Rust)
+bun run test          # Unit tests
 bun run test:integration  # CLI integration tests (bash)
 ```
 
@@ -50,8 +50,9 @@ tools/dotnet-unity-compile/ Dotnet compile harness for the Unity package
 
 ## CLI Structure
 
-- Public CLI uses a small top-level runner: `list`, `run`, `stream`, `install`, `uninstall`, `status`.
+- Public CLI uses a small top-level runner: `list`, `run`, `diff`, `stream`, `install`, `uninstall`, `cleanup`, `status`.
 - `list` and `run` call `UnityAgenticTools.Commands.Registry` through `editor.invoke`.
+- `diff` reports git changes for non-C# files by default.
 - `stream` opens a persistent WebSocket subscription and filters topics client-side.
 - Command aliases and project `[AgenticCommand]` methods live on the C# side, not as new CLI subcommands.
 - The CLI does not register legacy local file mutation command groups such as `read`, `create`, `update`, `delete`, `editor`, `clone`, `search`, `grep`, `docs`, `version`, or `setup`.
@@ -98,14 +99,11 @@ tools/dotnet-unity-compile/ Dotnet compile harness for the Unity package
 
 ## Skills
 
-- Skills are split into 2 directories under `skills/`:
-  - `unity-agentic-tools` (umbrella: compact command runner workflows)
-  - `unity-agentic-editor` (live bridge workflows through `list`, `run`, and `stream`)
-- **Single source of truth**: command runner docs only.
-- **Sync to global install**: `bun run sync-skill` copies the skills (SKILL.md, `reference/`, `scripts/`) to `~/.claude/skills/`.
+- The repo ships one unified skill at `skills/unity-agentic-tools` for CLI setup, command discovery, command execution, live bridge workflows, scene and prefab mutation, UI testing, screenshots, tests, logs, and troubleshooting.
+- **Generated command reference**: run `bun run generate:agent-guidance` after changing Unity command aliases so `skills/unity-agentic-tools/reference/command-reference.md` stays in sync with `Registry.cs`.
+- **Sync to global install**: `bun run sync-skill` copies the skill (SKILL.md, `reference/`, `scripts/`) to `~/.claude/skills/`.
 - **Verification**:
-  - `node skills/unity-agentic-tools/scripts/check-setup.mjs`
-  - `node skills/unity-agentic-editor/scripts/check-setup.mjs`
+  - `bun skills/unity-agentic-tools/scripts/check-setup.mjs`
 
 ## Code Style
 

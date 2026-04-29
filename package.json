@@ -17,6 +17,7 @@
     "test:integration:unity": "cd unity-agentic-tools && bun run test:unity-headless",
     "test:coverage": "cd unity-agentic-tools && bun run test:coverage",
     "check:classids": "bun scripts/check-classid-drift.js",
+    "generate:agent-guidance": "bun scripts/generate-agent-guidance.js",
     "type-check": "cd unity-agentic-tools && tsc --noEmit && cd ../doc-indexer && tsc --noEmit",
     "lint": "echo 'No linter configured'",
     "setup-dev": "bun install && bun run build:rust && bun run build && cd unity-agentic-tools && npm link",

@@ -7,8 +7,21 @@ DEST_ROOT="$HOME/.claude/skills"
 
 SKILLS=(
     "unity-agentic-tools"
+)
+
+LEGACY_SKILLS=(
     "unity-agentic-editor"
 )
+
+bun "$ROOT_DIR/scripts/generate-agent-guidance.js"
+
+for skill in "${LEGACY_SKILLS[@]}"; do
+    dst="$DEST_ROOT/$skill"
+    if [ -d "$dst" ]; then
+        rm -rf "$dst"
+        echo "Removed legacy skill $skill from $dst"
+    fi
+done
 
 for skill in "${SKILLS[@]}"; do
     src="$SKILLS_ROOT/$skill"
@@ -19,7 +32,9 @@ for skill in "${SKILLS[@]}"; do
         exit 1
     fi
 
-    mkdir -p "$dst" "$dst/reference" "$dst/scripts"
+    mkdir -p "$dst"
+    rm -rf "$dst/reference" "$dst/scripts"
+    mkdir -p "$dst/reference" "$dst/scripts"
 
     cp "$src/SKILL.md" "$dst/SKILL.md"
 
