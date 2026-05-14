@@ -4,7 +4,7 @@ This document provides essential guidelines for agentic coding tools working in 
 
 ## Project Overview
 
-TypeScript CLI + native Rust package + Unity Editor bridge. The public surface is a compact command runner: `list`, `run`, `diff`, `stream`, `install`, `uninstall`, `cleanup`, and `status`.
+TypeScript CLI + native Rust package + Unity Editor bridge. The public surface is a compact command runner: `list`, `run`, `stream`, `install`, `uninstall`, `cleanup`, and `status`.
 
 ## Quick Setup
 

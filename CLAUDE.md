@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Compact Unity command runner, native Rust package, and live Unity Editor bridge. The public CLI surface is `list`, `run`, `diff`, `stream`, `install`, `uninstall`, `cleanup`, and `status`.
+Compact Unity command runner, native Rust package, and live Unity Editor bridge. The public CLI surface is `list`, `run`, `stream`, `install`, `uninstall`, `cleanup`, and `status`.
 
 The Claude Code plugin (hooks, skills, manifest) lives in a separate repo: [unity-agentic-tools-claude-plugin](https://github.com/taconotsandwich/unity-agentic-tools-claude-plugin).
 
@@ -50,9 +50,8 @@ tools/dotnet-unity-compile/ Dotnet compile harness for the Unity package
 
 ## CLI Structure
 
-- Public CLI uses a small top-level runner: `list`, `run`, `diff`, `stream`, `install`, `uninstall`, `cleanup`, `status`.
+- Public CLI uses a small top-level runner: `list`, `run`, `stream`, `install`, `uninstall`, `cleanup`, `status`.
 - `list` and `run` call `UnityAgenticTools.Commands.Registry` through `editor.invoke`.
-- `diff` reports git changes for non-C# files by default.
 - `stream` opens a persistent WebSocket subscription and filters topics client-side.
 - Command aliases and project `[AgenticCommand]` methods live on the C# side, not as new CLI subcommands.
 - The CLI does not register legacy local file mutation command groups such as `read`, `create`, `update`, `delete`, `editor`, `clone`, `search`, `grep`, `docs`, `version`, or `setup`.
