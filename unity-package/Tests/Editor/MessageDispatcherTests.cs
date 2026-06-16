@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using UnityAgenticTools;
 using UnityAgenticTools.Bridge.Transport;
 
 namespace UnityAgenticTools.Tests
@@ -16,6 +17,32 @@ namespace UnityAgenticTools.Tests
 
             Assert.That(response, Does.Contain("-32601"));
             Assert.That(response, Does.Contain("Method not found"));
+        }
+
+        [Test]
+        public void JsonRpcParser_UnsignedNumerics_SerializeAsNumbers()
+        {
+            const ulong size = 4096UL;
+            const uint count = 42U;
+            const ushort port = 53782;
+            const byte flag = 7;
+
+            Assert.That(JsonRpcParser.IsTransportSafeValue(size), Is.True, "ulong should be transport-safe");
+            Assert.That(JsonRpcParser.IsTransportSafeValue(count), Is.True, "uint should be transport-safe");
+            Assert.That(JsonRpcParser.IsTransportSafeValue(port), Is.True, "ushort should be transport-safe");
+            Assert.That(JsonRpcParser.IsTransportSafeValue(flag), Is.True, "byte should be transport-safe");
+
+            Assert.That(JsonRpcParser.NormalizeValueForTransport(size), Is.EqualTo(size));
+            Assert.That(JsonRpcParser.NormalizeValueForTransport(count), Is.EqualTo(count));
+
+            var serialized = JsonRpcParser.SerializeValue(size);
+            Assert.That(serialized, Is.EqualTo("4096"),
+                "ulong should serialize as a JSON number literal, not {} (was the BuildSummary.totalSize regression).");
+
+            var summary = new Dictionary<string, object> { { "totalSize", size }, { "outputPath", "build.exe" } };
+            Assert.That(JsonRpcParser.IsTransportSafeValue(summary), Is.True,
+                "Dictionary holding unsigned numerics should be transport-safe end-to-end.");
+            Assert.That(JsonRpcParser.SerializeValue(summary), Does.Contain("\"totalSize\":4096"));
         }
 
         [Test]

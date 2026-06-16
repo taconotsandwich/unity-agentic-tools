@@ -63,8 +63,15 @@ namespace UnityAgenticTools
             if (value == null) return "null";
             if (value is string s) return $"\"{EscapeString(s)}\"";
             if (value is bool b) return b ? "true" : "false";
-            if (value is int i) return i.ToString();
-            if (value is long l) return l.ToString();
+            if (value is int i) return i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (value is long l) return l.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (value is uint ui) return ui.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (value is ulong ul) return ul.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (value is short sh) return sh.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (value is ushort ush) return ush.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (value is byte by) return by.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (value is sbyte sb) return sb.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (value is decimal dec) return dec.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (value is float f) return f.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (value is double d) return d.ToString(System.Globalization.CultureInfo.InvariantCulture);
             if (value is UnityEngine.Object unityObject) return SerializeUnityObject(unityObject);
@@ -418,6 +425,13 @@ namespace UnityAgenticTools
                 value is bool ||
                 value is int ||
                 value is long ||
+                value is uint ||
+                value is ulong ||
+                value is short ||
+                value is ushort ||
+                value is byte ||
+                value is sbyte ||
+                value is decimal ||
                 value is float ||
                 value is double)
             {
@@ -494,6 +508,13 @@ namespace UnityAgenticTools
                 value is bool ||
                 value is int ||
                 value is long ||
+                value is uint ||
+                value is ulong ||
+                value is short ||
+                value is ushort ||
+                value is byte ||
+                value is sbyte ||
+                value is decimal ||
                 value is float ||
                 value is double)
             {

@@ -99,3 +99,4 @@ unity-agentic-tools run build.addressables Production -p <project>
 - **Need available commands**: Run `unity-agentic-tools list <query> -p <project>`.
 - **Need raw APIs**: Run `unity-agentic-tools list <type-or-namespace> --raw -p <project>`.
 - **Need console logs**: Run `unity-agentic-tools stream console --duration 5000 -p <project>`.
+- **Long builds time out**: `run` defaults to 60s. Pass `--timeout 1200000` (20 min) for first-time platform builds or use `--no-wait` and stream events. See `reference/troubleshooting.md` "Long-running Commands".
