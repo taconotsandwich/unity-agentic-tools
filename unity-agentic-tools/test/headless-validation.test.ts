@@ -3,11 +3,19 @@ import { analyze_unity_log, parse_args, SCENARIO_NAMES } from './run-headless-va
 
 describe('parse_args', () => {
     it('requires --unity-bin', () => {
-        expect(() => parse_args([])).toThrow('--unity-bin is required');
+        expect(() => parse_args([], {})).toThrow('--unity-bin is required');
     });
 
     it('requires an absolute Unity path', () => {
-        expect(() => parse_args(['--unity-bin', 'Unity.app/Contents/MacOS/Unity'])).toThrow('--unity-bin must be an absolute path');
+        expect(() => parse_args(['--unity-bin', 'Unity.app/Contents/MacOS/Unity'], {})).toThrow('--unity-bin must be an absolute path');
+    });
+
+    it('uses UNITY_BIN when --unity-bin is omitted', () => {
+        const options = parse_args([], {
+            UNITY_BIN: '/Applications/Unity/Hub/Editor/6000.4.0f1/Unity.app/Contents/MacOS/Unity',
+        });
+
+        expect(options.unity_bin).toBe('/Applications/Unity/Hub/Editor/6000.4.0f1/Unity.app/Contents/MacOS/Unity');
     });
 
     it('parses supported options', () => {
@@ -16,7 +24,7 @@ describe('parse_args', () => {
             '--scenario', 'baseline',
             '--timeout-ms', '1234',
             '--keep-temp',
-        ]);
+        ], {});
 
         expect(options).toEqual({
             unity_bin: '/Applications/Unity/Hub/Editor/6000.4.0f1/Unity.app/Contents/MacOS/Unity',

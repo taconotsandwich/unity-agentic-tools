@@ -56,8 +56,8 @@ function filter_fixture_copy(source_path: string): boolean {
     return true;
 }
 
-export function parse_args(args: string[]): RunnerOptions {
-    let unity_bin = '';
+export function parse_args(args: string[], env: Record<string, string | undefined> = process.env): RunnerOptions {
+    let unity_bin = env.UNITY_BIN ?? '';
     let scenario = 'all';
     let timeout_ms = DEFAULT_TIMEOUT_MS;
     let keep_temp = false;
@@ -115,7 +115,7 @@ function print_help(): void {
     console.log(`Usage: bun test/run-headless-validation.ts --unity-bin <absolute-path> [options]
 
 Options:
-  --unity-bin <absolute-path>  Unity editor binary to run in batchmode
+  --unity-bin <absolute-path>  Unity editor binary to run in batchmode. Can also be set with UNITY_BIN.
   --scenario <name|all>        Scenario to execute (default: all)
   --timeout-ms <n>             Unity process timeout in milliseconds (default: ${DEFAULT_TIMEOUT_MS})
   --keep-temp                  Preserve temp projects after execution

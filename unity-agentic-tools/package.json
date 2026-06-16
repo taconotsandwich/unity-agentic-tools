@@ -30,7 +30,7 @@
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:coverage": "bun test --coverage",
-    "test:unity-headless": "bun test/run-headless-validation.ts --unity-bin ${UNITY_BIN:-/Applications/Unity/Hub/Editor/6000.4.0f1/Unity.app/Contents/MacOS/Unity}"
+    "test:unity-headless": "bun test/run-headless-validation.ts"
   },
   "dependencies": {
     "commander": "^14.0.2"
