@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync, spawn } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { resolve } from 'path';
 
@@ -51,6 +51,10 @@ function run_cli_async(args: string[]): Promise<CliResult> {
 }
 
 describe('command runner surface', () => {
+    it('builds the CLI bin as executable for npm link', () => {
+        expect(statSync(cli_path).mode & 0o111).not.toBe(0);
+    });
+
     it('shows the small top-level command surface in help', () => {
         const help = run_cli(['--help']);
 
