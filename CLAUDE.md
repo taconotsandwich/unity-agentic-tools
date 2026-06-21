@@ -24,8 +24,12 @@ bun run test:integration  # CLI integration tests (bash)
 ## Dev Setup
 
 ```bash
-cd unity-agentic-tools && npm link   # Register unity-agentic-tools CLI globally (one-time)
+bun run setup-dev
 ```
+
+`setup-dev` links the built CLI into Bun's global bin. If it reports that Bun's global bin is not on `PATH`, add the printed directory before relying on `unity-agentic-tools` by name.
+
+`unity-agentic-tools install` defaults to the GitHub package URL. For local bridge package development, use `unity-agentic-tools install --local -p <project>`; `--local` auto-detects this checkout's `unity-package/`.
 
 ## Architecture
 
@@ -88,7 +92,7 @@ tools/dotnet-unity-compile/ Dotnet compile harness for the Unity package
 - **Main thread dispatch**: `RunOnMainThread<T>()` queues actions via `ConcurrentQueue`, pumped by `EditorApplication.update`
 - **Handler routing**: `IRequestHandler` interface with `MethodPrefix` property; `MessageDispatcher` does reflection-based discovery
 - **Event streaming**: `EventBroadcaster` + `UnityEventBridge` broadcast play mode changes and log messages to all connected clients
-- **Install**: `unity-agentic-tools install` adds git URL to manifest.json (defaults project to cwd; use `--project <path>` when needed); for dev, copy `unity-package/` into project's `Packages/`
+- **Install**: `unity-agentic-tools install` adds the bridge package to manifest.json (defaults project to cwd; use `--project <path>` when needed). Default installs use the GitHub package URL. Use `--local [path]` for local bridge package development; existing `file:` dependencies are preserved unless `--remote` is passed.
 - **Transport**: `editor-client.ts` exports `call_editor()` (single request/response) and `stream_editor()` (persistent connection for events)
 - **Ref system**: `RefManager.cs` maintains `@hN` (hierarchy) and `@uN` (UI) ref registries. Refs created by `hierarchy-snapshot`/`ui-snapshot`, cleared on scene change, play mode transition, or domain reload
 - **UI walking**: `UIWalker.cs` walks both uGUI (Canvas/Selectable) and UI Toolkit (UIDocument/VisualElement) trees. TMP variants accessed via reflection to avoid hard dependency

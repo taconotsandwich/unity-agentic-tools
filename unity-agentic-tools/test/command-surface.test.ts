@@ -51,7 +51,7 @@ function run_cli_async(args: string[]): Promise<CliResult> {
 }
 
 describe('command runner surface', () => {
-    it('builds the CLI bin as executable for npm link', () => {
+    it('builds the CLI bin as executable for linked dev setup', () => {
         expect(statSync(cli_path).mode & 0o111).not.toBe(0);
     });
 
@@ -67,6 +67,15 @@ describe('command runner surface', () => {
         expect(help).toContain('status [options]');
         expect(help).not.toContain('read ');
         expect(help).not.toContain('editor ');
+    });
+
+    it('documents local and remote bridge install modes', () => {
+        const help = run_cli(['install', '--help']);
+
+        expect(help).toContain('--local [path]');
+        expect(help).toContain('--remote');
+        expect(help).toContain('source checkout');
+        expect(help).toContain('GitHub bridge package URL');
     });
 
     it('does not keep removed command groups registered', () => {

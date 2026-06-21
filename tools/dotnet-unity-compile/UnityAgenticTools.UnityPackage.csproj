@@ -8,11 +8,14 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <NoWarn>$(NoWarn);0649</NoWarn>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <UnityEditorVersion Condition="'$(UnityEditorVersion)' == ''">6000.4.0f1</UnityEditorVersion>
-    <UnityApp Condition="'$(UnityApp)' == ''">/Applications/Unity/Hub/Editor/$(UnityEditorVersion)/Unity.app</UnityApp>
     <UnityManagedDir>$(UnityApp)/Contents/Resources/Scripting/Managed</UnityManagedDir>
     <UnityTemplateCacheDir>$(UnityApp)/Contents/Resources/PackageManager/ProjectTemplates/libcache</UnityTemplateCacheDir>
   </PropertyGroup>
+
+  <Target Name="ValidateUnityApp" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(UnityApp)' == ''" Text="UnityApp is required. Use scripts/build-unity-package.js, set UNITY_APP=/path/to/Unity.app, or pass -p:UnityApp=/path/to/Unity.app." />
+    <Error Condition="'$(UnityApp)' != '' and !Exists('$(UnityManagedDir)')" Text="UnityApp does not look like a Unity.app bundle: $(UnityApp)" />
+  </Target>
 
   <ItemGroup>
     <Compile Include="../../unity-package/Editor/**/*.cs" />

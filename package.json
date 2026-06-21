@@ -6,7 +6,7 @@
     "build:unity-agentic-tools": "cd unity-agentic-tools && bun run build",
     "build:doc-indexer": "cd doc-indexer && bun run build",
     "build:rust": "cd rust-core && bun run build",
-    "build:unity-package": "dotnet build tools/dotnet-unity-compile/UnityAgenticTools.UnityPackage.csproj --nologo",
+    "build:unity-package": "bun scripts/build-unity-package.js",
     "build:all": "bun run build:rust || echo 'Rust build skipped' && bun run build",
     "test": "bun run test:unity-agentic-tools && bun run test:doc-indexer",
     "test:unity-agentic-tools": "cd unity-agentic-tools && bun run test",
@@ -20,8 +20,8 @@
     "generate:agent-guidance": "bun scripts/generate-agent-guidance.js",
     "type-check": "cd unity-agentic-tools && tsc --noEmit && cd ../doc-indexer && tsc --noEmit",
     "lint": "echo 'No linter configured'",
-    "setup-dev": "bun install && bun run build:rust && bun run build && cd unity-agentic-tools && npm link",
-    "teardown-dev": "cd unity-agentic-tools && npm unlink -g unity-agentic-tools && rm -rf dist",
+    "setup-dev": "bun install && bun run build:rust && bun run build && bun run build:unity-package && bun scripts/link-dev-cli.js",
+    "teardown-dev": "bun scripts/link-dev-cli.js --unlink && rm -rf unity-agentic-tools/dist",
     "sync-skill": "bash scripts/sync-skill.sh"
   },
   "devDependencies": {

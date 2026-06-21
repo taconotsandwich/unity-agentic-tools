@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { program } from 'commander';
-import { install_bridge_package } from './bridge-install';
+import { install_bridge_package, type BridgeInstallOptions } from './bridge-install';
 import { cleanup } from './cleanup';
 import { call_editor, stream_editor, ping_editor, discover_editor_config } from './editor-client';
 import { remove_package } from './packages';
@@ -40,6 +40,11 @@ interface CleanupCommandOptions {
     all?: boolean;
 }
 
+interface InstallCommandOptions extends BridgeCommandOptions {
+    local?: boolean | string;
+    remote?: boolean;
+}
+
 interface ResolvedBridgeOptions {
     project_path: string;
     timeout: number;
@@ -68,6 +73,29 @@ function resolve_bridge_options(options: BridgeCommandOptions): ResolvedBridgeOp
 
 function build_registry_args(values: string[]): string {
     return JSON.stringify(values);
+}
+
+function resolve_install_options(options: InstallCommandOptions): BridgeInstallOptions | { error: string } {
+    if (options.remote && options.local !== undefined) {
+        return { error: 'Use either --local or --remote, not both.' };
+    }
+
+    if (options.remote) {
+        return { remote: true };
+    }
+
+    if (typeof options.local === 'string') {
+        return {
+            local_package_path: path.resolve(options.local),
+            require_local: true,
+        };
+    }
+
+    if (options.local === true) {
+        return { require_local: true };
+    }
+
+    return {};
 }
 
 function output_rpc_response(response: RpcResponse): void {
@@ -247,9 +275,18 @@ program.command('stream [topic]')
 program.command('install')
     .description('Install the Unity command bridge package into a Unity project')
     .option('-p, --project <path>', 'Path to Unity project (defaults to cwd)')
-    .action((options: BridgeCommandOptions) => {
+    .option('--local [path]', 'Install from a local unity-package path; auto-detects source checkout when omitted')
+    .option('--remote', 'Force the published GitHub bridge package URL')
+    .action((options: InstallCommandOptions) => {
         const bridge = resolve_bridge_options(options);
-        const result = install_bridge_package(bridge.project_path);
+        const install_options = resolve_install_options(options);
+        if ('error' in install_options) {
+            console.log(JSON.stringify({ success: false, error: install_options.error }, null, 2));
+            process.exitCode = 1;
+            return;
+        }
+
+        const result = install_bridge_package(bridge.project_path, install_options);
         if ('error' in result) {
             console.log(JSON.stringify({ success: false, error: result.error }, null, 2));
             process.exitCode = 1;

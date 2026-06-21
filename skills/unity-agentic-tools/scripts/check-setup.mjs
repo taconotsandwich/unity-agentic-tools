@@ -15,7 +15,7 @@ try {
     console.log("[ok] unity-agentic-tools binary found");
 } catch {
     errors.push(
-        "unity-agentic-tools binary not found on PATH. Install with: npm install -g unity-agentic-tools"
+        "unity-agentic-tools binary not found on PATH. For source development, run bun run setup-dev in the repo and ensure Bun's global bin is on PATH. For public installs, use npm install -g unity-agentic-tools."
     );
 }
 

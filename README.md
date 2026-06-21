@@ -34,11 +34,10 @@ The repo ships one unified `unity-agentic-tools` skill for CLI setup, command di
 ```bash
 git clone https://github.com/taconotsandwich/unity-agentic-tools.git
 cd unity-agentic-tools
-bun install
-bun run build:rust
-bun run build
-bun run build:unity-package
+bun run setup-dev
 ```
+
+`setup-dev` links the built CLI into Bun's global bin. If it reports that Bun's global bin is not on `PATH`, add the printed directory before relying on `unity-agentic-tools` by name.
 
 ## CLI Usage
 
@@ -68,6 +67,8 @@ Install the bridge package into a Unity project, then open the project in Unity 
 unity-agentic-tools install -p /path/to/UnityProject
 unity-agentic-tools status -p /path/to/UnityProject
 ```
+
+By default, `install` writes the GitHub package URL. For local bridge package development, use `unity-agentic-tools install --local -p /path/to/UnityProject`; existing `file:` dependencies are preserved unless `--remote` is passed.
 
 The bridge starts automatically via `[InitializeOnLoad]` and writes connection info to `.unity-agentic/editor.json`.
 
@@ -194,10 +195,11 @@ bun run test:integration     # CLI integration tests
 bun run type-check           # tsc --noEmit
 ```
 
-The Unity package compile harness defaults to `/Applications/Unity/Hub/Editor/6000.4.0f1/Unity.app`. Override with MSBuild properties when needed:
+The Unity package compile script uses `UNITY_APP` when set, otherwise it discovers installed Unity Hub editors. You can also request a specific Hub version with `UNITY_EDITOR_VERSION`:
 
 ```bash
-dotnet build tools/dotnet-unity-compile/UnityAgenticTools.UnityPackage.csproj -p:UnityApp=/path/to/Unity.app
+UNITY_APP=/path/to/Unity.app bun run build:unity-package
+UNITY_EDITOR_VERSION=6000.4.0f1 bun run build:unity-package
 ```
 
 ### Testing npm package

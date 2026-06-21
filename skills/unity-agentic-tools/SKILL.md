@@ -26,6 +26,8 @@ Use this skill for Unity Agentic Tools CLI setup, command discovery, command exe
 
 Commands emit structured JSON by default.
 
+By default, `install` writes the GitHub package URL. For local bridge package development, use `install --local [path]`; existing `file:` dependencies are preserved unless `install --remote` is passed.
+
 ## Default Route
 
 1. `unity-agentic-tools status -p <project>`

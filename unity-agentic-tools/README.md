@@ -14,6 +14,8 @@ unity-agentic-tools stream console -p /path/to/UnityProject
 unity-agentic-tools cleanup -p /path/to/UnityProject
 ```
 
+By default, `install` writes the GitHub package URL. For local bridge package development, use `unity-agentic-tools install --local [path]`; existing `file:` dependencies are preserved unless `unity-agentic-tools install --remote` is passed.
+
 ## Command Surface
 
 The CLI intentionally exposes seven broad commands:
