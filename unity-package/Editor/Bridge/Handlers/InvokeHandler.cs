@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
-using System.Text;
 using System.Threading.Tasks;
 using UnityAgenticTools;
 using UnityAgenticTools.Bridge.Transport;
+using UnityAgenticTools.Util;
 using UnityEditor;
 
 namespace UnityAgenticTools.Bridge.Handlers
@@ -104,7 +104,7 @@ namespace UnityAgenticTools.Bridge.Handlers
             // parse args (JSON string array or empty)
             string[] argsArr = new string[0];
             if (parameters.TryGetValue("args", out var argsObj) && argsObj is string argsStr)
-                argsArr = ParseJsonStringArray(argsStr);
+                argsArr = JsonArgs.ParseStringArray(argsStr);
 
             // try static property getter (only when no args)
             var propInfo = type.GetProperty(memberName, BindingFlags.Public | BindingFlags.Static);
@@ -288,72 +288,5 @@ namespace UnityAgenticTools.Bridge.Handlers
             return null;
         }
 
-        private static string[] ParseJsonStringArray(string json)
-        {
-            json = json.Trim();
-            if (!json.StartsWith("[") || !json.EndsWith("]"))
-                return new[] { json };
-            json = json.Substring(1, json.Length - 2).Trim();
-            if (string.IsNullOrEmpty(json)) return new string[0];
-
-            var result = new List<string>();
-            int i = 0;
-            while (i < json.Length)
-            {
-                // skip whitespace and commas between elements
-                while (i < json.Length && (json[i] == ' ' || json[i] == '\t' || json[i] == ',')) i++;
-                if (i >= json.Length) break;
-
-                if (json[i] == '"')
-                {
-                    // quoted string element with proper escape handling
-                    i++;
-                    var sb = new StringBuilder();
-                    while (i < json.Length)
-                    {
-                        char c = json[i++];
-                        if (c == '"') break;
-                        if (c == '\\' && i < json.Length)
-                        {
-                            char esc = json[i++];
-                            switch (esc)
-                            {
-                                case '"': sb.Append('"'); break;
-                                case '\\': sb.Append('\\'); break;
-                                case '/': sb.Append('/'); break;
-                                case 'n': sb.Append('\n'); break;
-                                case 'r': sb.Append('\r'); break;
-                                case 't': sb.Append('\t'); break;
-                                case 'b': sb.Append('\b'); break;
-                                case 'f': sb.Append('\f'); break;
-                                case 'u':
-                                    if (i + 4 <= json.Length)
-                                    {
-                                        sb.Append((char)Convert.ToInt32(json.Substring(i, 4), 16));
-                                        i += 4;
-                                    }
-                                    else
-                                    {
-                                        sb.Append(esc);
-                                    }
-                                    break;
-                                default: sb.Append(esc); break;
-                            }
-                        }
-                        else sb.Append(c);
-                    }
-                    result.Add(sb.ToString());
-                }
-                else
-                {
-                    // unquoted value (number, bool, null)
-                    int start = i;
-                    while (i < json.Length && json[i] != ',') i++;
-                    result.Add(json.Substring(start, i - start).Trim());
-                }
-            }
-
-            return result.ToArray();
-        }
     }
 }
