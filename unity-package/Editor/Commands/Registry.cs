@@ -212,6 +212,8 @@ namespace UnityAgenticTools.Commands
                     continue;
                 }
 
+                var methodOverloads = new Dictionary<string, int>();
+                var orderedMethodNames = new List<string>();
                 foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Static))
                 {
                     if (method.IsGenericMethodDefinition || method.IsSpecialName)
@@ -219,12 +221,25 @@ namespace UnityAgenticTools.Commands
                         continue;
                     }
 
+                    if (methodOverloads.TryGetValue(method.Name, out var overloadCount))
+                    {
+                        methodOverloads[method.Name] = overloadCount + 1;
+                        continue;
+                    }
+
+                    methodOverloads[method.Name] = 1;
+                    orderedMethodNames.Add(method.Name);
+                }
+
+                foreach (var methodName in orderedMethodNames)
+                {
                     yield return new CommandDefinition(
-                        $"{type.FullName}.{method.Name}",
+                        $"{type.FullName}.{methodName}",
                         type.FullName,
-                        method.Name,
+                        methodName,
                         string.Empty,
-                        "raw");
+                        "raw",
+                        methodOverloads[methodName]);
                 }
 
                 foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Static))
@@ -442,14 +457,25 @@ namespace UnityAgenticTools.Commands
                 ? DescribeArguments(type, definition.MemberName)
                 : Array.Empty<object>();
 
-            return new Dictionary<string, object>
+            var entry = new Dictionary<string, object>
             {
-                { "name", definition.Name },
-                { "method", definition.Method },
-                { "description", definition.Description },
-                { "source", definition.Source },
-                { "args", args }
+                { "name", definition.Name }
             };
+
+            if (!string.Equals(definition.Method, definition.Name, StringComparison.Ordinal))
+            {
+                entry["method"] = definition.Method;
+            }
+
+            entry["description"] = definition.Description;
+            entry["source"] = definition.Source;
+            if (definition.Overloads > 1)
+            {
+                entry["overloads"] = definition.Overloads;
+            }
+
+            entry["args"] = args;
+            return entry;
         }
 
         private static object[] DescribeArguments(Type type, string memberName)
@@ -687,13 +713,14 @@ namespace UnityAgenticTools.Commands
 
         private sealed class CommandDefinition
         {
-            public CommandDefinition(string name, string typeName, string memberName, string description, string source)
+            public CommandDefinition(string name, string typeName, string memberName, string description, string source, int overloads = 1)
             {
                 Name = name;
                 TypeName = typeName;
                 MemberName = memberName;
                 Description = description ?? string.Empty;
                 Source = source;
+                Overloads = overloads;
             }
 
             public string Name { get; }
@@ -701,6 +728,7 @@ namespace UnityAgenticTools.Commands
             public string MemberName { get; }
             public string Description { get; }
             public string Source { get; }
+            public int Overloads { get; }
             public string Method => $"{TypeName}.{MemberName}";
         }
     }
