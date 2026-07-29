@@ -21,7 +21,13 @@ Prerequisites: Bun, and — only for `build:unity-package` — a local Unity Edi
 - `main` is the release branch.
 - `dev` is the integration branch for ongoing work.
 - Create your working branch from `dev` and open pull requests back into `dev`.
-- When preparing a release (for example `0.5.0`), add its `CHANGELOG.md` section, merge `dev` into `main`, run `bun scripts/sync-version.js --set 0.5.0` and commit, push `main`, then tag that commit `v0.5.0`. The workflow rejects a tag that is not `origin/main` HEAD.
+- When preparing a release (for example `0.5.0`), add its `CHANGELOG.md` section, merge `dev` into `main`, run `bun scripts/sync-version.js --set 0.5.0` and commit, then push `main`. Before tagging, run the preflight — it checks every precondition the release workflow enforces, while the tag is still cheap to not create:
+
+```bash
+bun run release:preflight 0.5.0
+```
+
+  Tag `v0.5.0` only once it passes. The preflight is read-only: it never tags, pushes, publishes, commits, or moves a branch, so it is safe to run at any point.
 
 ## Branch Name Rules
 
@@ -94,7 +100,16 @@ Write 2-4 concise bullets that summarize user-visible improvements. Avoid raw
 commit dumps, merge-commit lines, and extra sections.
 
 A tag with no section fails the release, deliberately before the npm publish step
-rather than after it. Check locally first:
+rather than after it. But a workflow failure means the tag is already public and
+has to be deleted locally and on the remote before retrying, so check before
+tagging instead — `release:preflight` covers this along with version sync, a
+clean tree, tag availability, and the `origin/main` HEAD rule:
+
+```bash
+bun run release:preflight 0.7.0
+```
+
+To check the notes alone:
 
 ```bash
 bun scripts/release-notes.js --check 0.7.0

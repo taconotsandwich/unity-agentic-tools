@@ -13,6 +13,7 @@
     "test:integration:unity": "cd unity-agentic-tools && bun run test:unity-headless",
     "test:integration:stress": "cd unity-agentic-tools && bun run test:stress",
     "check:classids": "bun scripts/check-classid-drift.js",
+    "release:preflight": "bun scripts/release-preflight.js",
     "generate:agent-guidance": "bun scripts/generate-agent-guidance.js",
     "type-check": "cd unity-agentic-tools && tsc --noEmit",
     "setup-dev": "bun install && bun run hooks && bun run build && bun run build:unity-package && bun scripts/link-dev-cli.js",

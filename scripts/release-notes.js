@@ -31,36 +31,44 @@ function extract_section(markdown, version) {
   return body.join('\n').trim();
 }
 
-const args = process.argv.slice(2);
-const check_only = args.includes('--check');
-const version = args.find((arg) => !arg.startsWith('-'));
+function main() {
+  const args = process.argv.slice(2);
+  const check_only = args.includes('--check');
+  const version = args.find((arg) => !arg.startsWith('-'));
 
-if (!version) {
-  console.error('Usage: bun scripts/release-notes.js [--check] <version>');
-  process.exit(1);
+  if (!version) {
+    console.error('Usage: bun scripts/release-notes.js [--check] <version>');
+    process.exit(1);
+  }
+
+  if (!fs.existsSync(CHANGELOG_PATH)) {
+    console.error(`CHANGELOG.md not found at ${CHANGELOG_PATH}`);
+    process.exit(1);
+  }
+
+  const section = extract_section(fs.readFileSync(CHANGELOG_PATH, 'utf-8'), version);
+
+  if (section === null) {
+    console.error(`CHANGELOG.md has no "## ${version}" section.`);
+    console.error('Add a few bullets covering user-visible changes before tagging.');
+    process.exit(1);
+  }
+
+  if (section === '') {
+    console.error(`CHANGELOG.md section "## ${version}" is empty.`);
+    process.exit(1);
+  }
+
+  if (check_only) {
+    console.log(`CHANGELOG.md has release notes for ${version}.`);
+    process.exit(0);
+  }
+
+  console.log(section);
 }
 
-if (!fs.existsSync(CHANGELOG_PATH)) {
-  console.error(`CHANGELOG.md not found at ${CHANGELOG_PATH}`);
-  process.exit(1);
+module.exports = { extract_section };
+
+if (require.main === module) {
+  main();
 }
-
-const section = extract_section(fs.readFileSync(CHANGELOG_PATH, 'utf-8'), version);
-
-if (section === null) {
-  console.error(`CHANGELOG.md has no "## ${version}" section.`);
-  console.error('Add a few bullets covering user-visible changes before tagging.');
-  process.exit(1);
-}
-
-if (section === '') {
-  console.error(`CHANGELOG.md section "## ${version}" is empty.`);
-  process.exit(1);
-}
-
-if (check_only) {
-  console.log(`CHANGELOG.md has release notes for ${version}.`);
-  process.exit(0);
-}
-
-console.log(section);
