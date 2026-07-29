@@ -7,9 +7,11 @@ import {
     generate_editor_request_id,
     request_editor_at_port,
 } from './editor-transport';
+import { is_record } from './util';
 import type {
     CallEditorOptions,
     EditorConfig,
+    EditorReadiness,
     RpcEvent,
     RpcRequest,
     RpcResponse,
@@ -176,6 +178,53 @@ function within_reload_tolerance(options: CallEditorOptions, started: number): b
 
 function sleep(ms: number): Promise<void> {
     return new Promise<void>(r => setTimeout(r, ms));
+}
+
+const READINESS_FIELDS = [
+    'is_playing',
+    'is_paused',
+    'is_compiling',
+    'is_updating',
+    'is_playmode_transitioning',
+    'is_reloading',
+    'is_stable',
+] as const;
+
+/**
+ * Ask a reachable bridge what the Editor is busy with. Accepting a socket only
+ * proves the server is listening; these fields say whether a call will be served.
+ */
+export async function read_editor_readiness(
+    port: number,
+    timeout_ms: number,
+): Promise<EditorReadiness | { error: string }> {
+    const response = await request_editor_at_port({
+        port,
+        method: 'editor.bridge.getInfo',
+        timeout: timeout_ms,
+    });
+
+    if (response.error) {
+        return { error: response.error.message };
+    }
+
+    if (!is_record(response.result)) {
+        return { error: 'Bridge returned no readiness fields' };
+    }
+
+    const info = response.result;
+    const readiness: Partial<EditorReadiness> = {};
+
+    for (const field of READINESS_FIELDS) {
+        const value = info[field];
+        if (typeof value !== 'boolean') {
+            return { error: `Bridge did not report ${field}; the installed package may be older than this CLI` };
+        }
+
+        readiness[field] = value;
+    }
+
+    return readiness as EditorReadiness;
 }
 
 /**

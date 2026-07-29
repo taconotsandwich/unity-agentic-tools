@@ -2,7 +2,7 @@
 import { program } from 'commander';
 import { install_bridge_package, type BridgeInstallOptions } from './bridge-install';
 import { cleanup } from './cleanup';
-import { call_editor, stream_editor, ping_editor, discover_editor_config } from './editor-client';
+import { call_editor, stream_editor, ping_editor, discover_editor_config, read_editor_readiness } from './editor-client';
 import { remove_package } from './packages';
 import type { RpcEvent, RpcResponse } from './types';
 import * as path from 'path';
@@ -375,6 +375,16 @@ program.command('cleanup')
         }
     });
 
+/**
+ * Reachability stays the ping's verdict: a bridge busy compiling still accepts
+ * sockets. A readiness probe that goes unanswered is itself useful information,
+ * so it is reported rather than downgrading the connection to unreachable.
+ */
+async function describe_readiness(port: number, timeout_ms: number): Promise<Record<string, unknown>> {
+    const readiness = await read_editor_readiness(port, timeout_ms);
+    return 'error' in readiness ? { readiness_error: readiness.error } : { readiness };
+}
+
 program.command('status')
     .description('Show Unity command bridge status')
     .option('-p, --project <path>', 'Path to Unity project (defaults to current directory)')
@@ -397,7 +407,7 @@ program.command('status')
                 port: bridge.port,
                 source: 'manual',
                 reachable: ping.reachable,
-                ...(ping.reachable ? {} : { error: ping.error }),
+                ...(ping.reachable ? await describe_readiness(bridge.port, bridge.timeout) : { error: ping.error }),
             };
         } else {
             const editor_config = await discover_editor_config(projectPath, bridge.timeout);
@@ -415,7 +425,9 @@ program.command('status')
                     source: editor_config.source ?? 'lockfile',
                     project_path: editor_config.project_path,
                     reachable: ping.reachable,
-                    ...(ping.reachable ? {} : { error: ping.error }),
+                    ...(ping.reachable
+                        ? await describe_readiness(editor_config.port, bridge.timeout)
+                        : { error: ping.error }),
                 };
             }
         }

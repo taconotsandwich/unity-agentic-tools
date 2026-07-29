@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { call_editor } from '../src/editor-client';
+import { call_editor, read_editor_readiness } from '../src/editor-client';
 import {
     DEAD_PID,
     RELOAD_WINDOW_MS,
@@ -392,5 +392,58 @@ describe('call_editor', () => {
 
         expect(response.error).toBeUndefined();
         expect(response.result).toEqual({ success: true });
+    });
+});
+
+describe('read_editor_readiness', () => {
+    const READY_INFO: Record<string, unknown> = {
+        port: 53785,
+        pid: 2222,
+        version: '0.1.0',
+        project_path: '/tmp/project',
+        is_playing: false,
+        is_paused: false,
+        is_compiling: true,
+        is_updating: false,
+        is_playmode_transitioning: false,
+        is_reloading: false,
+        is_stable: false,
+    };
+
+    afterEach(() => {
+        restore_websocket();
+    });
+
+    test('reports what the editor is busy with', async () => {
+        install_mock_websocket({ 53785: { bridge_info: READY_INFO } });
+
+        const readiness = await read_editor_readiness(53785, 100);
+        expect(readiness).toEqual({
+            is_playing: false,
+            is_paused: false,
+            is_compiling: true,
+            is_updating: false,
+            is_playmode_transitioning: false,
+            is_reloading: false,
+            is_stable: false,
+        });
+    });
+
+    test('names the missing field when the installed package predates it', async () => {
+        const { is_stable: _omitted, ...older_info } = READY_INFO;
+        install_mock_websocket({ 53785: { bridge_info: older_info } });
+
+        const readiness = await read_editor_readiness(53785, 100);
+        expect('error' in readiness).toBe(true);
+        if ('error' in readiness) {
+            expect(readiness.error).toContain('is_stable');
+        }
+    });
+
+    test('reports an unanswered probe instead of inventing a state', async () => {
+        install_mock_websocket({ 53785: { close_before_response: true } });
+
+        const readiness = await read_editor_readiness(53785, 100);
+        expect('error' in readiness).toBe(true);
     });
 });

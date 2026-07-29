@@ -59,6 +59,17 @@ export interface RpcEvent {
   params?: Record<string, unknown>;
 }
 
+/** What the editor is busy with, as reported by editor.bridge.getInfo. */
+export interface EditorReadiness {
+  is_playing: boolean;
+  is_paused: boolean;
+  is_compiling: boolean;
+  is_updating: boolean;
+  is_playmode_transitioning: boolean;
+  is_reloading: boolean;
+  is_stable: boolean;
+}
+
 export interface EditorStatusResult {
   port: number;
   pid: number;
@@ -159,13 +170,6 @@ export interface InputMapResult {
   inputSystemAvailable: boolean;
   actions: InputAction[];
   legacyAxes: LegacyAxis[];
-}
-
-export interface WaitResult {
-  success: boolean;
-  condition: string;
-  elapsed?: number;
-  error?: string;
 }
 
 export interface AnnotatedScreenshotResult {
