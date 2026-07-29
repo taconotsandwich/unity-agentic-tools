@@ -115,14 +115,14 @@ namespace UnityAgenticTools.Refs
         public static GameObject ResolveGameObject(string refStr)
         {
             if (!TryResolve(refStr, out var entry, out _))
-                throw new ArgumentException($"Stale or invalid ref '{refStr}'. Run hierarchy-snapshot or ui-snapshot to refresh refs.");
+                throw new ArgumentException($"Stale or invalid ref '{refStr}'. Run scene.hierarchy or ui.snapshot to refresh refs.");
 
             if (entry.InstanceId == 0)
-                throw new ArgumentException($"Ref '{refStr}' is a UI Toolkit element (no GameObject). Use ui-* commands instead.");
+                throw new ArgumentException($"Ref '{refStr}' is a UI Toolkit element (no GameObject). Use ui.* commands instead.");
 
             var obj = UnityObjectCompat.ResolveObject(entry.InstanceId);
             if (obj == null)
-                throw new ArgumentException($"Ref '{refStr}' points to a destroyed object. Run hierarchy-snapshot or ui-snapshot to refresh refs.");
+                throw new ArgumentException($"Ref '{refStr}' points to a destroyed object. Run scene.hierarchy or ui.snapshot to refresh refs.");
 
             if (obj is GameObject go) return go;
             if (obj is Component comp) return comp.gameObject;

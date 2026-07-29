@@ -88,10 +88,10 @@ namespace UnityAgenticTools.Util
             var interactAction = action;
 
                 if (!RefManager.TryResolve(refStr, out var entry, out var kind))
-                    throw new ArgumentException($"Stale or invalid ref '{refStr}'. Run ui-snapshot to refresh refs.");
+                    throw new ArgumentException($"Stale or invalid ref '{refStr}'. Run ui.snapshot to refresh refs.");
 
                 if (kind != RefKind.UI)
-                    throw new ArgumentException($"Ref '{refStr}' is not a UI ref. Use @uN refs from ui-snapshot.");
+                    throw new ArgumentException($"Ref '{refStr}' is not a UI ref. Use @uN refs from ui.snapshot.");
 
                 // UI Toolkit path
                 if (entry.InstanceId == 0 && !string.IsNullOrEmpty(entry.TreePath))
@@ -102,7 +102,7 @@ namespace UnityAgenticTools.Util
                 // uGUI path
                 var obj = UnityObjectCompat.ResolveObject(entry.InstanceId);
                 if (obj == null)
-                    throw new ArgumentException($"Ref '{refStr}' points to a destroyed element. Run ui-snapshot to refresh.");
+                    throw new ArgumentException($"Ref '{refStr}' points to a destroyed element. Run ui.snapshot to refresh.");
 
                 var component = obj as Component;
                 if (component == null)
@@ -382,7 +382,7 @@ namespace UnityAgenticTools.Util
         {
             var element = ResolveUIToolkitElement(treePath);
             if (element == null)
-                throw new ArgumentException($"Ref '{refStr}' could not be resolved. Run ui-snapshot to refresh.");
+                throw new ArgumentException($"Ref '{refStr}' could not be resolved. Run ui.snapshot to refresh.");
 
             var type = element.GetType();
             var typeName = type.Name;
@@ -665,14 +665,14 @@ namespace UnityAgenticTools.Util
         public static object Query(string refStr, string query)
         {
                 if (!RefManager.TryResolve(refStr, out var entry, out var kind))
-                    throw new ArgumentException($"Stale or invalid ref '{refStr}'. Run ui-snapshot to refresh refs.");
+                    throw new ArgumentException($"Stale or invalid ref '{refStr}'. Run ui.snapshot to refresh refs.");
 
                 // For UI Toolkit elements
                 if (entry.InstanceId == 0 && !string.IsNullOrEmpty(entry.TreePath))
                 {
                     var element = ResolveUIToolkitElement(entry.TreePath);
                     if (element == null)
-                        throw new ArgumentException($"Ref '{refStr}' could not be resolved. Run ui-snapshot to refresh.");
+                        throw new ArgumentException($"Ref '{refStr}' could not be resolved. Run ui.snapshot to refresh.");
 
                     return QueryUIToolkitElement(element, query, refStr);
                 }
@@ -680,7 +680,7 @@ namespace UnityAgenticTools.Util
                 // For uGUI
                 var obj = UnityObjectCompat.ResolveObject(entry.InstanceId);
                 if (obj == null)
-                    throw new ArgumentException($"Ref '{refStr}' points to a destroyed element. Run ui-snapshot to refresh.");
+                    throw new ArgumentException($"Ref '{refStr}' points to a destroyed element. Run ui.snapshot to refresh.");
 
                 var component = obj as Component;
                 if (component == null)

@@ -108,7 +108,7 @@ namespace UnityAgenticTools.Util
                 return new Dictionary<string, object>
                 {
                     { "success", false },
-                    { "error", "No touchscreen device available. Use input-mouse for screen coordinate interaction." }
+                    { "error", "No touchscreen device available. Use input.mouse for screen coordinate interaction." }
                 };
             }
 
