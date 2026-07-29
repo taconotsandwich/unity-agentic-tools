@@ -185,7 +185,7 @@ function sleep(ms: number): Promise<void> {
  * Automatically reconnects when the server restarts (e.g., after domain reload).
  */
 export async function stream_editor(options: StreamEditorOptions): Promise<{ close: () => void }> {
-    const { method, params, timeout = 30000, on_event } = options;
+    const { method, params, timeout = 30000, on_event, on_error } = options;
 
     const semantics = get_action_semantics(method, 'stream', params);
     const config = await resolve_config(options, semantics.discovery_timeout_ms);
@@ -193,15 +193,70 @@ export async function stream_editor(options: StreamEditorOptions): Promise<{ clo
         throw new Error(config.error);
     }
 
-    const MAX_RECONNECTS = 5;
-    let reconnect_count = 0;
     let stopped = false;
+    let reconnect_count = 0;
+    let reconnect_deadline: number | undefined;
+    let active_socket: WebSocket | undefined;
 
     return new Promise<{ close: () => void }>((resolve, reject) => {
         let resolved = false;
 
+        // Closing must target the current socket, not the one captured when the
+        // promise resolved -- after a reconnect those are different objects.
+        function stop(): void {
+            stopped = true;
+            try { active_socket?.close(); } catch {}
+        }
+
+        function fail(error: Error): void {
+            if (stopped) return;
+            stop();
+
+            if (!resolved) {
+                resolved = true;
+                reject(error);
+                return;
+            }
+
+            on_error?.(error);
+        }
+
+        function schedule_reconnect(): void {
+            if (stopped) return;
+
+            // Bound by wall clock rather than an attempt count, for the same reason
+            // the unary path is: a reload takes as long as it takes.
+            reconnect_deadline ??= Date.now() + RELOAD_TOLERANCE_MS;
+            if (Date.now() >= reconnect_deadline) {
+                fail(new Error(`Stream lost: could not reconnect within ${RELOAD_TOLERANCE_MS}ms`));
+                return;
+            }
+
+            reconnect_count += 1;
+            const delay = Math.min(500 * reconnect_count, 3000);
+
+            setTimeout(() => {
+                if (stopped) return;
+
+                void resolve_config(options, semantics.discovery_timeout_ms).then((fresh_config) => {
+                    if (stopped) return;
+
+                    // Discovery is unavailable for the whole reload window, so a single
+                    // miss is the normal case, not a reason to abandon the stream.
+                    if ('error' in fresh_config) {
+                        schedule_reconnect();
+                        return;
+                    }
+
+                    connect(`ws://127.0.0.1:${fresh_config.port}/unity-agentic`);
+                });
+            }, delay);
+        }
+
         function connect(url: string): void {
             const ws = new WebSocket(url);
+            active_socket = ws;
+
             const request_id = generate_editor_request_id();
             const request: RpcRequest = {
                 jsonrpc: "2.0",
@@ -211,55 +266,98 @@ export async function stream_editor(options: StreamEditorOptions): Promise<{ clo
             };
 
             let connected = false;
-            const timer = !resolved
-                ? setTimeout(() => {
-                    if (!connected && !resolved) {
-                        reject(new Error(`Timeout connecting to ${url}`));
-                    }
-                }, timeout)
-                : null;
+            let attempt_finished = false;
+
+            /** Guards against one attempt both timing out and closing into two reconnects. */
+            function finish_attempt(): boolean {
+                if (attempt_finished) {
+                    return false;
+                }
+                attempt_finished = true;
+                clearTimeout(timer);
+                return true;
+            }
+
+            // Every attempt gets a connecting timeout, reconnects included. This used
+            // to be skipped once the promise had resolved, so a reconnect that opened
+            // no socket and fired no close event stalled the chain forever.
+            const timer = setTimeout(() => {
+                if (connected || !finish_attempt() || stopped) return;
+
+                if (!resolved) {
+                    stopped = true;
+                    reject(new Error(`Timeout connecting to ${url}`));
+                    return;
+                }
+
+                try { ws.close(); } catch {}
+                schedule_reconnect();
+            }, timeout);
 
             ws.onopen = () => {
                 connected = true;
-                if (timer) clearTimeout(timer);
+                clearTimeout(timer);
                 reconnect_count = 0;
+                reconnect_deadline = undefined;
                 ws.send(JSON.stringify(request));
+
                 if (!resolved) {
                     resolved = true;
-                    resolve({ close: () => { stopped = true; ws.close(); } });
+                    resolve({ close: stop });
                 }
             };
 
             ws.onmessage = (event: MessageEvent) => {
                 // Ignore non-JSON or partial frames; the bridge may interleave the
                 // initial response with subsequent event notifications we forward.
+                let data: unknown;
                 try {
-                    const data = JSON.parse(String(event.data));
-                    if ('method' in data && !('id' in data)) {
-                        on_event(data as RpcEvent);
-                    }
-                } catch {}
-            };
+                    data = JSON.parse(String(event.data));
+                } catch {
+                    return;
+                }
 
-            ws.onerror = () => {
-                if (!connected && !resolved) {
-                    if (timer) clearTimeout(timer);
-                    reject(new Error(`WebSocket connection failed to ${url}`));
+                if (typeof data !== 'object' || data === null) {
+                    return;
+                }
+
+                if ('method' in data && !('id' in data)) {
+                    on_event(data as RpcEvent);
+                    return;
+                }
+
+                // An error response to our own subscribe request was dropped here,
+                // leaving a connected stream that silently never emitted anything.
+                const frame = data as { id?: unknown; error?: { message?: string } };
+                if (frame.id === request_id && frame.error) {
+                    fail(new Error(`Subscription rejected: ${frame.error.message ?? 'unknown error'}`));
                 }
             };
 
+            ws.onerror = () => {
+                if (connected || !finish_attempt() || stopped) return;
+
+                if (!resolved) {
+                    stopped = true;
+                    reject(new Error(`WebSocket connection failed to ${url}`));
+                    return;
+                }
+
+                schedule_reconnect();
+            };
+
             ws.onclose = () => {
-                if (stopped) return;
-                if (!connected && !resolved) return;
-                if (reconnect_count >= MAX_RECONNECTS) return;
-                reconnect_count++;
-                const delay = Math.min(500 * reconnect_count, 3000);
-                setTimeout(async () => {
-                    if (stopped) return;
-                    const fresh_config = await resolve_config(options, semantics.discovery_timeout_ms);
-                    if ('error' in fresh_config) return;
-                    connect(`ws://127.0.0.1:${fresh_config.port}/unity-agentic`);
-                }, delay);
+                if (!finish_attempt() || stopped) return;
+
+                // A close before the first open has to settle the promise here:
+                // finish_attempt() just disarmed the timeout that used to do it.
+                if (!resolved) {
+                    stopped = true;
+                    reject(new Error(`WebSocket connection failed to ${url}`));
+                    return;
+                }
+
+                schedule_reconnect();
             };
         }
 

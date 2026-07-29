@@ -291,6 +291,10 @@ program.command('stream [topic]')
                         print_stream_event(event, options.pretty === true);
                     }
                 },
+                on_error: (err) => {
+                    print_json({ success: false, error: err.message }, options.pretty === true);
+                    process.exit(1);
+                },
             });
 
             if (duration > 0) {

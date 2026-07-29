@@ -31,6 +31,12 @@ export interface CallEditorOptions {
 
 export interface StreamEditorOptions extends CallEditorOptions {
   on_event: (event: RpcEvent) => void;
+  /**
+   * Called when the stream dies after it was established: reconnects exhausted,
+   * or the subscribe request itself was rejected. Without this, both failures are
+   * invisible to the caller and the stream just goes quiet.
+   */
+  on_error?: (error: Error) => void;
 }
 
 export interface RpcRequest {

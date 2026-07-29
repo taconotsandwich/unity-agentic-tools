@@ -2,7 +2,8 @@ import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { call_editor, discover_editor_config, ping_editor, read_editor_config } from '../src/editor-client';
+import { call_editor, discover_editor_config, ping_editor, read_editor_config, stream_editor } from '../src/editor-client';
+import type { RpcEvent } from '../src/types';
 
 let original_websocket: typeof WebSocket | undefined;
 
@@ -27,13 +28,39 @@ interface MockPortBehavior {
     rpc_error_sequence?: Array<MockRpcError | null>;
     close_before_response?: boolean;
     close_before_response_sequence?: boolean[];
+    /**
+     * Models a domain reload, measured from mock install: already-open sockets are
+     * closed at `start`, connections attempted inside the window fail, and the port
+     * behaves normally again after `end`.
+     */
+    reload_window_ms?: MockWindow;
+    /**
+     * Sockets opened inside this window never fire open, error, or close -- the case
+     * that only a per-attempt connecting timeout can break out of.
+     */
+    hang_window_ms?: MockWindow;
+    /** Notification pushed to the client after a non-getInfo request is answered. */
+    stream_event?: Record<string, unknown>;
 }
 
-function install_mock_websocket(port_behaviors: Record<number, MockPortBehavior>): void {
+interface MockWindow {
+    start: number;
+    end: number;
+}
+
+/** Lets a test assert which socket a close() actually reached. */
+interface MockSocketRecord {
+    port: number;
+    opened: boolean;
+    closed: boolean;
+}
+
+function install_mock_websocket(port_behaviors: Record<number, MockPortBehavior>): MockSocketRecord[] {
     const behavior_map = new Map<number, MockPortBehavior>(
         Object.entries(port_behaviors).map(([port, behavior]) => [Number(port), behavior]),
     );
     const connection_counts = new Map<number, number>();
+    const sockets: MockSocketRecord[] = [];
     const installed_at = Date.now();
 
     class MockWebSocket {
@@ -43,22 +70,40 @@ function install_mock_websocket(port_behaviors: Record<number, MockPortBehavior>
         public onerror: ((event: Event) => void) | null = null;
         public onclose: (() => void) | null = null;
 
+        private record: MockSocketRecord;
+
         constructor(url: string) {
             this.url = url;
             const port = Number(new URL(url).port);
             const behavior = behavior_map.get(port);
             const connection_count = (connection_counts.get(port) ?? 0) + 1;
             connection_counts.set(port, connection_count);
-            const reachable = resolve_reachable(behavior, connection_count, installed_at);
+            const elapsed = Date.now() - installed_at;
+            const reload = behavior?.reload_window_ms;
+            const reachable = !in_window(reload, elapsed)
+                && resolve_reachable(behavior, connection_count, installed_at);
+
+            this.record = { port, opened: false, closed: false };
+            sockets.push(this.record);
+
+            if (in_window(behavior?.hang_window_ms, elapsed)) {
+                return;
+            }
 
             setTimeout(() => {
                 if (reachable && behavior) {
+                    this.record.opened = true;
                     this.onopen?.();
+
+                    if (reload && elapsed < reload.start) {
+                        setTimeout(() => this.close(), reload.start - elapsed);
+                    }
+
                     return;
                 }
 
                 this.onerror?.({ type: 'error' } as Event);
-                this.onclose?.();
+                this.close();
             }, 0);
         }
 
@@ -78,7 +123,7 @@ function install_mock_websocket(port_behaviors: Record<number, MockPortBehavior>
                     connection_count,
                 );
                 if (close_before_response) {
-                    this.onclose?.();
+                    this.close();
                     return;
                 }
 
@@ -127,16 +172,30 @@ function install_mock_websocket(port_behaviors: Record<number, MockPortBehavior>
                         result: behavior.rpc_result ?? { ok: true, port },
                     }),
                 });
+
+                if (behavior.stream_event) {
+                    this.onmessage?.({ data: JSON.stringify(behavior.stream_event) });
+                }
             }, 0);
         }
 
         public close(): void {
+            if (this.record.closed) {
+                return;
+            }
+
+            this.record.closed = true;
             this.onclose?.();
         }
     }
 
     original_websocket = globalThis.WebSocket;
     globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
+    return sockets;
+}
+
+function in_window(window: MockWindow | undefined, elapsed: number): boolean {
+    return window !== undefined && elapsed >= window.start && elapsed < window.end;
 }
 
 function resolve_reachable(
@@ -802,5 +861,128 @@ describe('editor-client', () => {
             expect(result.error).toContain('WebSocket connection failed to ws://127.0.0.1:53785/unity-agentic');
             expect(result.error).not.toBe('[object ErrorEvent]');
         });
+    });
+
+    describe('stream_editor', () => {
+        const CONSOLE_EVENT: Record<string, unknown> = {
+            jsonrpc: '2.0',
+            method: 'editor.console.log',
+            params: { message: 'hello', type: 'Log' },
+        };
+
+        async function wait_until(predicate: () => boolean, budget_ms: number): Promise<boolean> {
+            const deadline = Date.now() + budget_ms;
+            while (Date.now() < deadline) {
+                if (predicate()) {
+                    return true;
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+
+            return predicate();
+        }
+
+        test('a reconnect survives discovery being unavailable mid-reload', async () => {
+            write_lockfile(tmp_dir, 53782, process.pid);
+            install_mock_websocket({
+                53782: {
+                    reload_window_ms: { start: 40, end: 900 },
+                    stream_event: CONSOLE_EVENT,
+                },
+            });
+
+            const events: RpcEvent[] = [];
+            const handle = await stream_editor({
+                project_path: tmp_dir,
+                method: 'editor.console.subscribe',
+                timeout: 500,
+                on_event: (event) => { events.push(event); },
+            });
+
+            try {
+                // The second event can only arrive if the reconnect retried discovery
+                // instead of abandoning the chain the first time it came back empty.
+                expect(await wait_until(() => events.length >= 2, 5000)).toBe(true);
+            } finally {
+                handle.close();
+            }
+        }, 15000);
+
+        test('a hung reconnect times out instead of stalling the stream', async () => {
+            install_mock_websocket({
+                53782: {
+                    reload_window_ms: { start: 40, end: 60 },
+                    hang_window_ms: { start: 100, end: 800 },
+                    stream_event: CONSOLE_EVENT,
+                },
+            });
+
+            const events: RpcEvent[] = [];
+            const handle = await stream_editor({
+                project_path: tmp_dir,
+                port: 53782,
+                method: 'editor.console.subscribe',
+                timeout: 200,
+                on_event: (event) => { events.push(event); },
+            });
+
+            try {
+                expect(await wait_until(() => events.length >= 2, 5000)).toBe(true);
+            } finally {
+                handle.close();
+            }
+        }, 15000);
+
+        test('a rejected subscribe surfaces through on_error instead of going quiet', async () => {
+            install_mock_websocket({
+                53782: {
+                    rpc_error: { code: -32601, message: 'Method not found: editor.console.subscribe' },
+                },
+            });
+
+            const errors: Error[] = [];
+            const handle = await stream_editor({
+                project_path: tmp_dir,
+                port: 53782,
+                method: 'editor.console.subscribe',
+                timeout: 500,
+                on_event: () => {},
+                on_error: (error) => { errors.push(error); },
+            });
+
+            try {
+                expect(await wait_until(() => errors.length > 0, 1000)).toBe(true);
+                expect(errors[0]?.message).toContain('Subscription rejected');
+                expect(errors[0]?.message).toContain('Method not found');
+            } finally {
+                handle.close();
+            }
+        });
+
+        test('close shuts the reconnected socket, not the original', async () => {
+            const sockets = install_mock_websocket({
+                53782: {
+                    reload_window_ms: { start: 40, end: 60 },
+                    stream_event: CONSOLE_EVENT,
+                },
+            });
+
+            const events: RpcEvent[] = [];
+            const handle = await stream_editor({
+                project_path: tmp_dir,
+                port: 53782,
+                method: 'editor.console.subscribe',
+                timeout: 500,
+                on_event: (event) => { events.push(event); },
+            });
+
+            expect(await wait_until(() => events.length >= 2, 5000)).toBe(true);
+            handle.close();
+
+            const opened = sockets.filter((socket) => socket.opened);
+            expect(opened.length).toBeGreaterThanOrEqual(2);
+            expect(opened[opened.length - 1]?.closed).toBe(true);
+        }, 15000);
     });
 });
