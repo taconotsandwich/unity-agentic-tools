@@ -1,5 +1,5 @@
 {
-  "packageManager": "bun@latest",
+  "packageManager": "bun@1.3.14",
   "workspaces": ["rust-core", "unity-agentic-tools", "doc-indexer"],
   "scripts": {
     "build": "bun run build:doc-indexer && bun run build:unity-agentic-tools",
@@ -19,7 +19,6 @@
     "check:classids": "bun scripts/check-classid-drift.js",
     "generate:agent-guidance": "bun scripts/generate-agent-guidance.js",
     "type-check": "cd unity-agentic-tools && tsc --noEmit && cd ../doc-indexer && tsc --noEmit",
-    "lint": "echo 'No linter configured'",
     "setup-dev": "bun install && bun run hooks && bun run build:rust && bun run build && bun run build:unity-package && bun scripts/link-dev-cli.js",
     "teardown-dev": "bun scripts/link-dev-cli.js --unlink && bun scripts/install-hooks.js --uninstall && rm -rf unity-agentic-tools/dist",
     "hooks": "bun scripts/install-hooks.js",

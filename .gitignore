@@ -10,6 +10,7 @@ htmlcov/
 # Node.js
 node_modules/
 yarn.lock
+package-lock.json
 .pnp.*
 *.log
 npm-debug.log*
@@ -75,3 +76,6 @@ target/
 
 # Doc indexer artifacts
 .unity-docs-index.json
+
+# Machine-local skill install state
+skills-lock.json
