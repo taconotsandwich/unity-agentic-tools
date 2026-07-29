@@ -14,7 +14,7 @@ If you already cloned without `--recurse-submodules`, run `git submodule update 
 
 `setup-dev` also runs `bun run hooks`, which points `core.hooksPath` at `.githooks/`. Pre-commit runs type-check plus unit tests; pre-push adds the CLI integration suite. Use `--no-verify` to bypass a hook for one command, and `bun run teardown-dev` to turn them off.
 
-Prerequisites: Bun, a Rust toolchain (for the native module), and — only for `build:unity-package` — a local Unity Editor install and the .NET SDK.
+Prerequisites: Bun, and — only for `build:unity-package` — a local Unity Editor install and the .NET SDK.
 
 ## Branching
 
@@ -68,11 +68,9 @@ Examples:
 - Target `dev` for normal feature/fix/doc work.
 - Keep PRs focused and include a short why-focused description.
 - Ensure local checks pass before opening or updating a PR. This list mirrors what CI runs, so a clean pass here should mean a green PR:
-  - `bun run build:rust`
   - `bun run build`
   - `bun run type-check`
   - `bun run check:classids`
-  - `cargo test` (in `rust-core/`)
   - `bun run test`
   - `bun run test:integration`
 

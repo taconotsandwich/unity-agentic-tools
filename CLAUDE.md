@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Compact Unity command runner, native Rust package, and live Unity Editor bridge. The public CLI surface is `list`, `run`, `stream`, `install`, `uninstall`, `cleanup`, and `status`.
+Compact Unity command runner and live Unity Editor bridge. The public CLI surface is `list`, `run`, `stream`, `install`, `uninstall`, `cleanup`, and `status`.
 
 The Claude Code plugin (hooks, skills, manifest) lives in a separate repo: [unity-agentic-tools-claude-plugin](https://github.com/taconotsandwich/unity-agentic-tools-claude-plugin).
 
@@ -13,8 +13,7 @@ The Claude Code plugin (hooks, skills, manifest) lives in a separate repo: [unit
 ## Build & Test
 
 ```bash
-bun install           # Install all deps (workspaces resolve native module)
-bun run build:rust    # Build Rust native module
+bun install           # Install all deps
 bun run build         # Build TypeScript
 bun run build:unity-package # Compile Unity C# bridge package with dotnet
 bun run test          # Unit tests
@@ -35,21 +34,16 @@ bun run setup-dev
 
 ```
 unity-agentic-tools/         TypeScript CLI + Vitest tests
-rust-core/          Native Rust package (napi-rs)
-doc-indexer/        Documentation indexing module
 unity-package/      Unity Editor bridge (C# UPM package)
 tools/dotnet-unity-compile/ Dotnet compile harness for the Unity package
 ```
 
-- Workspaces: root package.json has `"workspaces": ["rust-core", "unity-agentic-tools", "doc-indexer"]`
-- `rust-core` is workspace-only (not published to npm) — its `unity-file-tools` name is used internally for napi build
+- Workspaces: root package.json has `"workspaces": ["unity-agentic-tools"]`
 
 ## Key Design Patterns
 
-- **Native Module via npm**: `rust-core` remains a workspace package and native build target for the npm side.
 - **Bridge-first mutation**: Create/update/delete scene, prefab, asset, and GameObject operations run through Unity-side bridge commands, not local serialized-file mutation code.
 - **Token Efficiency**: `inspect` without `--properties` returns structure only. Use `--properties` when component values are needed.
-- **Scanner loading**: scanner internals are no longer registered as CLI commands.
 - **Unity YAML regex safety**: Always use `[ \t]*` (not `\s*`) between YAML keys and values — `\s` matches `\n` and causes cross-line capture bleed. Similarly, use `[^\n]*` (not `.*`) for value capture groups.
 
 ## CLI Structure
@@ -62,24 +56,20 @@ tools/dotnet-unity-compile/ Dotnet compile harness for the Unity package
 
 ## CI / Release
 
-- CI has Rust toolchain, builds native module, runs cargo test + bun test + integration tests
+- CI runs bun test + integration tests
 - Git hooks live in `.githooks/` and are activated by `bun run hooks` (part of `setup-dev`), which sets `core.hooksPath`. Pre-commit runs type-check + tests; pre-push adds the integration suite. A fresh clone has them off until that script runs.
-- Release triggered by pushing `v*.*.*` tag — builds 4 platform binaries, runs tests, publishes to npm, creates GitHub Release
-- `macos-13` runners deprecated — use `macos-15` + cross-compile (`--target x86_64-apple-darwin`) for Intel macOS
+- Release triggered by pushing `v*.*.*` tag — runs tests, publishes to npm, creates GitHub Release
 - `test/fixtures/external/` is a git submodule — test.yml needs `submodules: true` on checkout
 - npm publish uses OIDC trusted publishing (--provenance) — no NPM_TOKEN secret needed
-- Version sync: `scripts/sync-version.js` keeps unity-agentic-tools and rust-core in sync
-- `unity-file-tools` moved from dependencies to devDependencies (workspace-only)
+- Version sync: `scripts/sync-version.js` keeps unity-agentic-tools and unity-package in sync
 
 ## Gotchas
 
-- `napi build --platform` regenerates index.js with ALL platforms (not just our 4) — this is expected, don't trim it
-- `tsc --noEmit` shows `import.meta` error for scanner.ts — this is expected (bun-only feature), doesn't block commits
 - Remote may have new commits — always `git pull --rebase` before push if rejected
 - TagManager layers regex MUST stop at `m_SortingLayers:` boundary — greedy regex bleeds into sorting layers
 - Build settings readers live in `build-version.ts` and `build-settings.ts`; local build-setting mutation helpers have been removed.
 - dist/ is gitignored at root level — dist files are NOT committed
-- **Regex `\s*` newline bleed**: In both Rust and TypeScript, `\s*` between YAML key and value will match newlines, causing the regex to capture data from subsequent lines. Always use `[ \t]*` for horizontal whitespace only. This caused critical bugs in tag extraction (`gameobject.rs`) and name extraction (`mod.rs`).
+- **Regex `\s*` newline bleed**: In Unity YAML regex parsing, `\s*` between a YAML key and value will match newlines, causing the regex to capture data from subsequent lines. Always use `[ \t]*` for horizontal whitespace only, and `[^\n]*` (not `.*`) for value capture groups — this has caused critical bugs in both TypeScript and C# YAML parsing code.
 
 ## Editor Bridge (Live Unity Integration)
 

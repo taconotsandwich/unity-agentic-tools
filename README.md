@@ -178,19 +178,16 @@ unity-agentic-tools run build.addressables Production
 
 ```
 unity-agentic-tools/     TypeScript CLI + tests
-rust-core/               Native Rust module package
-doc-indexer/             Documentation indexing module
 unity-package/           Unity Editor bridge C# UPM package
 tools/dotnet-unity-compile/  Local .NET compile harness for the Unity package
 ```
 
 ## Development
 
-Requires: Rust toolchain, Bun runtime, and — for `build:unity-package` only — a local Unity Editor install plus the .NET SDK.
+Requires: Bun runtime, and — for `build:unity-package` only — a local Unity Editor install plus the .NET SDK.
 
 ```bash
-bun run build:rust           # rebuild Rust native module
-bun run build                # build TypeScript workspaces
+bun run build                # build the TypeScript CLI
 bun run build:unity-package  # compile the Unity C# package with dotnet
 bun run test                 # unit tests
 bun run test:integration     # CLI integration tests
@@ -212,10 +209,7 @@ UNITY_EDITOR_VERSION=6000.4.0f1 bun run build:unity-package
 
 ```bash
 cd unity-agentic-tools
-mkdir -p native
-cp ../rust-core/index.js ../rust-core/index.d.ts ../rust-core/*.node native/
 npm publish --dry-run
-rm -rf native
 ```
 
 ## License
