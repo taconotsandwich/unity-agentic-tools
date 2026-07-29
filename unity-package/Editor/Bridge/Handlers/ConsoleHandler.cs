@@ -288,6 +288,12 @@ namespace UnityAgenticTools.Bridge.Handlers
                         typeFilter = tf;
                     }
 
+                    var includeStackTrace = true;
+                    if (parameters.TryGetValue("includeStackTrace", out var stackObj))
+                    {
+                        includeStackTrace = Convert.ToBoolean(stackObj);
+                    }
+
                     // Re-read LogEntries to capture native assertions that bypass
                     // Application.logMessageReceived (e.g. serialization errors)
                     RefreshFromLogEntries();
@@ -301,7 +307,7 @@ namespace UnityAgenticTools.Bridge.Handlers
                             entries = entries.Where(e => e.Type.Equals(typeFilter, StringComparison.OrdinalIgnoreCase));
                         }
 
-                        var result = entries.TakeLast(count).Select(e => e.ToDictionary()).ToArray();
+                        var result = entries.TakeLast(count).Select(e => e.ToDictionary(includeStackTrace)).ToArray();
                         return Task.FromResult<object>(new Dictionary<string, object>
                         {
                             { "count", result.Length },
@@ -378,15 +384,21 @@ namespace UnityAgenticTools.Bridge.Handlers
             public string Type;
             public string Timestamp;
 
-            public Dictionary<string, object> ToDictionary()
+            public Dictionary<string, object> ToDictionary(bool includeStackTrace = true)
             {
-                return new Dictionary<string, object>
+                var entry = new Dictionary<string, object>
                 {
-                    { "message", Message },
-                    { "stackTrace", StackTrace },
-                    { "type", Type },
-                    { "timestamp", Timestamp }
+                    { "message", Message }
                 };
+
+                if (includeStackTrace)
+                {
+                    entry["stackTrace"] = StackTrace;
+                }
+
+                entry["type"] = Type;
+                entry["timestamp"] = Timestamp;
+                return entry;
             }
         }
 
