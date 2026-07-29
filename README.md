@@ -120,11 +120,13 @@ unity-agentic-tools run update.transform Assets/Scenes/Main.unity Player 1,2,3 0
 unity-agentic-tools run delete.component Assets/Scenes/Main.unity Player BoxCollider 0
 ```
 
-Use `--args` when an argument itself is structured JSON:
+Structured arguments go positionally in single quotes. The CLI encodes the outer JSON array itself, so the payload needs no escaping:
 
 ```bash
-unity-agentic-tools run update.batch-components --args '["Assets/Scenes/Main.unity","[{\"gameObjectPath\":\"Player\",\"componentType\":\"BoxCollider\",\"componentIndex\":0,\"propertyPath\":\"m_IsTrigger\",\"value\":\"true\"}]"]'
+unity-agentic-tools run update.batch-components Assets/Scenes/Main.unity '[{"gameObjectPath":"Player","componentType":"BoxCollider","componentIndex":0,"propertyPath":"m_IsTrigger","value":"true"}]'
 ```
+
+`--args '<json array>'` sends the same payload with the escaping done by hand. Reach for it only when an argument starts with `-`, which the option parser would otherwise claim.
 
 Run raw public static C# APIs without adding a CLI command:
 

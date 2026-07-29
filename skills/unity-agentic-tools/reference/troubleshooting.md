@@ -89,10 +89,25 @@ Duplicate paths fail explicitly. Query the scene, identify the exact hierarchy l
 
 ## JSON Args
 
-Use `--args '<json array>'` when positional quoting becomes ambiguous or an argument is structured JSON.
+Pass a structured argument positionally, in single quotes. The CLI encodes the outer JSON array itself, so nothing needs escaping:
+
+```bash
+unity-agentic-tools run update.batch Assets/Scenes/Main.unity '[{"gameObjectPath":"Player","propertyPath":"m_Name","value":"Hero"}]' -p <project>
+```
+
+Prefer this over `--args`. Batch aliases take the edit list as a *string* parameter, so the `--args` form has to escape every inner quote by hand:
 
 ```bash
 unity-agentic-tools run update.batch --args '["Assets/Scenes/Main.unity","[{\"gameObjectPath\":\"Player\",\"propertyPath\":\"m_Name\",\"value\":\"Hero\"}]"]' -p <project>
+```
+
+Both send a byte-identical payload; the second is only harder to get right. If you are issuing the command through a tool call, the command line is itself a JSON string, so those `\"` get escaped again — and a mistake at any layer surfaces as `JSON parse error: Invalid value.` with no indication of which layer broke.
+
+`--args` earns its place for one thing positional args cannot express: an argument starting with `-`, which the option parser would otherwise claim:
+
+```bash
+unity-agentic-tools run query.assets -t:Prefab -p <project>          # error: unknown option '-t:Prefab'
+unity-agentic-tools run query.assets --args '["-t:Prefab"]' -p <project>
 ```
 
 ## Verification

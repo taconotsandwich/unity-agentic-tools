@@ -65,4 +65,10 @@ No manual sleep is needed between step 2 and step 3 — reads issued during a tr
 
 ## Batch Editing
 
-Use `--args '<json array>'` when one command argument is itself structured JSON — see "JSON Args" in `troubleshooting.md` for the canonical example. Batch aliases (`update.batch`, `update.batch-components`) take the nested payload as a JSON string argument.
+Batch aliases (`update.batch`, `update.batch-components`) take the edit list as a JSON string argument. Pass it positionally in single quotes and let the CLI encode the outer array:
+
+```bash
+unity-agentic-tools run update.batch Assets/Scenes/Main.unity '[{"gameObjectPath":"Player","propertyPath":"m_Name","value":"Hero"}]' -p <project>
+```
+
+See "JSON Args" in `troubleshooting.md` for why this beats the equivalent `--args` form, and for the one case that still needs `--args`.

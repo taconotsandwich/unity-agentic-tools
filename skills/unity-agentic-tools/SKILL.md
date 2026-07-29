@@ -48,7 +48,11 @@ unity-agentic-tools stream console --type Error -p <project>
 unity-agentic-tools cleanup --cache -p <project>
 ```
 
-Use `--args '<json array>'` when one argument is structured JSON — see `reference/troubleshooting.md` "JSON Args" for the exact quoting pattern.
+Pass a structured argument positionally in single quotes — the CLI encodes the outer JSON array itself, so no escaping is needed. Reserve `--args '<json array>'` for arguments starting with `-`. See `reference/troubleshooting.md` "JSON Args".
+
+```bash
+unity-agentic-tools run update.batch Assets/Scenes/Main.unity '[{"gameObjectPath":"Player","propertyPath":"m_Name","value":"Hero"}]' -p <project>
+```
 
 Raw public static APIs can be called directly when no alias or `[AgenticCommand]` wrapper exists.
 

@@ -53,7 +53,13 @@ unity-agentic-tools stream console --type Error -p <project>
 unity-agentic-tools cleanup --cache -p <project>
 ```
 
-Use `--args '<json array>'` when an argument itself is structured JSON.
+Structured arguments go positionally in single quotes — the CLI encodes the outer JSON array itself:
+
+```bash
+unity-agentic-tools run update.batch Assets/Scenes/Main.unity '[{"gameObjectPath":"Player","propertyPath":"m_Name","value":"Hero"}]' -p <project>
+```
+
+`--args '<json array>'` sends the same payload with the escaping done by hand. Reach for it only when an argument starts with `-`, which the option parser would otherwise claim.
 
 ## Project Commands
 
