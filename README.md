@@ -32,12 +32,14 @@ The repo ships one unified `unity-agentic-tools` skill for CLI setup, command di
 ### From Source
 
 ```bash
-git clone https://github.com/taconotsandwich/unity-agentic-tools.git
+git clone --recurse-submodules https://github.com/taconotsandwich/unity-agentic-tools.git
 cd unity-agentic-tools
 bun run setup-dev
 ```
 
-`setup-dev` links the built CLI into Bun's global bin. If it reports that Bun's global bin is not on `PATH`, add the printed directory before relying on `unity-agentic-tools` by name.
+`setup-dev` links the built CLI into Bun's global bin and enables the repo's git hooks. If it reports that Bun's global bin is not on `PATH`, add the printed directory before relying on `unity-agentic-tools` by name.
+
+The `--recurse-submodules` flag matters: `test/fixtures/external` is a submodule containing a real Unity project that several tests read from. If you already cloned without it, run `git submodule update --init --recursive`.
 
 ## CLI Usage
 
@@ -184,7 +186,7 @@ tools/dotnet-unity-compile/  Local .NET compile harness for the Unity package
 
 ## Development
 
-Requires: Rust toolchain, Bun runtime, and a local Unity Editor install for `build:unity-package`.
+Requires: Rust toolchain, Bun runtime, and — for `build:unity-package` only — a local Unity Editor install plus the .NET SDK.
 
 ```bash
 bun run build:rust           # rebuild Rust native module
@@ -193,7 +195,11 @@ bun run build:unity-package  # compile the Unity C# package with dotnet
 bun run test                 # unit tests
 bun run test:integration     # CLI integration tests
 bun run type-check           # tsc --noEmit
+bun run check:classids       # Unity ClassID drift check (needs network)
+bun run hooks                # enable the repo's git hooks
 ```
+
+`bun run test:integration:unity` runs headless Editor validation and needs a Unity executable via `--unity-bin` or `UNITY_BIN`. CI does not run it, or `build:unity-package`.
 
 The Unity package compile script uses `UNITY_APP` when set, otherwise it discovers installed Unity Hub editors. You can also request a specific Hub version with `UNITY_EDITOR_VERSION`:
 

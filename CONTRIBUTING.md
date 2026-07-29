@@ -2,6 +2,20 @@
 
 Thanks for contributing to `unity-agentic-tools`.
 
+## Getting Set Up
+
+```bash
+git clone --recurse-submodules https://github.com/taconotsandwich/unity-agentic-tools.git
+cd unity-agentic-tools
+bun run setup-dev
+```
+
+If you already cloned without `--recurse-submodules`, run `git submodule update --init --recursive`. `test/fixtures/external` is a submodule holding a real Unity project, and the build-settings and build-version tests read from it.
+
+`setup-dev` also runs `bun run hooks`, which points `core.hooksPath` at `.githooks/`. Pre-commit runs type-check plus unit tests; pre-push adds the CLI integration suite. Use `--no-verify` to bypass a hook for one command, and `bun run teardown-dev` to turn them off.
+
+Prerequisites: Bun, a Rust toolchain (for the native module), and — only for `build:unity-package` — a local Unity Editor install and the .NET SDK.
+
 ## Branching
 
 - `main` is the release branch.
@@ -53,12 +67,18 @@ Examples:
 
 - Target `dev` for normal feature/fix/doc work.
 - Keep PRs focused and include a short why-focused description.
-- Ensure local checks pass before opening or updating a PR:
+- Ensure local checks pass before opening or updating a PR. This list mirrors what CI runs, so a clean pass here should mean a green PR:
   - `bun run build:rust`
   - `bun run build`
   - `bun run type-check`
+  - `bun run check:classids`
+  - `cargo test` (in `rust-core/`)
   - `bun run test`
   - `bun run test:integration`
+
+`check:classids` fetches Unity's ClassID reference over the network, so it fails without a connection rather than because your change is wrong.
+
+Two things CI does not cover, because they need a local Unity install: `bun run build:unity-package` (compiles the C# bridge package) and `bun run test:integration:unity` (headless Editor validation, which needs `--unity-bin` or `UNITY_BIN` pointing at a Unity executable). Run them yourself when you touch `unity-package/`.
 
 ## Release Format
 
