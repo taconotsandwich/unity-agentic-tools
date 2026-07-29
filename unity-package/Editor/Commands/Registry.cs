@@ -1,15 +1,19 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
 using UnityAgenticTools.Util;
 
 namespace UnityAgenticTools.Commands
 {
     public static class Registry
     {
+        /// <summary>
+        /// Marks a definition that came from reflecting over loaded types rather
+        /// than from the registry, so it can reach any public static member.
+        /// </summary>
+        private const string RawCommandSource = "raw";
+
         private static readonly BuiltInCommand[] BuiltIns =
         {
             new BuiltInCommand("project.refresh", "UnityEditor.AssetDatabase", "Refresh", "Refresh the Unity AssetDatabase."),
@@ -118,18 +122,38 @@ namespace UnityAgenticTools.Commands
             };
         }
 
-        public static object Run(string target, string argsJson = "[]", string setValue = null)
+        /// <summary>
+        /// allowRaw sits ahead of setValue because callers arrive over the bridge
+        /// as a JSON string array, which cannot express the null that "no set
+        /// value" means -- a trailing flag would be unreachable without one.
+        /// </summary>
+        public static object Run(string target, string argsJson = "[]", bool allowRaw = false, string setValue = null)
         {
             if (string.IsNullOrWhiteSpace(target))
             {
                 throw new ArgumentException("Missing required command or method target.");
             }
 
-            var definition = ResolveCommand(target.Trim());
+            var trimmedTarget = target.Trim();
+            var definition = ResolveCommand(trimmedTarget);
             if (definition == null)
             {
                 throw new ArgumentException(
                     $"Command or method not found: {target}. Use `unity-agentic-tools list {target}` to discover available commands.");
+            }
+
+            if (definition.Source == RawCommandSource)
+            {
+                if (!allowRaw)
+                {
+                    throw new ArgumentException(
+                        $"Refusing to invoke the raw member {definition.TypeName}.{definition.MemberName}: "
+                        + $"\"{trimmedTarget}\" is not a registered command. Raw invocation reaches any public static "
+                        + "member on any loaded type, so it has to be asked for: pass --raw. "
+                        + $"Use `unity-agentic-tools list {trimmedTarget}` to look for a registered command instead.");
+                }
+
+                LogRawInvocation(definition, argsJson, setValue);
             }
 
             var type = FindType(definition.TypeName);
@@ -140,11 +164,11 @@ namespace UnityAgenticTools.Commands
 
             if (setValue != null)
             {
-                return SetProperty(type, definition.MemberName, setValue);
+                return MemberInvoker.SetProperty(type, definition.MemberName, setValue);
             }
 
             var args = JsonArgs.ParseStringArray(argsJson ?? "[]");
-            return InvokeMember(type, definition.MemberName, args);
+            return MemberInvoker.Invoke(type, definition.MemberName, args);
         }
 
         private static IEnumerable<CommandDefinition> GetRegisteredCommands()
@@ -238,7 +262,7 @@ namespace UnityAgenticTools.Commands
                         type.FullName,
                         methodName,
                         string.Empty,
-                        "raw",
+                        RawCommandSource,
                         methodOverloads[methodName]);
                 }
 
@@ -249,7 +273,7 @@ namespace UnityAgenticTools.Commands
                         type.FullName,
                         property.Name,
                         string.Empty,
-                        "raw");
+                        RawCommandSource);
                 }
             }
         }
@@ -278,7 +302,7 @@ namespace UnityAgenticTools.Commands
                 var type = FindType(typeName);
                 if (type != null && HasPublicStaticMember(type, memberName))
                 {
-                    return new CommandDefinition(target, type.FullName, memberName, string.Empty, "raw");
+                    return new CommandDefinition(target, type.FullName, memberName, string.Empty, RawCommandSource);
                 }
 
                 dotIndex = target.LastIndexOf('.', dotIndex - 1);
@@ -287,167 +311,21 @@ namespace UnityAgenticTools.Commands
             return null;
         }
 
-        private static object InvokeMember(Type type, string memberName, string[] args)
+        /// <summary>
+        /// The audit trail for the unsafe path. A warning rather than a plain log
+        /// so it survives the console's default filtering, and in the Editor log
+        /// so a human reviewing what an agent did to their project can find it
+        /// after the fact -- the RPC response only reaches the caller.
+        /// </summary>
+        private static void LogRawInvocation(CommandDefinition definition, string argsJson, string setValue)
         {
-            var property = type.GetProperty(memberName, BindingFlags.Public | BindingFlags.Static);
-            if (property != null && args.Length == 0)
-            {
-                if (!property.CanRead)
-                {
-                    throw new ArgumentException($"Property is write-only: {type.FullName}.{memberName}");
-                }
+            var detail = setValue != null
+                ? $"set {setValue}"
+                : $"args {(string.IsNullOrWhiteSpace(argsJson) ? "[]" : argsJson.Trim())}";
 
-                return property.GetValue(null, null);
-            }
-
-            var method = ResolveMethod(type, memberName, args.Length);
-            if (method == null)
-            {
-                throw new ArgumentException($"No public static method or readable property found: {type.FullName}.{memberName}");
-            }
-
-            var invokeArgs = ConvertArguments(method, args);
-            return TryInvoke(() => method.Invoke(null, invokeArgs));
-        }
-
-        private static object SetProperty(Type type, string memberName, string value)
-        {
-            var property = type.GetProperty(memberName, BindingFlags.Public | BindingFlags.Static);
-            if (property == null)
-            {
-                throw new ArgumentException($"Static property not found: {type.FullName}.{memberName}");
-            }
-
-            if (!property.CanWrite)
-            {
-                throw new ArgumentException($"Property is read-only: {type.FullName}.{memberName}");
-            }
-
-            var converted = ConvertArgument(value, property.PropertyType);
-            TryInvoke(() => property.SetValue(null, converted, null));
-            return new Dictionary<string, object> { { "success", true } };
-        }
-
-        private static MethodInfo ResolveMethod(Type type, string memberName, int argCount)
-        {
-            var matches = new List<MethodInfo>();
-            var availableArities = new List<string>();
-
-            foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Static))
-            {
-                if (method.Name != memberName || method.IsGenericMethodDefinition)
-                {
-                    continue;
-                }
-
-                var parameters = method.GetParameters();
-                var minParams = parameters.Count(parameter => !parameter.IsOptional);
-                availableArities.Add($"{minParams}-{parameters.Length}");
-                if (argCount >= minParams && argCount <= parameters.Length)
-                {
-                    matches.Add(method);
-                }
-            }
-
-            if (matches.Count == 1)
-            {
-                return matches[0];
-            }
-
-            if (matches.Count > 1)
-            {
-                throw new ArgumentException(
-                    $"Ambiguous: {type.FullName}.{memberName} has multiple overloads accepting {argCount} argument(s).");
-            }
-
-            if (availableArities.Count > 0)
-            {
-                throw new ArgumentException(
-                    $"No overload of {type.FullName}.{memberName} accepts {argCount} argument(s). Available ranges: {string.Join(", ", availableArities.ToArray())}.");
-            }
-
-            return null;
-        }
-
-        private static object[] ConvertArguments(MethodInfo method, string[] args)
-        {
-            var parameters = method.GetParameters();
-            var converted = new object[parameters.Length];
-
-            for (var index = 0; index < parameters.Length; index += 1)
-            {
-                if (index < args.Length)
-                {
-                    converted[index] = ConvertArgument(args[index], parameters[index].ParameterType);
-                }
-                else
-                {
-                    converted[index] = parameters[index].HasDefaultValue
-                        ? parameters[index].DefaultValue
-                        : Type.Missing;
-                }
-            }
-
-            return converted;
-        }
-
-        private static object ConvertArgument(string value, Type targetType)
-        {
-            if (targetType == typeof(string))
-            {
-                return value;
-            }
-
-            if (targetType == typeof(bool))
-            {
-                if (bool.TryParse(value, out var boolValue))
-                {
-                    return boolValue;
-                }
-
-                if (value == "1")
-                {
-                    return true;
-                }
-
-                if (value == "0")
-                {
-                    return false;
-                }
-            }
-
-            if (targetType.IsEnum)
-            {
-                return Enum.Parse(targetType, value, true);
-            }
-
-            return Convert.ChangeType(value, targetType, CultureInfo.InvariantCulture);
-        }
-
-        private static T TryInvoke<T>(Func<T> invoker)
-        {
-            try
-            {
-                return invoker();
-            }
-            catch (TargetInvocationException ex) when (ex.InnerException != null)
-            {
-                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
-                throw;
-            }
-        }
-
-        private static void TryInvoke(Action invoker)
-        {
-            try
-            {
-                invoker();
-            }
-            catch (TargetInvocationException ex) when (ex.InnerException != null)
-            {
-                ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
-                throw;
-            }
+            UnityEngine.Debug.LogWarning(
+                $"[unity-agentic-tools] raw invocation: {definition.TypeName}.{definition.MemberName} ({detail}). "
+                + "This member is not a registered command; it was reached through the opted-in raw path.");
         }
 
         private static Dictionary<string, object> ToDictionary(CommandDefinition definition)

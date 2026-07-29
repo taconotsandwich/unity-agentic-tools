@@ -17,7 +17,7 @@ Use this skill for Unity Agentic Tools CLI setup, command discovery, command exe
 | Command | What it does |
 |---------|-------------|
 | `list [query]` | Discover built-in aliases, attributed project commands, and optional raw static APIs. `--brief` omits per-argument detail; `--raw` adds raw statics |
-| `run <target> [args...]` | Execute a command alias or raw public static C# method/property through the Unity bridge |
+| `run <target> [args...]` | Execute a command alias through the Unity bridge, or a raw public static C# method/property with `--raw` |
 | `stream [topic]` | Watch real-time bridge events over WebSocket |
 | `install` | Install the Unity bridge package |
 | `uninstall` | Remove the Unity bridge package |
@@ -101,4 +101,4 @@ Full detail lives in `reference/troubleshooting.md`. Quick pointers:
 - **Reads are slow during a transition**: expected. Reads wait out a domain reload for up to 30s instead of failing; see "Domain reloads" in "Long-running Commands".
 - **Stale `@hN`/`@uN` refs**: re-run `scene.hierarchy` or `ui.snapshot`; see "Stale Refs".
 - **Need console logs**: `unity-agentic-tools stream console --duration 5000 -p <project>`.
-- **Need raw APIs**: `unity-agentic-tools list <type-or-namespace> --raw -p <project>`.
+- **Need raw APIs**: `unity-agentic-tools list <type-or-namespace> --raw -p <project>` to find one, then `run <target> --raw` to invoke it. `run` refuses an unregistered target without `--raw` and logs a warning in the Unity console when it accepts one. Prefer a registered alias whenever one exists.

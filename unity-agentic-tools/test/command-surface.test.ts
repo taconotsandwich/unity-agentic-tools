@@ -176,6 +176,59 @@ describe('command runner surface', () => {
         }
     });
 
+    // Registry.Run takes allowRaw ahead of setValue because the args wire is a
+    // JSON string array with no null to skip a set value with. Position matters,
+    // and only an end-to-end payload check catches getting it wrong.
+    it.each([
+        { name: 'defaults allowRaw to false', args: [], expected: ['project.refresh', '[]', 'false'] },
+        { name: 'sends allowRaw for --raw', args: ['--raw'], expected: ['project.refresh', '[]', 'true'] },
+        {
+            name: 'keeps a set value behind allowRaw',
+            args: ['--raw', '--set', 'true'],
+            expected: ['project.refresh', '[]', 'true', 'true'],
+        },
+    ])('$name in the Registry.Run payload', async ({ args, expected }) => {
+        let received_params: Record<string, unknown> | undefined;
+        const server = Bun.serve({
+            port: 0,
+            fetch(req, server) {
+                if (server.upgrade(req)) {
+                    return undefined;
+                }
+
+                return new Response('Expected WebSocket upgrade', { status: 400 });
+            },
+            websocket: {
+                message(ws, message) {
+                    const request = JSON.parse(String(message)) as RpcRequestLike;
+                    received_params = request.params;
+                    ws.send(JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: request.id,
+                        result: { success: true },
+                    }));
+                },
+            },
+        });
+
+        try {
+            const result = await run_cli_async([
+                'run',
+                'project.refresh',
+                ...args,
+                '--port',
+                String(server.port),
+                '--timeout',
+                '1000',
+            ]);
+            expect(result.code).toBe(0);
+            expect(received_params?.member).toBe('Run');
+            expect(JSON.parse(String(received_params?.args)) as string[]).toEqual(expected);
+        } finally {
+            server.stop(true);
+        }
+    });
+
     it('exits non-zero when the invoked command result reports failure', async () => {
         const server = Bun.serve({
             port: 0,

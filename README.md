@@ -55,7 +55,7 @@ Visible top-level commands:
 | Command | Purpose |
 |---------|---------|
 | `list [query]` | List runnable Unity commands and project script commands |
-| `run <target> [args...]` | Run a named command alias or raw public static C# method/property |
+| `run <target> [args...]` | Run a named command alias, or a raw public static C# method/property with `--raw` |
 | `stream [topic]` | Stream bridge events over WebSocket |
 | `install` | Install the Unity bridge package into a project |
 | `uninstall` | Remove the Unity bridge package from a project |
@@ -128,19 +128,21 @@ unity-agentic-tools run update.batch-components Assets/Scenes/Main.unity '[{"gam
 
 `--args '<json array>'` sends the same payload with the escaping done by hand. Reach for it only when an argument starts with `-`, which the option parser would otherwise claim.
 
-Run raw public static C# APIs without adding a CLI command:
+Run raw public static C# APIs without adding a CLI command. This reaches any public static member on any loaded type, so it requires `--raw` and is logged as a warning in the Unity console:
 
 ```bash
-unity-agentic-tools run UnityEditor.AssetDatabase.Refresh
-unity-agentic-tools run UnityEditor.EditorApplication.isCompiling
-unity-agentic-tools run UnityEditor.EditorApplication.ExecuteMenuItem "File/Save"
+unity-agentic-tools run UnityEditor.AssetDatabase.Refresh --raw
+unity-agentic-tools run UnityEditor.EditorApplication.isCompiling --raw
+unity-agentic-tools run UnityEditor.EditorApplication.ExecuteMenuItem "File/Save" --raw
 ```
+
+Without `--raw`, an unregistered target is refused with a message naming the flag. Registered aliases never need it.
 
 Read or set static properties:
 
 ```bash
-unity-agentic-tools run UnityEditor.EditorApplication.isPaused
-unity-agentic-tools run UnityEditor.EditorApplication.isPaused --set true
+unity-agentic-tools run UnityEditor.EditorApplication.isPaused --raw
+unity-agentic-tools run UnityEditor.EditorApplication.isPaused --set true --raw
 ```
 
 ### Stream

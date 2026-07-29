@@ -2,7 +2,7 @@
 
 Generated from `unity-package/Editor/Commands/Registry.cs`.
 
-Use aliases before raw public static C# targets. Argument hints: `<required>` `[optional]`.
+These aliases run without `--raw`. Any target not listed here is a raw public static C# member, which `run` refuses unless `--raw` is passed and logs a warning in the Unity console when it accepts. Argument hints: `<required>` `[optional]`.
 
 ## project
 

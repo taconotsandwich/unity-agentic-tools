@@ -578,7 +578,7 @@ The editor bridge should not be considered stable until all of the following are
 - met: stream subscriptions reconnect without manual intervention
 - met: discovery is no longer critically dependent on a single Unity-owned file
 - met: lower-level model mutation flows cannot produce invalid YAML through the default safe tool surface
-- open: force/unsafe mutation paths are explicit and auditable
+- met: force/unsafe mutation paths are explicit and auditable
 
 The discovery item was stale as written. `discover_editor_config`
 (`unity-agentic-tools/src/editor-discovery.ts`) has three tiers: the Unity-owned
@@ -606,8 +606,24 @@ metacharacters -- including embedded newlines, the classic way to split one
 scalar into several -- then forces a re-import and asserts every value round
 trips. Run it with `bun run test:integration:unity-tests`.
 
-The six met items close Phase 0. The one open item belongs to Phase 0.5 and
-later, so the bridge is not yet stable by this bar as a whole.
+The unsafe-path item was open because `Registry.Run` resolved any public static
+member on any loaded type with no opt-in and no record: `run System.IO.File.Delete
+<path>` was indistinguishable from `run scene.save` at the API surface. Raw
+resolution is already tagged as a distinct source in `CommandDefinition`; that tag
+is now enforced. An unregistered target is refused with a message naming `--raw`,
+and an opted-in one logs a console warning carrying the type, member, and args, so
+the audit trail lands in the Editor log rather than only in the caller's response.
+`MessageDispatcherTests` covers all three: refusal without the flag, success with
+it, and the warning itself.
+
+This is bounded to the command surface, which is what the criterion is about.
+`editor.invoke` remains a reflection gateway at the transport layer -- it has to
+be, because reaching `Registry` at all goes through it -- so anything speaking
+JSON-RPC directly to the bridge still has full reach. The bridge is
+localhost-only and the CLI is the supported client, but that is a trust boundary
+worth stating rather than papering over.
+
+All seven items are now met, which closes the bar as written.
 
 ## Current Recommendation
 

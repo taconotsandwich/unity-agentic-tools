@@ -21,6 +21,7 @@ interface BridgeCommandOptions {
 interface RunCommandOptions extends BridgeCommandOptions {
     args?: string;
     set?: string;
+    raw?: boolean;
     wait?: boolean;
 }
 
@@ -237,14 +238,16 @@ program.command('run <target> [args...]')
     .option('--port <n>', 'Connect to a specific bridge port')
     .option('--args <json>', 'JSON array of command arguments (overrides positional args)')
     .option('--set <value>', 'Set a static property value')
+    .option('--raw', 'Allow invoking an unregistered public static member (logged in the Editor console)')
     .option('--no-wait', 'Fire and forget -- return immediately without waiting for result')
     .option('--pretty', 'Pretty-print JSON output')
     .action(async (target: string, args: string[], options: RunCommandOptions) => {
         const bridge = resolve_bridge_options(options);
         const command_args_json = options.args || JSON.stringify(args);
+        const allow_raw = options.raw === true ? 'true' : 'false';
         const registry_args = options.set !== undefined
-            ? [target, command_args_json, options.set]
-            : [target, command_args_json];
+            ? [target, command_args_json, allow_raw, options.set]
+            : [target, command_args_json, allow_raw];
 
         const response = await call_editor({
             ...bridge,
