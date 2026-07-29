@@ -8,54 +8,96 @@ using UnityEditor.Animations;
 using UnityEditor.SceneManagement;
 using UnityAgenticTools.Util;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 namespace UnityAgenticTools.Create
 {
     internal static class CreateUtility
     {
         private const string InputActionsImporterGuid = "8404be70184654265930450def6a9037";
+
+        /// <summary>
+        /// Editor/Templates/EmptyScene.unity. Resolved by guid rather than path
+        /// so it is found whether the package is UPM-installed, embedded, or
+        /// dropped straight into Assets/.
+        /// </summary>
+        private const string EmptySceneTemplateGuid = "0cdf943ee52643c5bacf32aa5f21fccc";
+
         private static readonly Regex GuidRegex = new Regex("^[a-fA-F0-9]{32}$");
 
+        /// <summary>
+        /// Copies the shipped empty-scene template rather than calling
+        /// EditorSceneManager.NewScene.
+        ///
+        /// NewScene(..., Additive) is refused outright while any open scene has
+        /// never been saved -- which is what every fresh editor and every
+        /// batchmode run starts with -- so building the scene that way made
+        /// create.scene fail for reasons that had nothing to do with its
+        /// argument. CopyAsset works in every editor state and leaves the open
+        /// scenes untouched. NewPreviewScene is not an alternative: SaveScene
+        /// activates the scene internally and throws on a preview one.
+        ///
+        /// The defaults are added afterwards through the normal mutation path so
+        /// the running editor serializes the Camera and Light, rather than
+        /// shipping them frozen at whatever version authored the template.
+        /// </summary>
         public static object Scene(string assetPath, bool includeDefaults = false)
         {
             var normalizedPath = NormalizeAssetPath(assetPath);
             EnsureNewAssetPath(normalizedPath, ".unity");
+            EnsureParentDirectory(normalizedPath);
 
-            var originalActiveScene = SceneManager.GetActiveScene();
-            var scene = EditorSceneManager.NewScene(
-                includeDefaults ? NewSceneSetup.DefaultGameObjects : NewSceneSetup.EmptyScene,
-                NewSceneMode.Additive);
-
-            try
+            var templatePath = AssetDatabase.GUIDToAssetPath(EmptySceneTemplateGuid);
+            if (string.IsNullOrEmpty(templatePath))
             {
-                EnsureParentDirectory(normalizedPath);
-                if (!EditorSceneManager.SaveScene(scene, normalizedPath))
-                {
-                    throw new InvalidOperationException($"Failed to save scene {normalizedPath}.");
-                }
-
-                AssetDatabase.Refresh();
-
-                return new Dictionary<string, object>
-                {
-                    { "success", true },
-                    { "assetPath", normalizedPath },
-                    { "guid", AssetDatabase.AssetPathToGUID(normalizedPath) },
-                    { "includeDefaults", includeDefaults }
-                };
+                throw new InvalidOperationException(
+                    $"The empty-scene template (guid {EmptySceneTemplateGuid}) is not in this project. "
+                    + "Reinstall the bridge package -- Editor/Templates/EmptyScene.unity is part of it.");
             }
-            finally
-            {
-                if (scene.IsValid())
-                {
-                    EditorSceneManager.CloseScene(scene, true);
-                }
 
-                if (originalActiveScene.IsValid() && originalActiveScene.isLoaded)
-                {
-                    SceneManager.SetActiveScene(originalActiveScene);
-                }
+            if (!AssetDatabase.CopyAsset(templatePath, normalizedPath))
+            {
+                throw new InvalidOperationException(
+                    $"Failed to copy the scene template to {normalizedPath}.");
+            }
+
+            AssetDatabase.Refresh();
+
+            if (includeDefaults)
+            {
+                AddDefaultSceneObjects(normalizedPath);
+            }
+
+            return new Dictionary<string, object>
+            {
+                { "success", true },
+                { "assetPath", normalizedPath },
+                { "guid", AssetDatabase.AssetPathToGUID(normalizedPath) },
+                { "includeDefaults", includeDefaults }
+            };
+        }
+
+        /// <summary>
+        /// What NewSceneSetup.DefaultGameObjects produces: a main camera and a
+        /// directional light, at Unity's own default transforms.
+        /// </summary>
+        private static void AddDefaultSceneObjects(string scenePath)
+        {
+            using (var context = AssetMutationContext.Open(scenePath))
+            {
+                var camera = SceneObjects.Create("Main Camera", context.ObjectScene);
+                camera.tag = "MainCamera";
+                camera.transform.position = new Vector3(0f, 1f, -10f);
+                camera.AddComponent<Camera>();
+                camera.AddComponent<AudioListener>();
+
+                var light = SceneObjects.Create("Directional Light", context.ObjectScene);
+                light.transform.position = new Vector3(0f, 3f, 0f);
+                light.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+                light.AddComponent<Light>().type = LightType.Directional;
+
+                context.MarkDirty(camera);
+                context.MarkDirty(light);
+                context.Save();
             }
         }
 
@@ -541,9 +583,17 @@ namespace UnityAgenticTools.Create
                 ? name
                 : Path.GetFileNameWithoutExtension(normalizedPath);
 
-            var root = new GameObject(finalName);
+            // The root is built in a preview scene for the same reason
+            // PrefabVariant builds its instance in one: a bare new GameObject(name)
+            // lands in whichever scene the user has open and leaves it dirty,
+            // which is not something creating an asset should do to them.
+            var previewScene = EditorSceneManager.NewPreviewScene();
+            GameObject root = null;
+
             try
             {
+                root = SceneObjects.Create(finalName, previewScene);
+
                 EnsureParentDirectory(normalizedPath);
                 var savedPrefab = PrefabUtility.SaveAsPrefabAsset(root, normalizedPath);
                 if (savedPrefab == null)
@@ -559,12 +609,23 @@ namespace UnityAgenticTools.Create
                     { "success", true },
                     { "assetPath", normalizedPath },
                     { "guid", AssetDatabase.AssetPathToGUID(normalizedPath) },
-                    { "name", finalName }
+                    // What Unity wrote, not what was asked for: SaveAsPrefabAsset
+                    // names the root after the file, so reporting the requested
+                    // name hands back a hierarchy path that will not resolve.
+                    { "name", savedPrefab.name }
                 };
             }
             finally
             {
-                UnityEngine.Object.DestroyImmediate(root);
+                if (root != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(root);
+                }
+
+                if (previewScene.IsValid())
+                {
+                    EditorSceneManager.ClosePreviewScene(previewScene);
+                }
             }
         }
 
@@ -577,19 +638,11 @@ namespace UnityAgenticTools.Create
 
             using (var context = AssetMutationContext.Open(assetPath))
             {
-                var gameObject = new GameObject(name);
+                var gameObject = SceneObjects.Create(name, context.ObjectScene);
                 var parent = ResolveCreateParent(context, parentPath);
                 if (parent != null)
                 {
                     gameObject.transform.SetParent(parent.transform, false);
-                }
-                else if (context.IsScene)
-                {
-                    // new GameObject() lands in the active scene, and the context
-                    // opens its target additively without activating it. Without
-                    // this the object is written into whichever scene the editor
-                    // happens to have active, and the saved target never gets it.
-                    SceneManager.MoveGameObjectToScene(gameObject, context.Scene);
                 }
 
                 context.MarkDirty(gameObject);
@@ -695,8 +748,7 @@ namespace UnityAgenticTools.Create
 
             using (var context = AssetMutationContext.Open(assetPath))
             {
-                var destinationScene = context.IsScene ? context.Scene : context.PrefabRoot.scene;
-                var instanceObject = PrefabUtility.InstantiatePrefab(prefab, destinationScene) as GameObject;
+                var instanceObject = PrefabUtility.InstantiatePrefab(prefab, context.ObjectScene) as GameObject;
                 if (instanceObject == null)
                 {
                     throw new InvalidOperationException($"PrefabUtility.InstantiatePrefab did not return a GameObject for {prefabPath}.");

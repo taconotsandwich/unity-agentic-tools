@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using UnityAgenticTools.Util;
 using UnityEngine;
-using UnitySceneManager = UnityEngine.SceneManagement.SceneManager;
 
 namespace UnityAgenticTools.Query
 {
@@ -20,7 +19,7 @@ namespace UnityAgenticTools.Query
                 var roots = new List<object>();
                 foreach (var root in context.GetRootGameObjects())
                 {
-                    AddGameObject(roots, root, 0, maxDepth, includeInactive);
+                    AddGameObject(roots, root, 0, maxDepth, includeInactive, context.AssetPath);
                 }
 
                 return new Dictionary<string, object>
@@ -37,18 +36,18 @@ namespace UnityAgenticTools.Query
             using (var context = AssetMutationContext.Open(assetPath))
             {
                 var gameObject = MutationUtility.ResolveGameObject(context, gameObjectPath);
-                return DescribeGameObject(gameObject, 0);
+                return DescribeGameObject(gameObject, 0, context.AssetPath);
             }
         }
 
-        private static void AddGameObject(List<object> output, GameObject gameObject, int depth, int maxDepth, bool includeInactive)
+        private static void AddGameObject(List<object> output, GameObject gameObject, int depth, int maxDepth, bool includeInactive, string assetPath)
         {
             if (gameObject == null || (!includeInactive && !gameObject.activeInHierarchy))
             {
                 return;
             }
 
-            output.Add(DescribeGameObject(gameObject, depth));
+            output.Add(DescribeGameObject(gameObject, depth, assetPath));
 
             if (depth >= maxDepth)
             {
@@ -57,11 +56,16 @@ namespace UnityAgenticTools.Query
 
             for (var index = 0; index < gameObject.transform.childCount; index += 1)
             {
-                AddGameObject(output, gameObject.transform.GetChild(index).gameObject, depth + 1, maxDepth, includeInactive);
+                AddGameObject(output, gameObject.transform.GetChild(index).gameObject, depth + 1, maxDepth, includeInactive, assetPath);
             }
         }
 
-        private static Dictionary<string, object> DescribeGameObject(GameObject gameObject, int depth)
+        /// <summary>
+        /// A GameObject loaded out of a prefab has no scene, and the fallback used
+        /// to be the active scene's path -- naming a scene the object is not in
+        /// and never was. The asset the caller asked about is the honest answer.
+        /// </summary>
+        private static Dictionary<string, object> DescribeGameObject(GameObject gameObject, int depth, string assetPath)
         {
             var components = new List<object>();
             foreach (var component in gameObject.GetComponents<Component>())
@@ -86,7 +90,7 @@ namespace UnityAgenticTools.Query
                 { "tag", gameObject.tag },
                 { "layer", gameObject.layer },
                 { "depth", depth },
-                { "scene", gameObject.scene.IsValid() ? gameObject.scene.path : UnitySceneManager.GetActiveScene().path },
+                { "scene", gameObject.scene.IsValid() ? gameObject.scene.path : assetPath },
                 { "components", components.ToArray() }
             };
         }

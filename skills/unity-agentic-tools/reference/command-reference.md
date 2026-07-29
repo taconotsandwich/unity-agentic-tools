@@ -18,8 +18,8 @@ These aliases run without `--raw`. Any target not listed here is a raw public st
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
 | `scene.open <scenePath> [additive]` | `UnityAgenticTools.Util.Scene.Open` | Open a scene in the Unity Editor. |
-| `scene.save` | `UnityAgenticTools.Util.Scene.Save` | Save the active scene. |
-| `scene.hierarchy [maxDepth] [includeInactive] [maxNodes]` | `UnityAgenticTools.Util.Hierarchy.Snapshot` | Return a hierarchy snapshot for the active scene. |
+| `scene.save` | `UnityAgenticTools.Util.Scene.Save` | Save every open scene. |
+| `scene.hierarchy [maxDepth] [includeInactive] [maxNodes] [scenePath]` | `UnityAgenticTools.Util.Hierarchy.Snapshot` | Return a hierarchy snapshot of every loaded scene, or one named scene. |
 | `scene.query <refStr> <query> [type]` | `UnityAgenticTools.Util.Hierarchy.Query` | Query a hierarchy ref from a snapshot. |
 
 ## query
@@ -28,7 +28,7 @@ These aliases run without `--raw`. Any target not listed here is a raw public st
 |-------|-------------|---------|
 | `query.assets [filter] [foldersCsv] [maxResults]` | `UnityAgenticTools.Query.Assets.Find` | Find assets with Unity AssetDatabase filters. |
 | `query.asset <assetPath>` | `UnityAgenticTools.Query.Assets.Info` | Inspect basic AssetDatabase metadata for an asset path. |
-| `query.scene [assetPath] [maxDepth] [includeInactive]` | `UnityAgenticTools.Query.Scene.Hierarchy` | Inspect hierarchy data for the active scene or an asset path. |
+| `query.scene [assetPath] [maxDepth] [includeInactive]` | `UnityAgenticTools.Query.Scene.Hierarchy` | Inspect hierarchy data for an asset path, or for every loaded scene. |
 | `query.object <assetPath> <gameObjectPath>` | `UnityAgenticTools.Query.Scene.Object` | Inspect one GameObject in a scene or prefab asset. |
 
 ## create

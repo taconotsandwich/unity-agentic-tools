@@ -39,13 +39,6 @@ namespace UnityAgenticTools.Tests
             _assetFolderPath = $"Assets/UnityAgenticToolsTests/{Guid.NewGuid():N}";
             Directory.CreateDirectory(ToAbsolutePath(_assetFolderPath));
             AssetDatabase.Refresh();
-
-            // create.scene opens the new scene additively, and Unity refuses that
-            // while an untitled scene is unsaved -- which is what batchmode starts
-            // with. Park the editor on a saved scene so these tests fail for YAML
-            // reasons or not at all.
-            var host = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-            EditorSceneManager.SaveScene(host, $"{_assetFolderPath}/Host.unity");
         }
 
         [TearDown]

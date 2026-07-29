@@ -22,13 +22,13 @@ namespace UnityAgenticTools.Commands
             new BuiltInCommand("project.package.add", "UnityAgenticTools.Create.Project", "Package", "Add or update a package dependency."),
 
             new BuiltInCommand("scene.open", "UnityAgenticTools.Util.Scene", "Open", "Open a scene in the Unity Editor."),
-            new BuiltInCommand("scene.save", "UnityAgenticTools.Util.Scene", "Save", "Save the active scene."),
-            new BuiltInCommand("scene.hierarchy", "UnityAgenticTools.Util.Hierarchy", "Snapshot", "Return a hierarchy snapshot for the active scene."),
+            new BuiltInCommand("scene.save", "UnityAgenticTools.Util.Scene", "Save", "Save every open scene."),
+            new BuiltInCommand("scene.hierarchy", "UnityAgenticTools.Util.Hierarchy", "Snapshot", "Return a hierarchy snapshot of every loaded scene, or one named scene."),
             new BuiltInCommand("scene.query", "UnityAgenticTools.Util.Hierarchy", "Query", "Query a hierarchy ref from a snapshot."),
 
             new BuiltInCommand("query.assets", "UnityAgenticTools.Query.Assets", "Find", "Find assets with Unity AssetDatabase filters."),
             new BuiltInCommand("query.asset", "UnityAgenticTools.Query.Assets", "Info", "Inspect basic AssetDatabase metadata for an asset path."),
-            new BuiltInCommand("query.scene", "UnityAgenticTools.Query.Scene", "Hierarchy", "Inspect hierarchy data for the active scene or an asset path."),
+            new BuiltInCommand("query.scene", "UnityAgenticTools.Query.Scene", "Hierarchy", "Inspect hierarchy data for an asset path, or for every loaded scene."),
             new BuiltInCommand("query.object", "UnityAgenticTools.Query.Scene", "Object", "Inspect one GameObject in a scene or prefab asset."),
 
             new BuiltInCommand("create.scene", "UnityAgenticTools.Create.Scenes", "Scene", "Create a scene asset."),

@@ -92,6 +92,18 @@ namespace UnityAgenticTools.Util
                 $"Unsupported mutation target \"{assetPath}\". Only .unity scenes and .prefab assets are supported.");
         }
 
+        /// <summary>
+        /// The scene a new GameObject for this target must be born in. A scene
+        /// target is its own answer; a prefab target's answer is the isolated
+        /// scene LoadPrefabContents put the contents in. Constructing the object
+        /// anywhere else writes it into whatever scene the editor has active,
+        /// even when a reparent moves it out again a statement later.
+        /// </summary>
+        public UnityScene ObjectScene
+        {
+            get { return IsScene ? Scene : PrefabRoot.scene; }
+        }
+
         public IEnumerable<GameObject> GetRootGameObjects()
         {
             if (IsScene)

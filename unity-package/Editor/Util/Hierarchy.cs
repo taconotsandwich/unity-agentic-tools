@@ -5,45 +5,94 @@ using UnityAgenticTools;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityAgenticTools.Refs;
+using UnityScene = UnityEngine.SceneManagement.Scene;
 
 namespace UnityAgenticTools.Util
 {
     public static class Hierarchy
     {
 
-        public static object Snapshot(int maxDepth = 99, bool includeInactive = false, int maxNodes = 500)
+        /// <summary>
+        /// Walks every loaded scene, not the active one. Reading the active scene
+        /// to decide what to snapshot meant an additively loaded scene was left
+        /// out of the answer with nothing in the payload saying so, which is the
+        /// worst way for a read to be wrong. Roots carry the scene they came
+        /// from; children do not, because they are always in their root's scene.
+        /// </summary>
+        public static object Snapshot(int maxDepth = 99, bool includeInactive = false, int maxNodes = 500, string scenePath = "")
         {
                 RefManager.ClearHierarchy();
 
-                var scene = SceneManager.GetActiveScene();
-                var roots = scene.GetRootGameObjects();
+                var filter = (scenePath ?? string.Empty).Trim();
+                var targets = new List<UnityScene>();
+                for (var index = 0; index < SceneManager.sceneCount; index += 1)
+                {
+                    var candidate = SceneManager.GetSceneAt(index);
+                    if (!candidate.isLoaded) continue;
+                    if (filter.Length > 0 && candidate.path != filter) continue;
+                    targets.Add(candidate);
+                }
+
+                if (filter.Length > 0 && targets.Count == 0)
+                {
+                    throw new ArgumentException(
+                        $"No loaded scene at \"{filter}\". Loaded scenes: {DescribeLoadedScenes()}.");
+                }
+
+                var scenes = new List<object>();
                 var tree = new List<object>();
                 var remaining = maxNodes > 0 ? maxNodes : int.MaxValue;
                 var truncated = false;
 
-                foreach (var root in roots)
+                foreach (var scene in targets)
                 {
-                    if (!includeInactive && !root.activeInHierarchy) continue;
-                    var node = BuildNode(root, 0, maxDepth, includeInactive, ref remaining);
-                    if (node == null)
+                    var roots = scene.GetRootGameObjects();
+                    scenes.Add(new Dictionary<string, object>
                     {
-                        truncated = true;
-                        break;
+                        { "name", scene.name },
+                        { "path", scene.path },
+                        { "rootCount", roots.Length }
+                    });
+
+                    foreach (var root in roots)
+                    {
+                        if (!includeInactive && !root.activeInHierarchy) continue;
+                        var node = BuildNode(root, 0, maxDepth, includeInactive, ref remaining);
+                        if (node == null)
+                        {
+                            truncated = true;
+                            break;
+                        }
+                        node["scene"] = scene.path;
+                        tree.Add(node);
                     }
-                    tree.Add(node);
+
+                    if (truncated) break;
                 }
 
                 return new Dictionary<string, object>
                 {
-                    { "scene", scene.name },
-                    { "scenePath", scene.path },
+                    { "scenes", scenes.ToArray() },
                     { "refCount", RefManager.GetHierarchyRefCount() },
                     { "truncated", truncated },
                     { "tree", tree.ToArray() }
                 };
         }
 
-        private static object BuildNode(GameObject go, int depth, int maxDepth, bool includeInactive, ref int remaining)
+        private static string DescribeLoadedScenes()
+        {
+            var paths = new List<string>();
+            for (var index = 0; index < SceneManager.sceneCount; index += 1)
+            {
+                var scene = SceneManager.GetSceneAt(index);
+                if (!scene.isLoaded) continue;
+                paths.Add(scene.path.Length > 0 ? scene.path : $"(untitled: {scene.name})");
+            }
+
+            return paths.Count > 0 ? string.Join(", ", paths.ToArray()) : "none";
+        }
+
+        private static Dictionary<string, object> BuildNode(GameObject go, int depth, int maxDepth, bool includeInactive, ref int remaining)
         {
             if (remaining <= 0)
             {

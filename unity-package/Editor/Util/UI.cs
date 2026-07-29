@@ -787,7 +787,9 @@ namespace UnityAgenticTools.Util
                 case "scene":
                 {
                     if (name == null) throw new ArgumentException("Missing required parameter: name");
-                    return await WaitConditionRunner.WaitForCondition(() => UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == name, timeout, $"scene '{name}' to load");
+                    // Loaded, not active: the message has always said "to load",
+                    // and a scene loaded additively never becomes the active one.
+                    return await WaitConditionRunner.WaitForCondition(() => UnityEngine.SceneManagement.SceneManager.GetSceneByName(name).isLoaded, timeout, $"scene '{name}' to load");
                 }
 
                 case "log":
