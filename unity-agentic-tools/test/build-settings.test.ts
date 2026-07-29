@@ -8,8 +8,9 @@ import {
     list_build_profiles,
     get_build_settings,
 } from '../src/build-settings';
+import { require_external_fixture } from './external-fixture';
 
-const FIXTURE_PATH = path.resolve(__dirname, '../../test/fixtures/external');
+const FIXTURE_PATH = require_external_fixture();
 const BUILD_SETTINGS_PATH = path.join(FIXTURE_PATH, 'ProjectSettings', 'EditorBuildSettings.asset');
 
 describe('parse_editor_build_settings', () => {

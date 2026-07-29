@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import * as path from 'path';
 import {
     parse_version,
     is_unity6_or_later,
@@ -7,8 +6,9 @@ import {
     has_build_profiles,
     get_project_info,
 } from '../src/build-version';
+import { require_external_fixture } from './external-fixture';
 
-const FIXTURE_PATH = path.resolve(__dirname, '../../test/fixtures/external');
+const FIXTURE_PATH = require_external_fixture();
 
 describe('parse_version', () => {
     it('should parse Unity 2022 version', () => {
