@@ -27,20 +27,8 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust-core -> target
-
       - name: Install dependencies
         run: bun install
-
-      - name: Build native module
-        working-directory: ./rust-core
-        run: bun run build
 
       - name: Build TypeScript packages
         run: bun run build
@@ -51,10 +39,6 @@ jobs:
       - name: Check Unity ClassID drift
         run: bun run check:classids
 
-      - name: Run Rust tests
-        working-directory: ./rust-core
-        run: cargo test
-
       - name: Run unit tests
         run: bun run test
 
@@ -62,13 +46,6 @@ jobs:
         if: runner.os != 'Windows'
         working-directory: ./unity-agentic-tools
         run: bash test/cli-integration.test.sh
-
-      - name: Test CLI with native module (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          echo "Testing CLI with native module via workspace..."
-          bun unity-agentic-tools/dist/cli.js status
-          echo "Native module loaded successfully via workspace resolution"
 
       - name: Generate test coverage
         if: matrix.os == 'ubuntu-latest'
