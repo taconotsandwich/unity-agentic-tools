@@ -67,6 +67,13 @@ const READ_TARGETS: ReadTarget[] = [
     { name: 'query.assets', args: ['t:Scene', '', '5'] },
 ];
 
+/**
+ * The Registry exposes no compile alias, so this goes through the raw backing API.
+ * UnityEditor.EditorApplication.RequestScriptCompilation does not resolve -- it is
+ * CompilationPipeline that carries the method.
+ */
+const COMPILE_TARGET = 'UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation';
+
 const DEFAULT_CYCLES = 3;
 const DEFAULT_READS_PER_PHASE = 8;
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -413,7 +420,7 @@ async function run_compile_cycle(options: StressOptions, cycle: number): Promise
     const records: CallRecord[] = [];
 
     console.error(`cycle ${cycle}: requesting script compilation`);
-    await transition(options, records, 'UnityEditor.EditorApplication.RequestScriptCompilation', 'compiling');
+    await transition(options, records, COMPILE_TARGET, 'compiling');
     records.push(...await hammer_reads(options, 'compiling'));
 
     return records;
