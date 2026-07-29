@@ -1,253 +1,18 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, unlinkSync } from 'fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { call_editor, discover_editor_config, ping_editor, read_editor_config, stream_editor } from '../src/editor-client';
-import type { RpcEvent } from '../src/types';
+import { call_editor } from '../src/editor-client';
+import {
+    DEAD_PID,
+    RELOAD_WINDOW_MS,
+    install_mock_websocket,
+    registry_run_params,
+    restore_websocket,
+    write_lockfile,
+} from './editor-websocket-mock';
 
-let original_websocket: typeof WebSocket | undefined;
-
-interface MockRpcError {
-    code: number;
-    message: string;
-}
-
-interface MockPortBehavior {
-    reachable?: boolean;
-    reachable_sequence?: boolean[];
-    /**
-     * Unreachable until this many ms after the mock is installed, then reachable.
-     * Models a domain reload. Prefer this over reachable_sequence when the assertion
-     * is about how long the client waits: discovery opens a variable number of
-     * connections per attempt, so a count-based sequence cannot express a duration.
-     */
-    reachable_after_ms?: number;
-    bridge_info?: Record<string, unknown>;
-    rpc_result?: unknown;
-    rpc_error?: MockRpcError;
-    rpc_error_sequence?: Array<MockRpcError | null>;
-    close_before_response?: boolean;
-    close_before_response_sequence?: boolean[];
-    /**
-     * Models a domain reload, measured from mock install: already-open sockets are
-     * closed at `start`, connections attempted inside the window fail, and the port
-     * behaves normally again after `end`.
-     */
-    reload_window_ms?: MockWindow;
-    /**
-     * Sockets opened inside this window never fire open, error, or close -- the case
-     * that only a per-attempt connecting timeout can break out of.
-     */
-    hang_window_ms?: MockWindow;
-    /** Notification pushed to the client after a non-getInfo request is answered. */
-    stream_event?: Record<string, unknown>;
-}
-
-interface MockWindow {
-    start: number;
-    end: number;
-}
-
-/** Lets a test assert which socket a close() actually reached. */
-interface MockSocketRecord {
-    port: number;
-    opened: boolean;
-    closed: boolean;
-}
-
-function install_mock_websocket(port_behaviors: Record<number, MockPortBehavior>): MockSocketRecord[] {
-    const behavior_map = new Map<number, MockPortBehavior>(
-        Object.entries(port_behaviors).map(([port, behavior]) => [Number(port), behavior]),
-    );
-    const connection_counts = new Map<number, number>();
-    const sockets: MockSocketRecord[] = [];
-    const installed_at = Date.now();
-
-    class MockWebSocket {
-        public url: string;
-        public onopen: (() => void) | null = null;
-        public onmessage: ((event: { data: string }) => void) | null = null;
-        public onerror: ((event: Event) => void) | null = null;
-        public onclose: (() => void) | null = null;
-
-        private record: MockSocketRecord;
-
-        constructor(url: string) {
-            this.url = url;
-            const port = Number(new URL(url).port);
-            const behavior = behavior_map.get(port);
-            const connection_count = (connection_counts.get(port) ?? 0) + 1;
-            connection_counts.set(port, connection_count);
-            const elapsed = Date.now() - installed_at;
-            const reload = behavior?.reload_window_ms;
-            const reachable = !in_window(reload, elapsed)
-                && resolve_reachable(behavior, connection_count, installed_at);
-
-            this.record = { port, opened: false, closed: false };
-            sockets.push(this.record);
-
-            if (in_window(behavior?.hang_window_ms, elapsed)) {
-                return;
-            }
-
-            setTimeout(() => {
-                if (reachable && behavior) {
-                    this.record.opened = true;
-                    this.onopen?.();
-
-                    if (reload && elapsed < reload.start) {
-                        setTimeout(() => this.close(), reload.start - elapsed);
-                    }
-
-                    return;
-                }
-
-                this.onerror?.({ type: 'error' } as Event);
-                this.close();
-            }, 0);
-        }
-
-        public send(data: string): void {
-            const port = Number(new URL(this.url).port);
-            const behavior = behavior_map.get(port);
-            if (!behavior) {
-                return;
-            }
-
-            const request = JSON.parse(data) as { id: string; method: string };
-            const connection_count = connection_counts.get(port) ?? 1;
-            setTimeout(() => {
-                const close_before_response = resolve_sequence_value(
-                    behavior.close_before_response_sequence,
-                    behavior.close_before_response ?? false,
-                    connection_count,
-                );
-                if (close_before_response) {
-                    this.close();
-                    return;
-                }
-
-                if (request.method === 'editor.bridge.getInfo') {
-                    if (behavior.bridge_info) {
-                        this.onmessage?.({
-                            data: JSON.stringify({
-                                jsonrpc: '2.0',
-                                id: request.id,
-                                result: behavior.bridge_info,
-                            }),
-                        });
-                        return;
-                    }
-
-                    this.onmessage?.({
-                        data: JSON.stringify({
-                            jsonrpc: '2.0',
-                            id: request.id,
-                            error: { code: -32601, message: 'Method not found: editor.bridge.getInfo' },
-                        }),
-                    });
-                    return;
-                }
-
-                const rpc_error = resolve_sequence_value(
-                    behavior.rpc_error_sequence,
-                    behavior.rpc_error ?? null,
-                    connection_count,
-                );
-                if (rpc_error) {
-                    this.onmessage?.({
-                        data: JSON.stringify({
-                            jsonrpc: '2.0',
-                            id: request.id,
-                            error: rpc_error,
-                        }),
-                    });
-                    return;
-                }
-
-                this.onmessage?.({
-                    data: JSON.stringify({
-                        jsonrpc: '2.0',
-                        id: request.id,
-                        result: behavior.rpc_result ?? { ok: true, port },
-                    }),
-                });
-
-                if (behavior.stream_event) {
-                    this.onmessage?.({ data: JSON.stringify(behavior.stream_event) });
-                }
-            }, 0);
-        }
-
-        public close(): void {
-            if (this.record.closed) {
-                return;
-            }
-
-            this.record.closed = true;
-            this.onclose?.();
-        }
-    }
-
-    original_websocket = globalThis.WebSocket;
-    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
-    return sockets;
-}
-
-function in_window(window: MockWindow | undefined, elapsed: number): boolean {
-    return window !== undefined && elapsed >= window.start && elapsed < window.end;
-}
-
-function resolve_reachable(
-    behavior: MockPortBehavior | undefined,
-    connection_count: number,
-    installed_at: number,
-): boolean {
-    if (!behavior) {
-        return false;
-    }
-
-    if (behavior.reachable_after_ms !== undefined) {
-        return Date.now() - installed_at >= behavior.reachable_after_ms;
-    }
-
-    return resolve_sequence_value(behavior.reachable_sequence, behavior.reachable !== false, connection_count) !== false;
-}
-
-function resolve_sequence_value<T>(sequence: T[] | undefined, fallback: T, connection_count: number): T {
-    if (sequence && sequence.length > 0) {
-        const index = Math.min(connection_count - 1, sequence.length - 1);
-        return sequence[index] as T;
-    }
-
-    return fallback;
-}
-
-/** Above macOS's default maximum pid, so process.kill(pid, 0) always reports ESRCH. */
-const DEAD_PID = 999_999;
-
-/**
- * Longer than the default profile's fixed retry budget (500 + 1000ms of backoff),
- * so only the reload-tolerance path can outlast it.
- */
-const RELOAD_WINDOW_MS = 2_500;
-
-function write_lockfile(dir: string, port: number, pid: number): void {
-    const config_dir = join(dir, '.unity-agentic');
-    mkdirSync(config_dir, { recursive: true });
-    writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({ port, pid, version: '0.1.0' }), 'utf-8');
-}
-
-/** Mirrors what cli.ts sends: the real target lives inside params.args, not the method. */
-function registry_run_params(target: string, args: string[] = []): Record<string, unknown> {
-    return {
-        type: 'UnityAgenticTools.Commands.Registry',
-        member: 'Run',
-        args: JSON.stringify([target, JSON.stringify(args)]),
-    };
-}
-
-describe('editor-client', () => {
+describe('call_editor', () => {
     let tmp_dir: string;
 
     beforeEach(() => {
@@ -255,734 +20,377 @@ describe('editor-client', () => {
     });
 
     afterEach(() => {
-        if (original_websocket) {
-            globalThis.WebSocket = original_websocket;
-            original_websocket = undefined;
-        }
+        restore_websocket();
         rmSync(tmp_dir, { recursive: true, force: true });
     });
 
-    describe('read_editor_config', () => {
-        test('returns error when editor.json does not exist', () => {
-            const result = read_editor_config(tmp_dir);
-            expect('error' in result).toBe(true);
-            if ('error' in result) {
-                expect(result.error).toContain('Editor bridge not found');
-            }
+    test('recovers without editor.json and sends the request to the matching discovered bridge', async () => {
+        install_mock_websocket({
+            53784: {
+                bridge_info: {
+                    port: 53784,
+                    pid: 1111,
+                    version: '0.1.0',
+                    project_path: join(tmp_dir, '..', 'other-project'),
+                    project_name: 'other-project',
+                },
+                rpc_result: { ok: true, port: 53784 },
+            },
+            53785: {
+                bridge_info: {
+                    port: 53785,
+                    pid: 2222,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { ok: true, port: 53785 },
+            },
         });
 
-        test('returns error when editor.json is invalid JSON', () => {
-            const config_dir = join(tmp_dir, '.unity-agentic');
-            mkdirSync(config_dir, { recursive: true });
-            writeFileSync(join(config_dir, 'editor.json'), 'not json', 'utf-8');
-
-            const result = read_editor_config(tmp_dir);
-            expect('error' in result).toBe(true);
-            if ('error' in result) {
-                expect(result.error).toContain('Failed to parse');
-            }
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.playMode.getState',
+            timeout: 100,
         });
 
-        test('returns error when port or pid is missing', () => {
-            const config_dir = join(tmp_dir, '.unity-agentic');
-            mkdirSync(config_dir, { recursive: true });
-            writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({ version: "0.1.0" }), 'utf-8');
-
-            const result = read_editor_config(tmp_dir);
-            expect('error' in result).toBe(true);
-            if ('error' in result) {
-                expect(result.error).toContain('missing port or pid');
-            }
-        });
-
-        test('returns error when PID is not alive', () => {
-            const config_dir = join(tmp_dir, '.unity-agentic');
-            mkdirSync(config_dir, { recursive: true });
-            writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({
-                port: 53782,
-                pid: 999999999,
-                version: "0.1.0",
-            }), 'utf-8');
-
-            const result = read_editor_config(tmp_dir);
-            expect('error' in result).toBe(true);
-            if ('error' in result) {
-                expect(result.error).toContain('not running');
-            }
-        });
-
-        test('returns config when PID is alive (current process)', () => {
-            const config_dir = join(tmp_dir, '.unity-agentic');
-            mkdirSync(config_dir, { recursive: true });
-            writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({
-                port: 53782,
-                pid: process.pid,
-                version: "0.1.0",
-            }), 'utf-8');
-
-            const result = read_editor_config(tmp_dir);
-            expect('error' in result).toBe(false);
-            if (!('error' in result)) {
-                expect(result.port).toBe(53782);
-                expect(result.pid).toBe(process.pid);
-                expect(result.version).toBe("0.1.0");
-            }
-        });
-
-        test('treats EPERM from process.kill(pid, 0) as a live process', () => {
-            const config_dir = join(tmp_dir, '.unity-agentic');
-            mkdirSync(config_dir, { recursive: true });
-            writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({
-                port: 53782,
-                pid: 424242,
-                version: "0.1.0",
-            }), 'utf-8');
-
-            const original_kill = process.kill;
-            process.kill = (((pid: number, signal?: NodeJS.Signals | number) => {
-                if (pid === 424242 && signal === 0) {
-                    const err = Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
-                    throw err;
-                }
-
-                return original_kill(pid, signal);
-            }) as typeof process.kill);
-
-            try {
-                const result = read_editor_config(tmp_dir);
-                expect('error' in result).toBe(false);
-                if (!('error' in result)) {
-                    expect(result.port).toBe(53782);
-                    expect(result.pid).toBe(424242);
-                    expect(result.version).toBe("0.1.0");
-                }
-            } finally {
-                process.kill = original_kill;
-            }
-        });
-
-        test('discovers a live bridge when editor.json is missing', async () => {
-            install_mock_websocket({
-                53784: {
-                    bridge_info: {
-                        port: 53784,
-                        pid: 4242,
-                        version: '0.1.0',
-                        project_path: tmp_dir,
-                        project_name: 'editor-client-test',
-                        unity_version: '6000.4.0f1',
-                    },
-                },
-            });
-
-            const result = await discover_editor_config(tmp_dir, 20);
-            expect('error' in result).toBe(false);
-            if (!('error' in result)) {
-                expect(result.port).toBe(53784);
-                expect(result.pid).toBe(4242);
-                expect(result.version).toBe('0.1.0');
-                expect(result.project_path).toBe(tmp_dir);
-                expect(result.source).toBe('discovered');
-            }
-            expect(readFileSync(join(tmp_dir, '.gitignore'), 'utf-8')).toBe('.unity-agentic/\n');
-        });
-
-        test('falls back to a discovered port when editor.json points to a dead port', async () => {
-            const config_dir = join(tmp_dir, '.unity-agentic');
-            mkdirSync(config_dir, { recursive: true });
-            writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({
-                port: 53782,
-                pid: process.pid,
-                version: '0.1.0',
-            }), 'utf-8');
-
-            install_mock_websocket({
-                53784: {
-                    bridge_info: {
-                        port: 53784,
-                        pid: 5151,
-                        version: '0.1.0',
-                        project_path: tmp_dir,
-                        project_name: 'editor-client-test',
-                    },
-                },
-            });
-
-            const result = await discover_editor_config(tmp_dir, 20);
-            expect('error' in result).toBe(false);
-            if (!('error' in result)) {
-                expect(result.port).toBe(53784);
-                expect(result.pid).toBe(5151);
-                expect(result.version).toBe('0.1.0');
-                expect(result.source).toBe('discovered');
-            }
-        });
-
-        test('ignores bridges from other projects and asks for manual port fallback instead of guessing', async () => {
-            install_mock_websocket({
-                53784: {
-                    bridge_info: {
-                        port: 53784,
-                        pid: 4242,
-                        version: '0.1.0',
-                        project_path: join(tmp_dir, '..', 'other-project'),
-                        project_name: 'other-project',
-                    },
-                },
-            });
-
-            const result = await discover_editor_config(tmp_dir, 20);
-            expect('error' in result).toBe(true);
-            if ('error' in result) {
-                expect(result.error).toContain('different projects');
-                expect(result.error).toContain('--port <n>');
-            }
-        });
-
-        test('call_editor recovers without editor.json and sends the request to the matching discovered bridge', async () => {
-            install_mock_websocket({
-                53784: {
-                    bridge_info: {
-                        port: 53784,
-                        pid: 1111,
-                        version: '0.1.0',
-                        project_path: join(tmp_dir, '..', 'other-project'),
-                        project_name: 'other-project',
-                    },
-                    rpc_result: { ok: true, port: 53784 },
-                },
-                53785: {
-                    bridge_info: {
-                        port: 53785,
-                        pid: 2222,
-                        version: '0.1.0',
-                        project_path: tmp_dir,
-                        project_name: 'editor-client-test',
-                    },
-                    rpc_result: { ok: true, port: 53785 },
-                },
-            });
-
-            const response = await call_editor({
-                project_path: tmp_dir,
-                method: 'editor.playMode.getState',
-                timeout: 100,
-            });
-
-            expect(response.error).toBeUndefined();
-            expect(response.result).toEqual({ ok: true, port: 53785 });
-        });
-
-        test('call_editor still allows explicit manual port fallback', async () => {
-            install_mock_websocket({
-                53786: {
-                    rpc_result: { ok: true, port: 53786 },
-                },
-            });
-
-            const response = await call_editor({
-                project_path: tmp_dir,
-                method: 'editor.playMode.getState',
-                timeout: 100,
-                port: 53786,
-            });
-
-            expect(response.error).toBeUndefined();
-            expect(response.result).toEqual({ ok: true, port: 53786 });
-        });
-
-        // The CLI always sends method 'editor.invoke' with the real target inside
-        // params.args, so classification has to read the target out of args. An
-        // earlier version matched on dotted method names that were never sent.
-        test('read invokes keep retrying through temporary discovery loss', async () => {
-            install_mock_websocket({
-                53785: {
-                    reachable_sequence: [false, false, false, true, true],
-                    bridge_info: {
-                        port: 53785,
-                        pid: 2222,
-                        version: '0.1.0',
-                        project_path: tmp_dir,
-                        project_name: 'editor-client-test',
-                    },
-                    rpc_result: { state: 'Playing' },
-                },
-            });
-
-            const response = await call_editor({
-                project_path: tmp_dir,
-                method: 'editor.invoke',
-                timeout: 100,
-                params: registry_run_params('scene.hierarchy'),
-            });
-
-            expect(response.error).toBeUndefined();
-            expect(response.result).toEqual({ state: 'Playing' });
-        });
-
-        test('mutating invokes keep the shorter default recovery window', async () => {
-            install_mock_websocket({
-                53785: {
-                    reachable_sequence: [false, false, false, true, true],
-                    bridge_info: {
-                        port: 53785,
-                        pid: 2222,
-                        version: '0.1.0',
-                        project_path: tmp_dir,
-                        project_name: 'editor-client-test',
-                    },
-                    rpc_result: { success: true },
-                },
-            });
-
-            const response = await call_editor({
-                project_path: tmp_dir,
-                method: 'editor.invoke',
-                timeout: 100,
-                params: registry_run_params('scene.save'),
-            });
-
-            expect(response.result).toBeUndefined();
-            expect(response.error).toBeDefined();
-        });
-
-        // Entering play mode reloads the domain, which takes the server down for
-        // longer than any of the fixed retry budgets. StopForReload leaves the
-        // lockfile in place and the Unity process survives, so a live pid is the
-        // signal that waiting is worthwhile.
-        test('a live editor pid extends retries past the fixed count while it reloads', async () => {
-            write_lockfile(tmp_dir, 53785, process.pid);
-
-            install_mock_websocket({
-                53785: {
-                    reachable_after_ms: RELOAD_WINDOW_MS,
-                    bridge_info: {
-                        port: 53785,
-                        pid: process.pid,
-                        version: '0.1.0',
-                        project_path: tmp_dir,
-                        project_name: 'editor-client-test',
-                    },
-                    rpc_result: { success: true },
-                },
-            });
-
-            const response = await call_editor({
-                project_path: tmp_dir,
-                method: 'editor.invoke',
-                timeout: 100,
-                params: registry_run_params('scene.save'),
-            });
-
-            expect(response.error).toBeUndefined();
-            expect(response.result).toEqual({ success: true });
-        });
-
-        test('a dead editor pid fails fast instead of waiting out a reload', async () => {
-            write_lockfile(tmp_dir, 53785, DEAD_PID);
-
-            install_mock_websocket({
-                53785: {
-                    reachable_after_ms: RELOAD_WINDOW_MS,
-                    bridge_info: {
-                        port: 53785,
-                        pid: DEAD_PID,
-                        version: '0.1.0',
-                        project_path: tmp_dir,
-                        project_name: 'editor-client-test',
-                    },
-                    rpc_result: { success: true },
-                },
-            });
-
-            const response = await call_editor({
-                project_path: tmp_dir,
-                method: 'editor.invoke',
-                timeout: 100,
-                params: registry_run_params('scene.save'),
-            });
-
-            expect(response.error).toBeDefined();
-        });
-
-        test('an explicit retries option caps waiting even for a live editor', async () => {
-            write_lockfile(tmp_dir, 53785, process.pid);
-
-            install_mock_websocket({
-                53785: {
-                    reachable_after_ms: RELOAD_WINDOW_MS,
-                    bridge_info: {
-                        port: 53785,
-                        pid: process.pid,
-                        version: '0.1.0',
-                        project_path: tmp_dir,
-                        project_name: 'editor-client-test',
-                    },
-                    rpc_result: { success: true },
-                },
-            });
-
-            const response = await call_editor({
-                project_path: tmp_dir,
-                method: 'editor.invoke',
-                timeout: 100,
-                retries: 0,
-                params: registry_run_params('scene.save'),
-            });
-
-            expect(response.error).toBeDefined();
-        });
-
-        test('command actions keep the shorter default recovery window', async () => {
-            install_mock_websocket({
-                53785: {
-                    reachable_sequence: [false, false, false, true, true],
-                    bridge_info: {
-                        port: 53785,
-                        pid: 2222,
-                        version: '0.1.0',
-                        project_path: tmp_dir,
-                        project_name: 'editor-client-test',
-                    },
-                    rpc_result: { success: true },
-                },
-            });
-
-            const response = await call_editor({
-                project_path: tmp_dir,
-                method: 'editor.playMode.enter',
-                timeout: 100,
-            });
-
-            expect(response.result).toBeUndefined();
-            expect(response.error).toBeDefined();
-            expect(response.error?.message).toContain('Autodiscovery could not find a matching Unity project bridge');
-        });
-
-        test('EditorApplication.isPlaying invoke gets transition-tolerant retries for play-mode entry', async () => {
-            install_mock_websocket({
-                53785: {
-                    reachable_sequence: [false, false, false, true, true, true],
-                    bridge_info: {
-                        port: 53785,
-                        pid: 2222,
-                        version: '0.1.0',
-                        project_path: tmp_dir,
-                        project_name: 'editor-client-test',
-                    },
-                    rpc_result: { success: true },
-                },
-            });
-
-            const response = await call_editor({
-                project_path: tmp_dir,
-                method: 'editor.invoke',
-                params: {
-                    type: 'UnityEditor.EditorApplication',
-                    member: 'isPlaying',
-                    set: 'true',
-                },
-                timeout: 100,
-            });
-
-            expect(response.error).toBeUndefined();
-            expect(response.result).toEqual({ success: true });
-        });
-
-        test('EditorApplication.isPlaying invoke retries clean socket closes during play-mode entry', async () => {
-            const config_dir = join(tmp_dir, '.unity-agentic');
-            mkdirSync(config_dir, { recursive: true });
-            writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({
-                port: 53785,
-                pid: process.pid,
-                version: '0.1.0',
-            }), 'utf-8');
-
-            install_mock_websocket({
-                53785: {
-                    close_before_response_sequence: [false, true, false, false],
-                    rpc_result: { success: true },
-                },
-            });
-
-            const response = await call_editor({
-                project_path: tmp_dir,
-                method: 'editor.invoke',
-                params: {
-                    type: 'UnityEditor.EditorApplication',
-                    member: 'isPlaying',
-                    set: 'true',
-                },
-                timeout: 100,
-            });
-
-            expect(response.error).toBeUndefined();
-            expect(response.result).toEqual({ success: true });
-        });
-
-        test('UnityAgenticTools.Util.PlayMode.GetState invoke gets transition-tolerant retries during play-mode transition', async () => {
-            install_mock_websocket({
-                53785: {
-                    reachable_sequence: [false, false, false, true, true, true],
-                    bridge_info: {
-                        port: 53785,
-                        pid: 2222,
-                        version: '0.1.0',
-                        project_path: tmp_dir,
-                        project_name: 'editor-client-test',
-                    },
-                    rpc_result: { success: true },
-                },
-            });
-
-            const response = await call_editor({
-                project_path: tmp_dir,
-                method: 'editor.invoke',
-                params: {
-                    type: 'UnityAgenticTools.Util.PlayMode',
-                    member: 'GetState',
-                },
-                timeout: 100,
-            });
-
-            expect(response.error).toBeUndefined();
-            expect(response.result).toEqual({ success: true });
-        });
-
-        test('Registry play aliases get transition-tolerant retries during play-mode transition', async () => {
-            install_mock_websocket({
-                53785: {
-                    reachable_sequence: [false, false, false, true, true, true],
-                    bridge_info: {
-                        port: 53785,
-                        pid: 2222,
-                        version: '0.1.0',
-                        project_path: tmp_dir,
-                        project_name: 'editor-client-test',
-                    },
-                    rpc_result: { success: true },
-                },
-            });
-
-            const response = await call_editor({
-                project_path: tmp_dir,
-                method: 'editor.invoke',
-                params: {
-                    type: 'UnityAgenticTools.Commands.Registry',
-                    member: 'Run',
-                    args: JSON.stringify(['play.enter', '[]']),
-                },
-                timeout: 100,
-            });
-
-            expect(response.error).toBeUndefined();
-            expect(response.result).toEqual({ success: true });
-        });
-
-        test('UnityAgenticTools.Util.PlayMode.GetState invoke retries clean socket closes during play-mode transition', async () => {
-            const config_dir = join(tmp_dir, '.unity-agentic');
-            mkdirSync(config_dir, { recursive: true });
-            writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({
-                port: 53785,
-                pid: process.pid,
-                version: '0.1.0',
-            }), 'utf-8');
-
-            install_mock_websocket({
-                53785: {
-                    close_before_response_sequence: [false, true, false, false],
-                    rpc_result: { success: true },
-                },
-            });
-
-            const response = await call_editor({
-                project_path: tmp_dir,
-                method: 'editor.invoke',
-                params: {
-                    type: 'UnityAgenticTools.Util.PlayMode',
-                    member: 'GetState',
-                },
-                timeout: 100,
-            });
-
-            expect(response.error).toBeUndefined();
-            expect(response.result).toEqual({ success: true });
-        });
-
-        test('discover_editor_config does not return an unreachable cached project bridge', async () => {
-            const config_dir = join(tmp_dir, '.unity-agentic');
-            mkdirSync(config_dir, { recursive: true });
-            writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({
-                port: 53785,
-                pid: process.pid,
-                version: '0.1.0',
-            }), 'utf-8');
-
-            install_mock_websocket({
-                53785: {
-                    bridge_info: {
-                        port: 53785,
-                        pid: 2222,
-                        version: '0.1.0',
-                        project_path: tmp_dir,
-                        project_name: 'editor-client-test',
-                    },
-                },
-            });
-
-            const initial = await discover_editor_config(tmp_dir, 20);
-            expect('error' in initial).toBe(false);
-
-            unlinkSync(join(config_dir, 'editor.json'));
-            install_mock_websocket({
-                53785: {
-                    reachable: false,
-                },
-            });
-
-            const cached = await discover_editor_config(tmp_dir, 20);
-            expect('error' in cached).toBe(true);
-            if ('error' in cached) {
-                expect(cached.error).toContain('Cached bridge port 53785 was also unreachable');
-            }
-
-            expect(existsSync(join(config_dir, 'editor.last.json'))).toBe(false);
-        });
-
-        test('ping_editor reports a readable websocket failure instead of ErrorEvent', async () => {
-            install_mock_websocket({
-                53785: {
-                    reachable: false,
-                },
-            });
-
-            const result = await ping_editor(53785, 20);
-            expect(result.reachable).toBe(false);
-            expect(result.error).toContain('WebSocket connection failed to ws://127.0.0.1:53785/unity-agentic');
-            expect(result.error).not.toBe('[object ErrorEvent]');
-        });
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ ok: true, port: 53785 });
     });
 
-    describe('stream_editor', () => {
-        const CONSOLE_EVENT: Record<string, unknown> = {
-            jsonrpc: '2.0',
-            method: 'editor.console.log',
-            params: { message: 'hello', type: 'Log' },
-        };
-
-        async function wait_until(predicate: () => boolean, budget_ms: number): Promise<boolean> {
-            const deadline = Date.now() + budget_ms;
-            while (Date.now() < deadline) {
-                if (predicate()) {
-                    return true;
-                }
-
-                await new Promise((resolve) => setTimeout(resolve, 10));
-            }
-
-            return predicate();
-        }
-
-        test('a reconnect survives discovery being unavailable mid-reload', async () => {
-            write_lockfile(tmp_dir, 53782, process.pid);
-            install_mock_websocket({
-                53782: {
-                    reload_window_ms: { start: 40, end: 900 },
-                    stream_event: CONSOLE_EVENT,
-                },
-            });
-
-            const events: RpcEvent[] = [];
-            const handle = await stream_editor({
-                project_path: tmp_dir,
-                method: 'editor.console.subscribe',
-                timeout: 500,
-                on_event: (event) => { events.push(event); },
-            });
-
-            try {
-                // The second event can only arrive if the reconnect retried discovery
-                // instead of abandoning the chain the first time it came back empty.
-                expect(await wait_until(() => events.length >= 2, 5000)).toBe(true);
-            } finally {
-                handle.close();
-            }
-        }, 15000);
-
-        test('a hung reconnect times out instead of stalling the stream', async () => {
-            install_mock_websocket({
-                53782: {
-                    reload_window_ms: { start: 40, end: 60 },
-                    hang_window_ms: { start: 100, end: 800 },
-                    stream_event: CONSOLE_EVENT,
-                },
-            });
-
-            const events: RpcEvent[] = [];
-            const handle = await stream_editor({
-                project_path: tmp_dir,
-                port: 53782,
-                method: 'editor.console.subscribe',
-                timeout: 200,
-                on_event: (event) => { events.push(event); },
-            });
-
-            try {
-                expect(await wait_until(() => events.length >= 2, 5000)).toBe(true);
-            } finally {
-                handle.close();
-            }
-        }, 15000);
-
-        test('a rejected subscribe surfaces through on_error instead of going quiet', async () => {
-            install_mock_websocket({
-                53782: {
-                    rpc_error: { code: -32601, message: 'Method not found: editor.console.subscribe' },
-                },
-            });
-
-            const errors: Error[] = [];
-            const handle = await stream_editor({
-                project_path: tmp_dir,
-                port: 53782,
-                method: 'editor.console.subscribe',
-                timeout: 500,
-                on_event: () => {},
-                on_error: (error) => { errors.push(error); },
-            });
-
-            try {
-                expect(await wait_until(() => errors.length > 0, 1000)).toBe(true);
-                expect(errors[0]?.message).toContain('Subscription rejected');
-                expect(errors[0]?.message).toContain('Method not found');
-            } finally {
-                handle.close();
-            }
+    test('still allows explicit manual port fallback', async () => {
+        install_mock_websocket({
+            53786: {
+                rpc_result: { ok: true, port: 53786 },
+            },
         });
 
-        test('close shuts the reconnected socket, not the original', async () => {
-            const sockets = install_mock_websocket({
-                53782: {
-                    reload_window_ms: { start: 40, end: 60 },
-                    stream_event: CONSOLE_EVENT,
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.playMode.getState',
+            timeout: 100,
+            port: 53786,
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ ok: true, port: 53786 });
+    });
+
+    // The CLI always sends method 'editor.invoke' with the real target inside
+    // params.args, so classification has to read the target out of args. An
+    // earlier version matched on dotted method names that were never sent.
+    test('read invokes keep retrying through temporary discovery loss', async () => {
+        install_mock_websocket({
+            53785: {
+                reachable_sequence: [false, false, false, true, true],
+                bridge_info: {
+                    port: 53785,
+                    pid: 2222,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
                 },
-            });
+                rpc_result: { state: 'Playing' },
+            },
+        });
 
-            const events: RpcEvent[] = [];
-            const handle = await stream_editor({
-                project_path: tmp_dir,
-                port: 53782,
-                method: 'editor.console.subscribe',
-                timeout: 500,
-                on_event: (event) => { events.push(event); },
-            });
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('scene.hierarchy'),
+        });
 
-            expect(await wait_until(() => events.length >= 2, 5000)).toBe(true);
-            handle.close();
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ state: 'Playing' });
+    });
 
-            const opened = sockets.filter((socket) => socket.opened);
-            expect(opened.length).toBeGreaterThanOrEqual(2);
-            expect(opened[opened.length - 1]?.closed).toBe(true);
-        }, 15000);
+    test('mutating invokes keep the shorter default recovery window', async () => {
+        install_mock_websocket({
+            53785: {
+                reachable_sequence: [false, false, false, true, true],
+                bridge_info: {
+                    port: 53785,
+                    pid: 2222,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('scene.save'),
+        });
+
+        expect(response.result).toBeUndefined();
+        expect(response.error).toBeDefined();
+    });
+
+    // Entering play mode reloads the domain, which takes the server down for
+    // longer than any of the fixed retry budgets. StopForReload leaves the
+    // lockfile in place and the Unity process survives, so a live pid is the
+    // signal that waiting is worthwhile.
+    test('a live editor pid extends retries past the fixed count while it reloads', async () => {
+        write_lockfile(tmp_dir, 53785, process.pid);
+
+        install_mock_websocket({
+            53785: {
+                reachable_after_ms: RELOAD_WINDOW_MS,
+                bridge_info: {
+                    port: 53785,
+                    pid: process.pid,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('scene.save'),
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true });
+    });
+
+    test('a dead editor pid fails fast instead of waiting out a reload', async () => {
+        write_lockfile(tmp_dir, 53785, DEAD_PID);
+
+        install_mock_websocket({
+            53785: {
+                reachable_after_ms: RELOAD_WINDOW_MS,
+                bridge_info: {
+                    port: 53785,
+                    pid: DEAD_PID,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('scene.save'),
+        });
+
+        expect(response.error).toBeDefined();
+    });
+
+    test('an explicit retries option caps waiting even for a live editor', async () => {
+        write_lockfile(tmp_dir, 53785, process.pid);
+
+        install_mock_websocket({
+            53785: {
+                reachable_after_ms: RELOAD_WINDOW_MS,
+                bridge_info: {
+                    port: 53785,
+                    pid: process.pid,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            retries: 0,
+            params: registry_run_params('scene.save'),
+        });
+
+        expect(response.error).toBeDefined();
+    });
+
+    test('command actions keep the shorter default recovery window', async () => {
+        install_mock_websocket({
+            53785: {
+                reachable_sequence: [false, false, false, true, true],
+                bridge_info: {
+                    port: 53785,
+                    pid: 2222,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.playMode.enter',
+            timeout: 100,
+        });
+
+        expect(response.result).toBeUndefined();
+        expect(response.error).toBeDefined();
+        expect(response.error?.message).toContain('Autodiscovery could not find a matching Unity project bridge');
+    });
+
+    test('EditorApplication.isPlaying invoke gets transition-tolerant retries for play-mode entry', async () => {
+        install_mock_websocket({
+            53785: {
+                reachable_sequence: [false, false, false, true, true, true],
+                bridge_info: {
+                    port: 53785,
+                    pid: 2222,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            params: {
+                type: 'UnityEditor.EditorApplication',
+                member: 'isPlaying',
+                set: 'true',
+            },
+            timeout: 100,
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true });
+    });
+
+    test('EditorApplication.isPlaying invoke retries clean socket closes during play-mode entry', async () => {
+        const config_dir = join(tmp_dir, '.unity-agentic');
+        mkdirSync(config_dir, { recursive: true });
+        writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({
+            port: 53785,
+            pid: process.pid,
+            version: '0.1.0',
+        }), 'utf-8');
+
+        install_mock_websocket({
+            53785: {
+                close_before_response_sequence: [false, true, false, false],
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            params: {
+                type: 'UnityEditor.EditorApplication',
+                member: 'isPlaying',
+                set: 'true',
+            },
+            timeout: 100,
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true });
+    });
+
+    test('UnityAgenticTools.Util.PlayMode.GetState invoke gets transition-tolerant retries during play-mode transition', async () => {
+        install_mock_websocket({
+            53785: {
+                reachable_sequence: [false, false, false, true, true, true],
+                bridge_info: {
+                    port: 53785,
+                    pid: 2222,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            params: {
+                type: 'UnityAgenticTools.Util.PlayMode',
+                member: 'GetState',
+            },
+            timeout: 100,
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true });
+    });
+
+    test('Registry play aliases get transition-tolerant retries during play-mode transition', async () => {
+        install_mock_websocket({
+            53785: {
+                reachable_sequence: [false, false, false, true, true, true],
+                bridge_info: {
+                    port: 53785,
+                    pid: 2222,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            params: {
+                type: 'UnityAgenticTools.Commands.Registry',
+                member: 'Run',
+                args: JSON.stringify(['play.enter', '[]']),
+            },
+            timeout: 100,
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true });
+    });
+
+    test('UnityAgenticTools.Util.PlayMode.GetState invoke retries clean socket closes during play-mode transition', async () => {
+        const config_dir = join(tmp_dir, '.unity-agentic');
+        mkdirSync(config_dir, { recursive: true });
+        writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({
+            port: 53785,
+            pid: process.pid,
+            version: '0.1.0',
+        }), 'utf-8');
+
+        install_mock_websocket({
+            53785: {
+                close_before_response_sequence: [false, true, false, false],
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            params: {
+                type: 'UnityAgenticTools.Util.PlayMode',
+                member: 'GetState',
+            },
+            timeout: 100,
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true });
     });
 });
