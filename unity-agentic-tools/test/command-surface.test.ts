@@ -50,8 +50,13 @@ function run_cli_async(args: string[]): Promise<CliResult> {
     });
 }
 
+// NTFS has no POSIX permission bits, so mode & 0o111 is always 0 on Windows
+// no matter how the file was built. Bun and npm generate .cmd shims there
+// instead, which makes the exec bit meaningful only on POSIX.
+const it_posix = process.platform === 'win32' ? it.skip : it;
+
 describe('command runner surface', () => {
-    it('builds the CLI bin as executable for linked dev setup', () => {
+    it_posix('builds the CLI bin as executable for linked dev setup', () => {
         expect(statSync(cli_path).mode & 0o111).not.toBe(0);
     });
 
