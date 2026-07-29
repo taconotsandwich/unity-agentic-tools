@@ -10,7 +10,7 @@ namespace UnityAgenticTools.Util
 {
     public static class Input
     {
-        public static object Map()
+        public static object Map(string filter = "", bool includeLegacyAxes = true)
         {
             var result = new Dictionary<string, object>();
             var actions = new List<object>();
@@ -23,11 +23,48 @@ namespace UnityAgenticTools.Util
             result["inputSystemAvailable"] = false;
 #endif
 
-            legacyAxes = DiscoverLegacyAxes();
+            if (includeLegacyAxes)
+            {
+                legacyAxes = DiscoverLegacyAxes();
+            }
+
+            var normalizedFilter = (filter ?? string.Empty).Trim();
+            if (normalizedFilter.Length > 0)
+            {
+                actions = FilterEntries(actions, normalizedFilter, "name", "map");
+                legacyAxes = FilterEntries(legacyAxes, normalizedFilter, "name");
+            }
+
             result["actions"] = actions.ToArray();
             result["legacyAxes"] = legacyAxes.ToArray();
 
             return result;
+        }
+
+        private static List<object> FilterEntries(List<object> entries, string filter, params string[] keys)
+        {
+            var filtered = new List<object>();
+            foreach (var entry in entries)
+            {
+                if (!(entry is Dictionary<string, object> dict))
+                {
+                    filtered.Add(entry);
+                    continue;
+                }
+
+                foreach (var key in keys)
+                {
+                    if (dict.TryGetValue(key, out var value) &&
+                        value is string text &&
+                        text.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        filtered.Add(entry);
+                        break;
+                    }
+                }
+            }
+
+            return filtered;
         }
 
         public static object Key(string key, string mode = "press")
