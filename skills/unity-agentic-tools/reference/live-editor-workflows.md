@@ -4,16 +4,11 @@ Use these workflows when Unity is open and the bridge should be reachable.
 
 ## Setup
 
-1. `unity-agentic-tools install -p <project>`
-2. Open the project in Unity and wait for import/compile.
-3. `unity-agentic-tools status -p <project>`
-4. `unity-agentic-tools list -p <project>`
-
-If status reports stale lockfiles, run `unity-agentic-tools cleanup -p <project>` and re-check status.
+Fresh project: `unity-agentic-tools install -p <project>`, open Unity, wait for import/compile, then `unity-agentic-tools status -p <project>`. For stale locks or unreachable bridges, follow "Bridge Not Reachable" in `troubleshooting.md`.
 
 ## Inspect-Run-Verify
 
-1. Discover: `unity-agentic-tools list <query> -p <project>`.
+1. Discover: `unity-agentic-tools list <query> --brief -p <project>`.
 2. Inspect:
    - `unity-agentic-tools run query.scene Assets/Scenes/Main.unity -p <project>`
    - `unity-agentic-tools run query.object Assets/Scenes/Main.unity Player -p <project>`
@@ -50,10 +45,8 @@ Use this for GameObjects, components, prefab instances, parenting, sibling order
 
 Refs such as `@hN` and `@uN` invalidate on scene change, play mode transition, or domain reload. Re-run `scene.hierarchy` or `ui.snapshot` to refresh.
 
+`scene.hierarchy` caps output at 500 nodes and `ui.snapshot` at 300 elements by default; a capped response carries `"truncated": true`. Pass a larger trailing max argument (or `0` for unlimited) to lift the cap, e.g. `run scene.hierarchy 99 false 0`.
+
 ## Batch Editing
 
-Use `--args '<json array>'` when one command argument is itself structured JSON.
-
-```bash
-unity-agentic-tools run update.batch-components --args '["Assets/Scenes/Main.unity","[{\"gameObjectPath\":\"Player\",\"componentType\":\"BoxCollider\",\"componentIndex\":0,\"propertyPath\":\"m_IsTrigger\",\"value\":\"true\"}]"]' -p <project>
-```
+Use `--args '<json array>'` when one command argument is itself structured JSON — see "JSON Args" in `troubleshooting.md` for the canonical example. Batch aliases (`update.batch`, `update.batch-components`) take the nested payload as a JSON string argument.

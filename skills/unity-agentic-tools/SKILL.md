@@ -1,6 +1,6 @@
 ---
 name: unity-agentic-tools
-description: "Use for Unity project automation with unity-agentic-tools: install/status/list/run/stream, command discovery, bridge setup, and safe CLI-first Unity scene, prefab, asset, and editor workflows."
+description: "Use for Unity project automation via the unity-agentic-tools CLI and live Editor bridge: discover and run Unity commands (list/run/stream), install or troubleshoot the bridge, create/update/delete GameObjects, components, scenes, prefabs, and assets, query hierarchies and UI, run Play Mode tests, capture screenshots, and read console logs. Triggers: Unity Editor automation, scene or prefab edits, 'run Unity tests', 'check the Unity console', 'screenshot the game view'. Not for writing C# gameplay scripts or shaders; not for raw edits to .unity/.prefab/.asset YAML unless the user explicitly asks for raw file work."
 allowed-tools:
   - "Bash(unity-agentic-tools *)"
 argument-hint: "<command and args>"
@@ -16,7 +16,7 @@ Use this skill for Unity Agentic Tools CLI setup, command discovery, command exe
 
 | Command | What it does |
 |---------|-------------|
-| `list [query]` | Discover built-in aliases, attributed project commands, and optional raw static APIs |
+| `list [query]` | Discover built-in aliases, attributed project commands, and optional raw static APIs. `--brief` omits per-argument detail; `--raw` adds raw statics |
 | `run <target> [args...]` | Execute a command alias or raw public static C# method/property through the Unity bridge |
 | `stream [topic]` | Watch real-time bridge events over WebSocket |
 | `install` | Install the Unity bridge package |
@@ -24,14 +24,14 @@ Use this skill for Unity Agentic Tools CLI setup, command discovery, command exe
 | `cleanup` | Remove stale bridge state or rebuildable `.unity-agentic` caches |
 | `status` | Check command runner and bridge reachability |
 
-Commands emit structured JSON by default.
+Commands emit compact single-line JSON by default; pass `--pretty` for indented output. Prefer `list <query> --brief` for discovery.
 
 By default, `install` writes the GitHub package URL. For local bridge package development, use `install --local [path]`; existing `file:` dependencies are preserved unless `install --remote` is passed.
 
 ## Default Route
 
 1. `unity-agentic-tools status -p <project>`
-2. `unity-agentic-tools list <query> -p <project>`
+2. `unity-agentic-tools list <query> --brief -p <project>`
 3. Inspect current state with `query.*`, `scene.hierarchy`, `ui.snapshot`, or screenshots.
 4. `unity-agentic-tools run <target> ... -p <project>`
 5. Verify with the matching query, snapshot, screenshot, tests, or console stream.
@@ -39,8 +39,7 @@ By default, `install` writes the GitHub package URL. For local bridge package de
 ## Examples
 
 ```bash
-unity-agentic-tools list scene -p <project>
-unity-agentic-tools list create -p <project>
+unity-agentic-tools list scene --brief -p <project>
 unity-agentic-tools run project.refresh -p <project>
 unity-agentic-tools run query.scene Assets/Scenes/Main.unity -p <project>
 unity-agentic-tools run create.gameobject Assets/Scenes/Main.unity EnemyRoot Gameplay -p <project>
@@ -49,23 +48,18 @@ unity-agentic-tools stream console --type Error -p <project>
 unity-agentic-tools cleanup --cache -p <project>
 ```
 
-Use `--args '<json array>'` when one argument is structured JSON.
-
-```bash
-unity-agentic-tools run update.batch-components --args '["Assets/Scenes/Main.unity","[{\"gameObjectPath\":\"Player\",\"componentType\":\"BoxCollider\",\"componentIndex\":0,\"propertyPath\":\"m_IsTrigger\",\"value\":\"true\"}]"]' -p <project>
-```
+Use `--args '<json array>'` when one argument is structured JSON — see `reference/troubleshooting.md` "JSON Args" for the exact quoting pattern.
 
 Raw public static APIs can be called directly when no alias or `[AgenticCommand]` wrapper exists.
 
 ```bash
 unity-agentic-tools run UnityEditor.AssetDatabase.Refresh -p <project>
-unity-agentic-tools run UnityEditor.EditorApplication.isCompiling -p <project>
 unity-agentic-tools run UnityEditor.EditorApplication.ExecuteMenuItem "File/Save" -p <project>
 ```
 
 ## Project Commands
 
-Expose project-specific behavior by adding `[AgenticCommand]` to public static methods/properties in Unity Editor C#:
+Do not add a new CLI command for each Unity operation. Expose project-specific behavior by adding `[AgenticCommand]` to public static methods/properties in Unity Editor C#:
 
 ```csharp
 using UnityAgenticTools.Commands;
@@ -83,22 +77,22 @@ public static class BuildCommands
 Then use:
 
 ```bash
-unity-agentic-tools list build -p <project>
+unity-agentic-tools list build --brief -p <project>
 unity-agentic-tools run build.addressables Production -p <project>
 ```
 
 ## References
 
-- `reference/core.md`: command runner contract and routing
 - `reference/live-editor-workflows.md`: live Editor setup, mutation, UI, and batch workflows
 - `reference/command-reference.md`: generated alias reference from `Registry.cs`
-- `reference/troubleshooting.md`: bridge, refs, JSON args, and verification
+- `reference/troubleshooting.md`: bridge, timeouts, refs, JSON args, and verification
 
 ## Troubleshooting
 
-- **Bridge won't connect**: Run `unity-agentic-tools install -p <project>`, open Unity, wait for compile/import, then run `unity-agentic-tools status -p <project>`.
-- **Stale bridge state**: Run `unity-agentic-tools cleanup -p <project>` to clear stale lockfiles, or `cleanup --cache` for rebuildable caches.
-- **Need available commands**: Run `unity-agentic-tools list <query> -p <project>`.
-- **Need raw APIs**: Run `unity-agentic-tools list <type-or-namespace> --raw -p <project>`.
-- **Need console logs**: Run `unity-agentic-tools stream console --duration 5000 -p <project>`.
-- **Long builds time out**: `run` defaults to 60s. Pass `--timeout 1200000` (20 min) for first-time platform builds or use `--no-wait` and stream events. See `reference/troubleshooting.md` "Long-running Commands".
+Full detail lives in `reference/troubleshooting.md`. Quick pointers:
+
+- **Bridge won't connect**: see "Bridge Not Reachable" (install, open Unity, wait for compile, status, cleanup).
+- **Long builds time out**: `run` defaults to 60s; see "Long-running Commands" (`--timeout 1200000`, `--no-wait`).
+- **Stale `@hN`/`@uN` refs**: re-run `scene.hierarchy` or `ui.snapshot`; see "Stale Refs".
+- **Need console logs**: `unity-agentic-tools stream console --duration 5000 -p <project>`.
+- **Need raw APIs**: `unity-agentic-tools list <type-or-namespace> --raw -p <project>`.
