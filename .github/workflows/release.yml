@@ -66,6 +66,11 @@ jobs:
       - name: Check version sync
         run: bun scripts/sync-version.js --check
 
+      # Runs here rather than in publish: a missing section must fail the
+      # release before npm publish, not after.
+      - name: Check release notes
+        run: bun scripts/release-notes.js --check "${GITHUB_REF_NAME#v}"
+
   publish:
     needs: test
     runs-on: ubuntu-latest
@@ -98,31 +103,20 @@ jobs:
         working-directory: ./unity-agentic-tools
         run: npm publish --provenance --access public
 
-      - name: Extract version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Generate changelog
-        id: changelog
+      - name: Build release notes
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            CHANGELOG=$(git log --pretty=format:"- %s" $PREV_TAG..HEAD)
-          else
-            CHANGELOG=$(git log --pretty=format:"- %s" -10)
-          fi
-          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          {
+            echo "## What's Changed"
+            echo
+            bun scripts/release-notes.js "${GITHUB_REF_NAME#v}"
+          } > release-notes.md
+          cat release-notes.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          name: Release v${{ steps.version.outputs.VERSION }}
-          body: |
-            ## What's Changed
-
-            ${{ steps.changelog.outputs.CHANGELOG }}
+          name: Release ${{ github.ref_name }}
+          body_path: release-notes.md
           draft: false
           prerelease: true
         env:

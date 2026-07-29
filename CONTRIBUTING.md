@@ -21,7 +21,7 @@ Prerequisites: Bun, and — only for `build:unity-package` — a local Unity Edi
 - `main` is the release branch.
 - `dev` is the integration branch for ongoing work.
 - Create your working branch from `dev` and open pull requests back into `dev`.
-- When preparing a release (for example `0.5.0`), merge `dev` into `main`, then tag `main` with `v0.5.0`.
+- When preparing a release (for example `0.5.0`), add its `CHANGELOG.md` section, merge `dev` into `main`, run `bun scripts/sync-version.js --set 0.5.0` and commit, push `main`, then tag that commit `v0.5.0`. The workflow rejects a tag that is not `origin/main` HEAD.
 
 ## Branch Name Rules
 
@@ -86,9 +86,16 @@ Run the first two yourself when you touch `unity-package/`, and the third when y
 
 ## Release Format
 
-GitHub release notes should contain a single section only:
+Release notes live in `CHANGELOG.md`, one `## <version>` section per release. The
+workflow reads the section matching the tag and publishes it under a single
+`## What's Changed` heading.
 
-`## What's Changed`
+Write 2-4 concise bullets that summarize user-visible improvements. Avoid raw
+commit dumps, merge-commit lines, and extra sections.
 
-Under that heading, add 2-4 concise bullets that summarize user-visible improvements.
-Avoid raw commit dumps, merge-commit lines, and extra sections.
+A tag with no section fails the release, deliberately before the npm publish step
+rather than after it. Check locally first:
+
+```bash
+bun scripts/release-notes.js --check 0.7.0
+```
