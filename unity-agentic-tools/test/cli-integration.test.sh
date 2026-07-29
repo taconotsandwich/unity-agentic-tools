@@ -82,7 +82,7 @@ echo ""
 echo "Test 4: Status returns bridge-shaped JSON"
 if run_cli "status" bun dist/cli.js status; then
     status_output="$(cat "$tmp_dir/status.out")"
-    if echo "$status_output" | grep -q '"runtime": "bun"' \
+    if echo "$status_output" | grep -q '"runtime":[[:space:]]*"bun"' \
         && echo "$status_output" | grep -q '"project_path"' \
         && echo "$status_output" | grep -q '"bridge"'; then
         echo "[ok] status output is runner-only"

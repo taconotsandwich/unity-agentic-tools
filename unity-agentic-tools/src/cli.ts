@@ -15,6 +15,7 @@ interface BridgeCommandOptions {
     project?: string;
     timeout?: string;
     port?: string;
+    pretty?: boolean;
 }
 
 interface RunCommandOptions extends BridgeCommandOptions {
@@ -30,7 +31,6 @@ interface ListCommandOptions extends BridgeCommandOptions {
 interface StreamCommandOptions extends BridgeCommandOptions {
     type?: string;
     duration?: string;
-    pretty?: boolean;
 }
 
 interface CleanupCommandOptions {
@@ -38,6 +38,7 @@ interface CleanupCommandOptions {
     stale?: boolean;
     cache?: boolean;
     all?: boolean;
+    pretty?: boolean;
 }
 
 interface InstallCommandOptions extends BridgeCommandOptions {
@@ -98,14 +99,23 @@ function resolve_install_options(options: InstallCommandOptions): BridgeInstallO
     return {};
 }
 
-function output_rpc_response(response: RpcResponse): void {
+function print_json(value: unknown, pretty: boolean): void {
+    console.log(JSON.stringify(value, null, pretty ? 2 : 0));
+}
+
+function output_rpc_response(response: RpcResponse, pretty: boolean): void {
     if (response.error) {
-        console.log(JSON.stringify({ success: false, error: response.error.message, code: response.error.code }, null, 2));
+        print_json({
+            success: false,
+            error: response.error.message,
+            code: response.error.code,
+            ...(response.error.data !== undefined ? { data: response.error.data } : {}),
+        }, pretty);
         process.exitCode = 1;
         return;
     }
 
-    console.log(JSON.stringify(response.result, null, 2));
+    print_json(response.result, pretty);
     if (payload_reports_failure(response.result)) {
         process.exitCode = 1;
     }
@@ -162,11 +172,10 @@ function event_matches_topic(event: RpcEvent, topic: string, type_filter?: strin
 }
 
 function print_stream_event(event: RpcEvent, pretty: boolean = false): void {
-    const payload = {
+    print_json({
         method: event.method,
         ...(event.params ? event.params : {}),
-    };
-    console.log(JSON.stringify(payload, null, pretty ? 2 : 0));
+    }, pretty);
 }
 
 // Primary command-runner surface
@@ -176,6 +185,7 @@ program.command('list [query]')
     .option('--timeout <ms>', 'WebSocket timeout in ms', '10000')
     .option('--port <n>', 'Connect to a specific bridge port')
     .option('--raw', 'Include raw public static methods/properties for matching types')
+    .option('--pretty', 'Pretty-print JSON output')
     .action(async (query: string | undefined, options: ListCommandOptions) => {
         const bridge = resolve_bridge_options(options);
         const response = await call_editor({
@@ -187,7 +197,7 @@ program.command('list [query]')
                 args: build_registry_args([query || '', options.raw === true ? 'true' : 'false']),
             },
         });
-        output_rpc_response(response);
+        output_rpc_response(response, options.pretty === true);
     });
 
 program.command('run <target> [args...]')
@@ -198,6 +208,7 @@ program.command('run <target> [args...]')
     .option('--args <json>', 'JSON array of command arguments (overrides positional args)')
     .option('--set <value>', 'Set a static property value')
     .option('--no-wait', 'Fire and forget -- return immediately without waiting for result')
+    .option('--pretty', 'Pretty-print JSON output')
     .action(async (target: string, args: string[], options: RunCommandOptions) => {
         const bridge = resolve_bridge_options(options);
         const command_args_json = options.args || JSON.stringify(args);
@@ -215,7 +226,7 @@ program.command('run <target> [args...]')
                 args: build_registry_args(registry_args),
             },
         });
-        output_rpc_response(response);
+        output_rpc_response(response, options.pretty === true);
     });
 
 program.command('stream [topic]')
@@ -230,10 +241,10 @@ program.command('stream [topic]')
         const topic = (topic_raw || 'console').toLowerCase();
         const valid_topics = ['console', 'events', 'playmode', 'tests'];
         if (!valid_topics.includes(topic)) {
-            console.log(JSON.stringify({
+            print_json({
                 success: false,
                 error: `Invalid stream topic "${topic}". Use: ${valid_topics.join(', ')}`,
-            }, null, 2));
+            }, options.pretty === true);
             process.exitCode = 1;
             return;
         }
@@ -264,10 +275,10 @@ program.command('stream [topic]')
                 });
             }
         } catch (err: unknown) {
-            console.log(JSON.stringify({
+            print_json({
                 success: false,
                 error: err instanceof Error ? err.message : String(err),
-            }, null, 2));
+            }, options.pretty === true);
             process.exitCode = 1;
         }
     });
@@ -277,38 +288,42 @@ program.command('install')
     .option('-p, --project <path>', 'Path to Unity project (defaults to cwd)')
     .option('--local [path]', 'Install from a local unity-package path; auto-detects source checkout when omitted')
     .option('--remote', 'Force the published GitHub bridge package URL')
+    .option('--pretty', 'Pretty-print JSON output')
     .action((options: InstallCommandOptions) => {
         const bridge = resolve_bridge_options(options);
+        const pretty = options.pretty === true;
         const install_options = resolve_install_options(options);
         if ('error' in install_options) {
-            console.log(JSON.stringify({ success: false, error: install_options.error }, null, 2));
+            print_json({ success: false, error: install_options.error }, pretty);
             process.exitCode = 1;
             return;
         }
 
         const result = install_bridge_package(bridge.project_path, install_options);
         if ('error' in result) {
-            console.log(JSON.stringify({ success: false, error: result.error }, null, 2));
+            print_json({ success: false, error: result.error }, pretty);
             process.exitCode = 1;
             return;
         }
 
-        console.log(JSON.stringify(result, null, 2));
+        print_json(result, pretty);
     });
 
 program.command('uninstall')
     .description('Remove the Unity command bridge package from a Unity project')
     .option('-p, --project <path>', 'Path to Unity project (defaults to cwd)')
+    .option('--pretty', 'Pretty-print JSON output')
     .action((options: BridgeCommandOptions) => {
         const bridge = resolve_bridge_options(options);
+        const pretty = options.pretty === true;
         const result = remove_package(bridge.project_path, BRIDGE_PACKAGE_NAME);
         if ('error' in result) {
-            console.log(JSON.stringify({ success: false, error: result.error }, null, 2));
+            print_json({ success: false, error: result.error }, pretty);
             process.exitCode = 1;
             return;
         }
 
-        console.log(JSON.stringify(result, null, 2));
+        print_json(result, pretty);
     });
 
 program.command('cleanup')
@@ -317,15 +332,13 @@ program.command('cleanup')
     .option('--stale', 'Remove stale bridge lock state (default)')
     .option('--cache', 'Remove rebuildable project caches')
     .option('--all', 'Remove the entire .unity-agentic directory')
+    .option('--pretty', 'Pretty-print JSON output')
     .action((options: CleanupCommandOptions) => {
         const result = cleanup(options);
+        print_json(result, options.pretty === true);
         if (!result.success) {
-            console.log(JSON.stringify(result, null, 2));
             process.exitCode = 1;
-            return;
         }
-
-        console.log(JSON.stringify(result, null, 2));
     });
 
 program.command('status')
@@ -333,6 +346,7 @@ program.command('status')
     .option('-p, --project <path>', 'Path to Unity project (defaults to current directory)')
     .option('--timeout <ms>', 'WebSocket timeout in ms', '2000')
     .option('--port <n>', 'Connect to a specific bridge port')
+    .option('--pretty', 'Pretty-print JSON output')
     .action(async (options: BridgeCommandOptions) => {
         const bridge = resolve_bridge_options(options);
         const projectPath = bridge.project_path;
@@ -372,7 +386,7 @@ program.command('status')
             }
         }
 
-        console.log(JSON.stringify(status, null, 2));
+        print_json(status, options.pretty === true);
     });
 
 program.parse();
