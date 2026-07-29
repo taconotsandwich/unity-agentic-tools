@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+
+echo "[pre-commit] type-check"
+bun run type-check
+
+echo "[pre-commit] unit tests"
+bun run test

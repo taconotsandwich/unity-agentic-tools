@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+echo "[pre-push] type-check"
+bun run type-check
+
+echo "[pre-push] unit tests"
+bun run test
+
+echo "[pre-push] CLI integration tests"
+bun run test:integration

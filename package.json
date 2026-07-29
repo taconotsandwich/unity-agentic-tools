@@ -20,8 +20,9 @@
     "generate:agent-guidance": "bun scripts/generate-agent-guidance.js",
     "type-check": "cd unity-agentic-tools && tsc --noEmit && cd ../doc-indexer && tsc --noEmit",
     "lint": "echo 'No linter configured'",
-    "setup-dev": "bun install && bun run build:rust && bun run build && bun run build:unity-package && bun scripts/link-dev-cli.js",
-    "teardown-dev": "bun scripts/link-dev-cli.js --unlink && rm -rf unity-agentic-tools/dist",
+    "setup-dev": "bun install && bun run hooks && bun run build:rust && bun run build && bun run build:unity-package && bun scripts/link-dev-cli.js",
+    "teardown-dev": "bun scripts/link-dev-cli.js --unlink && bun scripts/install-hooks.js --uninstall && rm -rf unity-agentic-tools/dist",
+    "hooks": "bun scripts/install-hooks.js",
     "sync-skill": "bash scripts/sync-skill.sh"
   },
   "devDependencies": {

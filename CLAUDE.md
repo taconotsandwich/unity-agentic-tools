@@ -63,7 +63,7 @@ tools/dotnet-unity-compile/ Dotnet compile harness for the Unity package
 ## CI / Release
 
 - CI has Rust toolchain, builds native module, runs cargo test + bun test + integration tests
-- Pre-commit hook runs type-check + tests; pre-push runs full test suite + integration
+- Git hooks live in `.githooks/` and are activated by `bun run hooks` (part of `setup-dev`), which sets `core.hooksPath`. Pre-commit runs type-check + tests; pre-push adds the integration suite. A fresh clone has them off until that script runs.
 - Release triggered by pushing `v*.*.*` tag — builds 4 platform binaries, runs tests, publishes to npm, creates GitHub Release
 - `macos-13` runners deprecated — use `macos-15` + cross-compile (`--target x86_64-apple-darwin`) for Intel macOS
 - `test/fixtures/external/` is a git submodule — test.yml needs `submodules: true` on checkout
