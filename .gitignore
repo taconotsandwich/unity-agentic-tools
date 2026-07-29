@@ -67,12 +67,5 @@ ts/
 
 # MCP
 
-# Native binaries (built by CI at publish time)
-*.node
-unity-agentic-tools/native/
-
-# Rust
-target/
-
 # Machine-local skill install state
 skills-lock.json

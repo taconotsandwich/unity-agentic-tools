@@ -1,12 +1,10 @@
 {
   "packageManager": "bun@1.3.14",
-  "workspaces": ["rust-core", "unity-agentic-tools"],
+  "workspaces": ["unity-agentic-tools"],
   "scripts": {
     "build": "bun run build:unity-agentic-tools",
     "build:unity-agentic-tools": "cd unity-agentic-tools && bun run build",
-    "build:rust": "cd rust-core && bun run build",
     "build:unity-package": "bun scripts/build-unity-package.js",
-    "build:all": "bun run build:rust || echo 'Rust build skipped' && bun run build",
     "test": "bun run test:unity-agentic-tools",
     "test:unity-agentic-tools": "cd unity-agentic-tools && bun run test",
     "test:quick": "cd unity-agentic-tools && bun run test",
@@ -17,7 +15,7 @@
     "check:classids": "bun scripts/check-classid-drift.js",
     "generate:agent-guidance": "bun scripts/generate-agent-guidance.js",
     "type-check": "cd unity-agentic-tools && tsc --noEmit",
-    "setup-dev": "bun install && bun run hooks && bun run build:rust && bun run build && bun run build:unity-package && bun scripts/link-dev-cli.js",
+    "setup-dev": "bun install && bun run hooks && bun run build && bun run build:unity-package && bun scripts/link-dev-cli.js",
     "teardown-dev": "bun scripts/link-dev-cli.js --unlink && bun scripts/install-hooks.js --uninstall && rm -rf unity-agentic-tools/dist",
     "hooks": "bun scripts/install-hooks.js",
     "sync-skill": "bash scripts/sync-skill.sh"
