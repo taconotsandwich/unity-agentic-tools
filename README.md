@@ -11,6 +11,7 @@ A compact CLI and Unity Editor bridge for inspecting and changing Unity projects
 - **Built-In Unity Operations** - Create, update, delete, and query scenes, prefabs, assets, GameObjects, components, UI refs, and test results through one runner.
 - **Bridge-First Mutation** - Unity project changes go through the Editor bridge; the npm package no longer ships local serialized-file mutation helpers.
 - **Real-Time Console Watch** - `stream console` follows Unity logs over WebSocket, with topic and log-type filtering.
+- **Reload-Tolerant Reads** - Domain reloads take the bridge down for seconds at a time. Reads and play mode transitions wait that window out while the Editor is alive, instead of failing.
 
 ## Installation
 
@@ -59,7 +60,7 @@ Visible top-level commands:
 | `install` | Install the Unity bridge package into a project |
 | `uninstall` | Remove the Unity bridge package from a project |
 | `cleanup` | Remove stale bridge state or rebuildable `.unity-agentic` caches |
-| `status` | Report command runner and bridge reachability |
+| `status` | Report command runner and bridge reachability, and what the Editor is busy with |
 
 ### Setup
 
@@ -69,6 +70,17 @@ Install the bridge package into a Unity project, then open the project in Unity 
 unity-agentic-tools install -p /path/to/UnityProject
 unity-agentic-tools status -p /path/to/UnityProject
 ```
+
+When the bridge answers, `status` also reports readiness inside `bridge`:
+
+```json
+{"runtime":"bun","version":"0.6.1","project_path":"...","bridge":{
+ "port":53782,"pid":95468,"version":"0.1.0","source":"lockfile","reachable":true,
+ "readiness":{"is_playing":false,"is_paused":false,"is_compiling":false,"is_updating":false,
+ "is_playmode_transitioning":false,"is_reloading":false,"is_stable":true}}}
+```
+
+`reachable: true` with `is_stable: false` means the bridge is up but the Editor is busy — wait rather than reinstall.
 
 By default, `install` writes the GitHub package URL. For local bridge package development, use `unity-agentic-tools install --local -p /path/to/UnityProject`; existing `file:` dependencies are preserved unless `--remote` is passed.
 
@@ -196,7 +208,14 @@ bun run check:classids       # Unity ClassID drift check (needs network)
 bun run hooks                # enable the repo's git hooks
 ```
 
-`bun run test:integration:unity` runs headless Editor validation and needs a Unity executable via `--unity-bin` or `UNITY_BIN`. CI does not run it, or `build:unity-package`.
+Two suites are opt-in and not run by CI, alongside `build:unity-package`:
+
+- `bun run test:integration:unity` runs headless Editor validation and needs a Unity executable via `--unity-bin` or `UNITY_BIN`.
+- `bun run test:integration:stress` drives play mode enter/exit cycles against an *open* Editor and reports per-call latency and failures by JSON-RPC error code. Run it when changing retry or transport behaviour in `unity-agentic-tools/src/editor-client.ts`.
+
+```bash
+bun run test:integration:stress -- --project /path/to/UnityProject --cycles 5
+```
 
 The Unity package compile script uses `UNITY_APP` when set, otherwise it discovers installed Unity Hub editors. You can also request a specific Hub version with `UNITY_EDITOR_VERSION`:
 

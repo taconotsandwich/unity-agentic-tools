@@ -45,6 +45,22 @@ Use this for GameObjects, components, prefab instances, parenting, sibling order
 
 Refs such as `@hN` and `@uN` invalidate on scene change, play mode transition, or domain reload. Re-run `scene.hierarchy` or `ui.snapshot` to refresh.
 
+### Play Mode Transitions
+
+`play.enter` and `play.exit` report what the Editor is doing when they return, not the state you asked for. `requested` names the intent; `state` and `isPlaying` are queried live:
+
+```json
+{"success":true,"requested":"Playing","state":"Stopped","isPlaying":false}
+```
+
+Unity applies the change over several frames, and entering play mode reloads the domain, so both directions return before the transition lands. Gate on `play.state`, never on the transition response:
+
+```bash
+unity-agentic-tools run play.state -p <project>
+```
+
+No manual sleep is needed between step 2 and step 3 — reads issued during a transition wait it out on their own. They will just be slow (seconds, not milliseconds).
+
 `scene.hierarchy` caps output at 500 nodes and `ui.snapshot` at 300 elements by default; a capped response carries `"truncated": true`. Pass a larger trailing max argument (or `0` for unlimited) to lift the cap, e.g. `run scene.hierarchy 99 false 0`.
 
 ## Batch Editing

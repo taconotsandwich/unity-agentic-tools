@@ -22,7 +22,7 @@ Use this skill for Unity Agentic Tools CLI setup, command discovery, command exe
 | `install` | Install the Unity bridge package |
 | `uninstall` | Remove the Unity bridge package |
 | `cleanup` | Remove stale bridge state or rebuildable `.unity-agentic` caches |
-| `status` | Check command runner and bridge reachability |
+| `status` | Check command runner and bridge reachability, plus a `readiness` block saying what the Editor is busy with |
 
 Commands emit compact single-line JSON by default; pass `--pretty` for indented output. Prefer `list <query> --brief` for discovery.
 
@@ -91,8 +91,10 @@ unity-agentic-tools run build.addressables Production -p <project>
 
 Full detail lives in `reference/troubleshooting.md`. Quick pointers:
 
-- **Bridge won't connect**: see "Bridge Not Reachable" (install, open Unity, wait for compile, status, cleanup).
+- **Bridge won't connect**: see "Bridge Not Reachable" (install, open Unity, wait for compile, status, cleanup). `reachable: true` with `is_stable: false` means busy, not broken.
 - **Long builds time out**: `run` defaults to 60s; see "Long-running Commands" (`--timeout 1200000`, `--no-wait`).
+- **Play mode looks wrong right after `play.enter`**: the response reports the current state, not the requested one. Poll `play.state`; see "Play Mode Transitions" in `reference/live-editor-workflows.md`.
+- **Reads are slow during a transition**: expected. Reads wait out a domain reload for up to 30s instead of failing; see "Domain reloads" in "Long-running Commands".
 - **Stale `@hN`/`@uN` refs**: re-run `scene.hierarchy` or `ui.snapshot`; see "Stale Refs".
 - **Need console logs**: `unity-agentic-tools stream console --duration 5000 -p <project>`.
 - **Need raw APIs**: `unity-agentic-tools list <type-or-namespace> --raw -p <project>`.

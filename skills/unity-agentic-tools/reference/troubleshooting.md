@@ -10,6 +10,23 @@
 
 Use `--port <n>` only when targeting a known bridge port manually.
 
+### Reading `status`
+
+When the bridge answers, `status` adds a `readiness` block inside `bridge`:
+
+```json
+{"runtime":"bun","version":"0.6.1","project_path":"...","bridge":{
+ "port":53782,"pid":95468,"version":"0.1.0","source":"lockfile","reachable":true,
+ "readiness":{"is_playing":false,"is_paused":false,"is_compiling":false,"is_updating":false,
+ "is_playmode_transitioning":false,"is_reloading":false,"is_stable":true}}}
+```
+
+- `reachable: true` with `is_stable: false` means the bridge is up but the Editor is busy. Wait; do not reinstall or clean up.
+- `readiness_error` instead of `readiness` means the socket opened but the Editor did not answer in time. Same "busy" signal, harsher form.
+- `reachable: false` means no socket at all: Unity closed, mid-reload, or the package is not installed.
+
+A call issued while Unity is running but the bridge server is dead takes about 30s to fail, because the client cannot distinguish that from a slow domain reload. That wait is deliberate.
+
 ## Long-running Commands (build, bake, reimport)
 
 The `run` command defaults to a 60s WebSocket timeout. Builds, lighting bakes, AssetDatabase reimports, and platform switches commonly exceed it.
@@ -33,7 +50,21 @@ The `run` command defaults to a 60s WebSocket timeout. Builds, lighting bakes, A
 
 - **The Unity main thread is single-threaded.** Stacked `run` calls queue on `_mainThreadQueue` and execute serially. Do not fire a second `run` while the first is still executing — it will sit in the queue and your client will time out before its turn comes up. Either wait for the first to return, or stream `editor.event.*` notifications until the first op signals completion.
 
-- **Domain reloads cancel in-flight requests.** Any script edit, `.asmdef` change, or scripting-define adjustment triggers `OnBeforeAssemblyReload`, which tears down the bridge and orphans pending requests with the error `Editor invoke was interrupted by a server transition before its response could be delivered`. The bridge auto-restarts on `afterAssemblyReload`; just retry once `unity-agentic-tools status` reports reachable again.
+- **Domain reloads interrupt in-flight requests, but reads recover on their own.** Any script edit, `.asmdef` change, scripting-define adjustment, or *entering play mode* triggers `OnBeforeAssemblyReload`, which tears the bridge down for roughly 4-7s on a large project. Read commands (`scene.hierarchy`, `scene.query`, `query.*`, `ui.snapshot`, `ui.query`, `play.state`, `input.map`, `tests.results`) and the `play.*` transitions (`enter`, `exit`, `pause`, `step`) wait that window out automatically, for up to 30s and only while the Unity process is provably alive. Expect a slow call, not a failure.
+
+- **Mutating commands do not silently retry a reload.** Codes `-32000` (server restarting) and `-32003` (closed before response) mean the request may already be executing on Unity's main thread, so replaying it could apply it twice. Only `-32002` (connect refused) and `-32010` (discovery unavailable) are retried for mutations, because neither reaches the Editor. A mutation interrupted mid-flight returns `Editor invoke was interrupted by a server transition before its response could be delivered` — treat that as "result unknown", check the side effects, then decide whether to re-run.
+
+## Stream Drops
+
+`stream` reconnects by itself when the bridge goes away, so a domain reload mid-stream is not a reason to restart the command — events resume on the far side. Reconnects are bounded by wall clock (30s from the drop), not by an attempt count.
+
+If it cannot get back, it fails loudly rather than sitting connected to nothing:
+
+```json
+{"success":false,"error":"Stream lost: could not reconnect within 30000ms"}
+```
+
+and exits non-zero. A rejected subscription (`Subscription rejected: ...`) is reported the same way. A stream that goes quiet without either message is Unity being quiet, not the CLI hiding an error.
 
 ## Stale Refs
 
