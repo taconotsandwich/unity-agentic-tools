@@ -26,6 +26,7 @@ interface RunCommandOptions extends BridgeCommandOptions {
 
 interface ListCommandOptions extends BridgeCommandOptions {
     raw?: boolean;
+    brief?: boolean;
 }
 
 interface StreamCommandOptions extends BridgeCommandOptions {
@@ -137,6 +138,31 @@ function is_record(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function strip_command_listing_details(payload: unknown): unknown {
+    if (!is_record(payload)) {
+        return payload;
+    }
+
+    if (Array.isArray(payload.commands)) {
+        return {
+            ...payload,
+            commands: payload.commands.map((entry: unknown) => {
+                if (!is_record(entry)) {
+                    return entry;
+                }
+                const { args: _args, source: _source, ...brief } = entry;
+                return brief;
+            }),
+        };
+    }
+
+    if ('result' in payload) {
+        return { ...payload, result: strip_command_listing_details(payload.result) };
+    }
+
+    return payload;
+}
+
 function event_matches_topic(event: RpcEvent, topic: string, type_filter?: string): boolean {
     if (topic === 'console') {
         if (event.method !== 'editor.console.logReceived') {
@@ -185,6 +211,7 @@ program.command('list [query]')
     .option('--timeout <ms>', 'WebSocket timeout in ms', '10000')
     .option('--port <n>', 'Connect to a specific bridge port')
     .option('--raw', 'Include raw public static methods/properties for matching types')
+    .option('--brief', 'List names and descriptions only, omit args')
     .option('--pretty', 'Pretty-print JSON output')
     .action(async (query: string | undefined, options: ListCommandOptions) => {
         const bridge = resolve_bridge_options(options);
@@ -197,6 +224,9 @@ program.command('list [query]')
                 args: build_registry_args([query || '', options.raw === true ? 'true' : 'false']),
             },
         });
+        if (options.brief === true && !response.error) {
+            response.result = strip_command_listing_details(response.result);
+        }
         output_rpc_response(response, options.pretty === true);
     });
 
