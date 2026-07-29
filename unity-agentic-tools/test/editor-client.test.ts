@@ -9,6 +9,7 @@ import {
     install_mock_websocket,
     registry_run_params,
     restore_websocket,
+    write_cached_config,
     write_lockfile,
 } from './editor-websocket-mock';
 
@@ -188,6 +189,119 @@ describe('call_editor', () => {
         });
 
         expect(response.error).toBeDefined();
+    });
+
+    // The lockfile is Unity-owned and can vanish for the whole reload window --
+    // exactly the window the budget exists to cover. The CLI-owned cache is
+    // enough to know a wait is worthwhile.
+    test('waits out a reload with no lockfile at all, on the cached pid', async () => {
+        write_cached_config(tmp_dir, 53785, process.pid);
+
+        install_mock_websocket({
+            53785: {
+                reachable_after_ms: RELOAD_WINDOW_MS,
+                bridge_info: {
+                    port: 53785,
+                    pid: process.pid,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('scene.save'),
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true });
+    });
+
+    test('a dead cached pid fails fast even though the record exists', async () => {
+        write_cached_config(tmp_dir, 53785, DEAD_PID);
+
+        install_mock_websocket({
+            53785: {
+                reachable_after_ms: RELOAD_WINDOW_MS,
+                bridge_info: {
+                    port: 53785,
+                    pid: DEAD_PID,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('scene.save'),
+        });
+
+        expect(response.error).toBeDefined();
+    });
+
+    test('no lockfile and no cache means no pid to wait on, so it fails fast', async () => {
+        install_mock_websocket({
+            53785: {
+                reachable_after_ms: RELOAD_WINDOW_MS,
+                bridge_info: {
+                    port: 53785,
+                    pid: process.pid,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('scene.save'),
+        });
+
+        expect(response.error).toBeDefined();
+    });
+
+    // A dead pid in the lockfile must not veto a live one the cache still knows.
+    test('falls through a dead lockfile pid to the cached record', async () => {
+        write_lockfile(tmp_dir, 53785, DEAD_PID);
+        write_cached_config(tmp_dir, 53786, process.pid);
+
+        install_mock_websocket({
+            53786: {
+                reachable_after_ms: RELOAD_WINDOW_MS,
+                bridge_info: {
+                    port: 53786,
+                    pid: process.pid,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('scene.save'),
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true });
     });
 
     test('an explicit retries option caps waiting even for a live editor', async () => {

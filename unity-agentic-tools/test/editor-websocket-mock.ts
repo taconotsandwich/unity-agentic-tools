@@ -241,6 +241,17 @@ export function write_lockfile(dir: string, port: number, pid: number): void {
     writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({ port, pid, version: '0.1.0' }), 'utf-8');
 }
 
+/** The CLI-owned last-known record, which outlives the Unity-owned lockfile. */
+export function write_cached_config(dir: string, port: number, pid: number): void {
+    const config_dir = join(dir, '.unity-agentic');
+    mkdirSync(config_dir, { recursive: true });
+    writeFileSync(
+        join(config_dir, 'editor.last.json'),
+        JSON.stringify({ port, pid, version: '0.1.0', project_path: dir }),
+        'utf-8',
+    );
+}
+
 /** Mirrors what cli.ts sends: the real target lives inside params.args, not the method. */
 export function registry_run_params(target: string, args: string[] = []): Record<string, unknown> {
     return {

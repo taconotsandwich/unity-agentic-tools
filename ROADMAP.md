@@ -576,11 +576,23 @@ The editor bridge should not be considered stable until all of the following are
 - met: repeated play enter/exit cycles keep the bridge available
 - met: unary reads like `play-state`, `console-logs`, and `hierarchy-snapshot` do not transiently fail during normal transitions
 - met: stream subscriptions reconnect without manual intervention
-- open: discovery is no longer critically dependent on a single Unity-owned file
+- met: discovery is no longer critically dependent on a single Unity-owned file
 - open: lower-level model mutation flows cannot produce invalid YAML through the default safe tool surface
 - open: force/unsafe mutation paths are explicit and auditable
 
-The four met items close Phase 0. The three open items belong to Phase 0.5 and
+The discovery item was stale as written. `discover_editor_config`
+(`unity-agentic-tools/src/editor-discovery.ts`) has three tiers: the Unity-owned
+`editor.json` lockfile, the CLI-owned `editor.last.json` cache, and a full
+53782-53791 port scan matched on `project_path`. Losing the lockfile costs a port
+scan, not the connection.
+
+The part that really did depend on the lockfile was the *retry* path, not
+discovery: reload tolerance re-read `editor.json` on every poll to decide whether
+the Editor was still alive, so an unreadable lockfile mid-reload ended the wait in
+exactly the window the budget exists to cover. That now resolves a pid once per
+call from the lockfile or the cache, whichever answers.
+
+The five met items close Phase 0. The two open items belong to Phase 0.5 and
 later, so the bridge is not yet stable by this bar as a whole.
 
 ## Current Recommendation

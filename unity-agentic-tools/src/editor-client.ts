@@ -1,6 +1,7 @@
 import {
     discover_editor_config,
-    read_editor_config,
+    is_pid_alive,
+    read_candidate_editor_pid,
 } from './editor-discovery';
 import {
     DEFAULT_EDITOR_REQUEST_TIMEOUT_MS,
@@ -132,6 +133,12 @@ export async function call_editor(options: CallEditorOptions): Promise<RpcRespon
     const delays = semantics.retry_delays_ms;
     const started = Date.now();
 
+    // Read once up front, not lazily on the first poll: a failed cache ping makes
+    // discovery forget the last-known record, so by the time retries are
+    // exhausted the file this would have read is already gone. 0 means no source
+    // could name a pid, which means there is nothing to wait on.
+    const watched_pid = options.port === undefined ? read_candidate_editor_pid(options.project_path) : 0;
+
     let last_response: RpcResponse | undefined;
 
     for (let attempt = 0; ; attempt++) {
@@ -148,7 +155,7 @@ export async function call_editor(options: CallEditorOptions): Promise<RpcRespon
 
         // An explicit retries option is a hard cap; otherwise keep waiting out a
         // domain reload while the Editor is still alive.
-        if (explicit_retries || !within_reload_tolerance(options, started)) {
+        if (explicit_retries || !within_reload_tolerance(options, started, watched_pid)) {
             return last_response;
         }
 
@@ -159,12 +166,14 @@ export async function call_editor(options: CallEditorOptions): Promise<RpcRespon
 /**
  * True while it is worth waiting out a domain reload.
  *
- * StopForReload deliberately leaves the lockfile in place and the Unity process
- * survives an assembly reload, so a live pid with an unreachable server means
- * "reloading". A closed or crashed Editor still fails fast, because
- * read_editor_config rejects a missing lockfile or a dead pid.
+ * The Unity process survives an assembly reload, so a live pid with an
+ * unreachable server means "reloading" and a dead pid means "closed". The pid is
+ * resolved once per call rather than re-read from editor.json every poll, which
+ * keeps the retry path off a file Unity owns and rewrites -- the lockfile being
+ * unreadable mid-reload is the window this budget exists to cover, so treating
+ * it as "give up" defeated the purpose.
  */
-function within_reload_tolerance(options: CallEditorOptions, started: number): boolean {
+function within_reload_tolerance(options: CallEditorOptions, started: number, watched_pid: number): boolean {
     if (options.port !== undefined) {
         return false;
     }
@@ -173,7 +182,7 @@ function within_reload_tolerance(options: CallEditorOptions, started: number): b
         return false;
     }
 
-    return !('error' in read_editor_config(options.project_path));
+    return watched_pid !== 0 && is_pid_alive(watched_pid);
 }
 
 function sleep(ms: number): Promise<void> {
