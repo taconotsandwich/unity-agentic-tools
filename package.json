@@ -11,7 +11,6 @@
     "test:all": "bun run test && bun run test:integration",
     "test:integration": "cd unity-agentic-tools && bash test/cli-integration.test.sh",
     "test:integration:unity": "cd unity-agentic-tools && bun run test:unity-headless",
-    "test:coverage": "cd unity-agentic-tools && bun run test:coverage",
     "check:classids": "bun scripts/check-classid-drift.js",
     "generate:agent-guidance": "bun scripts/generate-agent-guidance.js",
     "type-check": "cd unity-agentic-tools && tsc --noEmit",

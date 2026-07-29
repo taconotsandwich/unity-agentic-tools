@@ -6,9 +6,4 @@ export default defineConfig({
     exclude: ['node_modules', 'dist'],
     globals: true,
   },
-  coverage: {
-    provider: 'v8',
-    reporter: ['text', 'json', 'html'],
-    exclude: ['**/*.test.ts', 'node_modules'],
-  },
 });

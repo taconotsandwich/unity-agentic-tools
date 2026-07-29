@@ -46,19 +46,3 @@ jobs:
         if: runner.os != 'Windows'
         working-directory: ./unity-agentic-tools
         run: bash test/cli-integration.test.sh
-
-      - name: Generate test coverage
-        if: matrix.os == 'ubuntu-latest'
-        run: bun run test:coverage
-
-      - name: Upload coverage to Codecov
-        if: matrix.os == 'ubuntu-latest'
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./unity-agentic-tools/coverage/lcov.info
-          flags: unittests
-          name: unity-agentic-tools-coverage
-          fail_ci_if_error: false
-          verbose: true
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
