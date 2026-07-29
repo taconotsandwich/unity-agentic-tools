@@ -583,6 +583,14 @@ namespace UnityAgenticTools.Create
                 {
                     gameObject.transform.SetParent(parent.transform, false);
                 }
+                else if (context.IsScene)
+                {
+                    // new GameObject() lands in the active scene, and the context
+                    // opens its target additively without activating it. Without
+                    // this the object is written into whichever scene the editor
+                    // happens to have active, and the saved target never gets it.
+                    SceneManager.MoveGameObjectToScene(gameObject, context.Scene);
+                }
 
                 context.MarkDirty(gameObject);
                 context.Save();
