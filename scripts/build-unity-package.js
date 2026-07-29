@@ -8,6 +8,8 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PROJECT_PATH = resolve(REPO_ROOT, 'tools', 'dotnet-unity-compile', 'UnityAgenticTools.UnityPackage.csproj');
 
 function main() {
+    require_supported_platform();
+
     const unity_app = resolve_unity_app();
     if (!unity_app) {
         fail('Unity app not found. Set UNITY_APP=/path/to/Unity.app or install Unity through Unity Hub.');
@@ -26,7 +28,29 @@ function main() {
         stdio: 'inherit',
     });
 
+    if (result.error) {
+        if (result.error.code === 'ENOENT') {
+            fail('dotnet not found on PATH. Install the .NET SDK from https://dotnet.microsoft.com/download, then re-run.');
+        }
+
+        fail(`Failed to run dotnet: ${result.error.message}`);
+    }
+
     process.exit(result.status ?? 1);
+}
+
+// The compile harness references Unity assemblies through the macOS bundle
+// layout (Contents/Resources/...), so other platforms would fail later inside
+// MSBuild with a less useful message.
+function require_supported_platform() {
+    if (process.platform === 'darwin') {
+        return;
+    }
+
+    fail(
+        `build:unity-package currently supports macOS only (this is ${process.platform}).\n` +
+        'Compile the package by opening the Unity project instead.'
+    );
 }
 
 function resolve_unity_app() {
