@@ -11,18 +11,26 @@ namespace UnityAgenticTools.Util
     public static class Hierarchy
     {
 
-        public static object Snapshot(int maxDepth = 99, bool includeInactive = false)
+        public static object Snapshot(int maxDepth = 99, bool includeInactive = false, int maxNodes = 500)
         {
                 RefManager.ClearHierarchy();
 
                 var scene = SceneManager.GetActiveScene();
                 var roots = scene.GetRootGameObjects();
                 var tree = new List<object>();
+                var remaining = maxNodes > 0 ? maxNodes : int.MaxValue;
+                var truncated = false;
 
                 foreach (var root in roots)
                 {
                     if (!includeInactive && !root.activeInHierarchy) continue;
-                    tree.Add(BuildNode(root, 0, maxDepth, includeInactive));
+                    var node = BuildNode(root, 0, maxDepth, includeInactive, ref remaining);
+                    if (node == null)
+                    {
+                        truncated = true;
+                        break;
+                    }
+                    tree.Add(node);
                 }
 
                 return new Dictionary<string, object>
@@ -30,12 +38,19 @@ namespace UnityAgenticTools.Util
                     { "scene", scene.name },
                     { "scenePath", scene.path },
                     { "refCount", RefManager.GetHierarchyRefCount() },
+                    { "truncated", truncated },
                     { "tree", tree.ToArray() }
                 };
         }
 
-        private static object BuildNode(GameObject go, int depth, int maxDepth, bool includeInactive)
+        private static object BuildNode(GameObject go, int depth, int maxDepth, bool includeInactive, ref int remaining)
         {
+            if (remaining <= 0)
+            {
+                return null;
+            }
+
+            remaining--;
             string refStr = RefManager.RegisterHierarchy(UnityObjectCompat.GetObjectId(go));
 
             var node = new Dictionary<string, object>
@@ -76,7 +91,12 @@ namespace UnityAgenticTools.Util
                 {
                     var child = go.transform.GetChild(i).gameObject;
                     if (!includeInactive && !child.activeInHierarchy) continue;
-                    children.Add(BuildNode(child, depth + 1, maxDepth, includeInactive));
+                    var childNode = BuildNode(child, depth + 1, maxDepth, includeInactive, ref remaining);
+                    if (childNode == null)
+                    {
+                        break;
+                    }
+                    children.Add(childNode);
                 }
                 if (children.Count > 0)
                     node["children"] = children.ToArray();

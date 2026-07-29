@@ -16,7 +16,7 @@ namespace UnityAgenticTools.Util
 
         // --- Snapshot ---
 
-        public static object Snapshot()
+        public static object Snapshot(int maxElements = 300)
         {
 
                 var elements = new List<UIElementInfo>();
@@ -34,9 +34,16 @@ namespace UnityAgenticTools.Util
                 // Walk UI Toolkit
                 elements.AddRange(UIWalker.WalkUIToolkit());
 
+                var limit = maxElements > 0 ? maxElements : int.MaxValue;
+                var truncated = elements.Count > limit;
                 var items = new List<object>();
                 foreach (var elem in elements)
                 {
+                    if (items.Count >= limit)
+                    {
+                        break;
+                    }
+
                     var item = new Dictionary<string, object>
                     {
                         { "ref", elem.Ref },
@@ -69,6 +76,7 @@ namespace UnityAgenticTools.Util
                 return new Dictionary<string, object>
                 {
                     { "refCount", RefManager.GetUIRefCount() },
+                    { "truncated", truncated },
                     { "elements", items.ToArray() }
                 };
         }
