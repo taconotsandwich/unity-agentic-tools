@@ -73,8 +73,7 @@ namespace UnityAgenticTools.Query
 
                 components.Add(new Dictionary<string, object>
                 {
-                    { "type", component.GetType().FullName },
-                    { "name", component.GetType().Name }
+                    { "type", component.GetType().FullName }
                 });
             }
 

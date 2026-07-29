@@ -615,7 +615,6 @@ namespace UnityAgenticTools
             }
             else if (unityObject is Component component)
             {
-                TryAddUnityProperty(payload, "gameObjectName", () => component.gameObject.name);
                 TryAddUnityProperty(payload, "gameObjectInstanceId", () => UnityObjectCompat.GetObjectId(component.gameObject));
                 TryAddUnityProperty(payload, "path", () => GetHierarchyPath(component.transform));
 
