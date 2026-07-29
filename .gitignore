@@ -74,8 +74,5 @@ unity-agentic-tools/native/
 # Rust
 target/
 
-# Doc indexer artifacts
-.unity-docs-index.json
-
 # Machine-local skill install state
 skills-lock.json
