@@ -99,20 +99,37 @@ Impact:
 
 ## Stress-Test Findings
 
-The most relevant recent findings are:
+These numbers come from `bun run test:integration:stress`
+(`unity-agentic-tools/test/run-bridge-stress.ts`), against a live Editor. Earlier
+figures in this file came from an ad hoc script that was never committed and so
+could not be reproduced.
 
-- compile reload stress passed: repeated explicit `RequestScriptCompilation` cycles dropped and recovered the bridge successfully
-- play enter/exit stress passed in the sense that the bridge always recovered
-- transient read failures still exist during play entry
+Baseline, before any fix, 3 play cycles at 8 reads per phase:
 
-Latest observed residual issue after multiple fixes:
+- `total_calls=102`, `transient_reads=1`, all of it `-32010` during the entering phase
 
-- a short `editor play-state` probe still produced `transient_reads=1` across `3` play cycles with `8` reads per cycle
+Localized with `--no-retry`, which strips the retry budget and exposes the raw
+transition window:
+
+- `total_calls=196`, `transient_reads=48` — every read target failed exactly 12
+  times, i.e. 100% of entering-phase reads, and 0% of exiting-phase reads
+
+That asymmetry is the whole story: entering play mode reloads the domain and
+takes the server down for 4-7s, while exiting does not (`play.exit` returns in
+~6ms). The fixed retry budgets spanned 5.25-6.25s, so they covered the window
+most of the time and missed it occasionally — a ~1-in-102 failure rate.
+
+After replacing the count-based budget with a deadline gated on lockfile PID
+aliveness:
+
+- 5 play cycles, `total_calls=170`, `total_failures=0`, `transient_reads=0`
+- a compile-and-reload run: 166 calls, 0 failures, worst read wait 6438ms against
+  a 30s budget
 
 Interpretation:
 
-- the hard outage problem is much smaller than before
-- the remaining bug is now a narrow transition-window problem, not a full bridge-loss problem
+- the transient-read problem was a budget-shape problem, not a bridge-loss problem
+- a count of retries cannot express "survive a domain reload"; only a deadline can
 
 ## Design Principles
 
@@ -420,7 +437,7 @@ This makes it easier to debug model behavior and tool failures later.
 
 ### Phase 0. Harden the current in-process bridge
 
-Status: in progress
+Status: complete
 
 Work:
 
@@ -432,9 +449,10 @@ Work:
 
 Success criteria:
 
-- no lost bridge across repeated compile reloads
-- no lost bridge across repeated play enter/exit cycles
-- `editor play-state` should not miss during normal play transitions
+- no lost bridge across repeated compile reloads — met
+- no lost bridge across repeated play enter/exit cycles — met
+- `editor play-state` should not miss during normal play transitions — met,
+  `transient_reads=0` across 5 play cycles (see Stress-Test Findings)
 
 ### Phase 0.5. Replace the loaded-file blocker with a mutation-safety blocker
 
@@ -554,13 +572,16 @@ These are the next concrete tasks worth doing.
 
 The editor bridge should not be considered stable until all of the following are true:
 
-- repeated compile reload cycles keep the bridge available
-- repeated play enter/exit cycles keep the bridge available
-- unary reads like `play-state`, `console-logs`, and `hierarchy-snapshot` do not transiently fail during normal transitions
-- stream subscriptions reconnect without manual intervention
-- discovery is no longer critically dependent on a single Unity-owned file
-- lower-level model mutation flows cannot produce invalid YAML through the default safe tool surface
-- force/unsafe mutation paths are explicit and auditable
+- met: repeated compile reload cycles keep the bridge available
+- met: repeated play enter/exit cycles keep the bridge available
+- met: unary reads like `play-state`, `console-logs`, and `hierarchy-snapshot` do not transiently fail during normal transitions
+- met: stream subscriptions reconnect without manual intervention
+- open: discovery is no longer critically dependent on a single Unity-owned file
+- open: lower-level model mutation flows cannot produce invalid YAML through the default safe tool surface
+- open: force/unsafe mutation paths are explicit and auditable
+
+The four met items close Phase 0. The three open items belong to Phase 0.5 and
+later, so the bridge is not yet stable by this bar as a whole.
 
 ## Current Recommendation
 
