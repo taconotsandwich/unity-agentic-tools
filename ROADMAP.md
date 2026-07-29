@@ -577,7 +577,7 @@ The editor bridge should not be considered stable until all of the following are
 - met: unary reads like `play-state`, `console-logs`, and `hierarchy-snapshot` do not transiently fail during normal transitions
 - met: stream subscriptions reconnect without manual intervention
 - met: discovery is no longer critically dependent on a single Unity-owned file
-- open: lower-level model mutation flows cannot produce invalid YAML through the default safe tool surface
+- met: lower-level model mutation flows cannot produce invalid YAML through the default safe tool surface
 - open: force/unsafe mutation paths are explicit and auditable
 
 The discovery item was stale as written. `discover_editor_config`
@@ -592,7 +592,21 @@ the Editor was still alive, so an unreadable lockfile mid-reload ended the wait 
 exactly the window the budget exists to cover. That now resolves a pid once per
 call from the lockfile or the cache, whichever answers.
 
-The five met items close Phase 0. The two open items belong to Phase 0.5 and
+The YAML item predates the bridge-first migration. Every mutation on the safe
+surface now runs through Unity's own `SerializedObject` and `AssetDatabase`
+writers, so Unity emits the YAML and the local-mutation corruption class this
+criterion was written against no longer has a code path.
+
+That is now tested rather than assumed.
+`unity-package/Tests/Editor/SafeSurfaceYamlTests.cs` drives `create.scene`,
+`create.gameobject`, `create.component`, `update.transform`, `update.component`,
+`update.batch`, `update.object`, `create.prefab`, `create.prefab-instance`, and
+`update.prefab.override` through `Registry.Run` using names full of YAML
+metacharacters -- including embedded newlines, the classic way to split one
+scalar into several -- then forces a re-import and asserts every value round
+trips. Run it with `bun run test:integration:unity-tests`.
+
+The six met items close Phase 0. The one open item belongs to Phase 0.5 and
 later, so the bridge is not yet stable by this bar as a whole.
 
 ## Current Recommendation
