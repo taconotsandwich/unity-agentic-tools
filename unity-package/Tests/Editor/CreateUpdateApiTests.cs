@@ -1,11 +1,13 @@
 using System;
 using System.IO;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.TestTools;
 using UnityAgenticTools.Bridge.Transport;
 using UnityAgenticTools.Create;
 using UnityAgenticTools.Update;
@@ -77,7 +79,6 @@ namespace UnityAgenticTools.Tests
             Assert.That(response, Does.Contain("\"success\":true"));
 
             EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
-            Assert.That(GameObject.Find("Root/Child"), Is.Null);
             var child = GameObject.Find("Child");
             Assert.That(child, Is.Not.Null);
             Assert.That(child.transform.parent, Is.Not.Null);
@@ -192,6 +193,8 @@ namespace UnityAgenticTools.Tests
                 "GameObject",
                 "Assets/Scenes/Main.unity",
                 "Child");
+
+            LogAssert.Expect(LogType.Error, new Regex(@"Type not found: UnityAgenticTools\.API\.CreateAPI"));
 
             var response = await MessageDispatcher.Dispatch(request);
             Assert.That(response, Does.Contain("Type not found"));

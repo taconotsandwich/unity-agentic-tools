@@ -119,14 +119,18 @@ namespace UnityAgenticTools.Tests
         }
 
         [Test]
-        public async Task Dispatch_ValidPlayModeGetState_ReturnsResult()
+        public async Task Dispatch_InvokePlayModeGetState_ReturnsResult()
         {
             MessageDispatcher.Reset();
 
-            var request = "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"editor.playMode.getState\"}";
+            var request = BuildInvokeRequest(
+                "playmode-1",
+                "UnityAgenticTools.Util.PlayMode",
+                "GetState");
+
             var response = await MessageDispatcher.Dispatch(request);
 
-            Assert.That(response, Does.Contain("\"id\":\"1\""));
+            Assert.That(response, Does.Contain("\"id\":\"playmode-1\""));
             Assert.That(response, Does.Contain("\"result\""));
             Assert.That(response, Does.Contain("\"state\""));
         }

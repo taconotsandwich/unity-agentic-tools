@@ -144,9 +144,12 @@ namespace UnityAgenticTools.Tests
             try
             {
                 var result = JsonRpcParser.SerializeValue(component);
-                Assert.That(result, Does.Contain("\"name\":\"BoxCollider\""));
+                Assert.That(result, Does.Contain("\"name\":\"AppRoot\""),
+                    "Component.name proxies the owning GameObject name.");
                 Assert.That(result, Does.Contain("\"type\":\"BoxCollider\""));
-                Assert.That(result, Does.Contain("\"gameObjectName\":\"AppRoot\""));
+                Assert.That(result, Does.Contain("\"gameObjectInstanceId\""));
+                Assert.That(result, Does.Not.Contain("\"gameObjectName\""),
+                    "gameObjectName was dropped as redundant with name.");
                 Assert.That(result, Does.Contain("\"path\":\"AppRoot\""));
                 Assert.That(result, Does.Not.Contain("\"gameObject\":{"));
             }
