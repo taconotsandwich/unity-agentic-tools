@@ -84,7 +84,7 @@ unity-agentic-tools run build.addressables Production -p <project>
 ## References
 
 - `reference/live-editor-workflows.md`: live Editor setup, mutation, UI, and batch workflows
-- `reference/command-reference.md`: generated alias reference from `Registry.cs`
+- `reference/command-reference.md`: generated alias reference with arg hints (`<required>` `[optional]`)
 - `reference/troubleshooting.md`: bridge, timeouts, refs, JSON args, and verification
 
 ## Troubleshooting

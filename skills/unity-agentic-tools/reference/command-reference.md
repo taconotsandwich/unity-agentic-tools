@@ -2,7 +2,7 @@
 
 Generated from `unity-package/Editor/Commands/Registry.cs`.
 
-Use aliases before raw public static C# targets.
+Use aliases before raw public static C# targets. Argument hints: `<required>` `[optional]`.
 
 ## project
 
@@ -10,75 +10,75 @@ Use aliases before raw public static C# targets.
 |-------|-------------|---------|
 | `project.refresh` | `UnityEditor.AssetDatabase.Refresh` | Refresh the Unity AssetDatabase. |
 | `project.save-assets` | `UnityEditor.AssetDatabase.SaveAssets` | Save modified project assets. |
-| `project.build.add` | `UnityAgenticTools.Create.Project.Build` | Add a scene to build settings. |
-| `project.package.add` | `UnityAgenticTools.Create.Project.Package` | Add or update a package dependency. |
+| `project.build.add <scenePath> [position]` | `UnityAgenticTools.Create.Project.Build` | Add a scene to build settings. |
+| `project.package.add <name> <version>` | `UnityAgenticTools.Create.Project.Package` | Add or update a package dependency. |
 
 ## scene
 
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
-| `scene.open` | `UnityAgenticTools.Util.Scene.Open` | Open a scene in the Unity Editor. |
+| `scene.open <scenePath> [additive]` | `UnityAgenticTools.Util.Scene.Open` | Open a scene in the Unity Editor. |
 | `scene.save` | `UnityAgenticTools.Util.Scene.Save` | Save the active scene. |
-| `scene.hierarchy` | `UnityAgenticTools.Util.Hierarchy.Snapshot` | Return a hierarchy snapshot for the active scene. |
-| `scene.query` | `UnityAgenticTools.Util.Hierarchy.Query` | Query a hierarchy ref from a snapshot. |
+| `scene.hierarchy [maxDepth] [includeInactive] [maxNodes]` | `UnityAgenticTools.Util.Hierarchy.Snapshot` | Return a hierarchy snapshot for the active scene. |
+| `scene.query <refStr> <query> [type]` | `UnityAgenticTools.Util.Hierarchy.Query` | Query a hierarchy ref from a snapshot. |
 
 ## query
 
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
-| `query.assets` | `UnityAgenticTools.Query.Assets.Find` | Find assets with Unity AssetDatabase filters. |
-| `query.asset` | `UnityAgenticTools.Query.Assets.Info` | Inspect basic AssetDatabase metadata for an asset path. |
-| `query.scene` | `UnityAgenticTools.Query.Scene.Hierarchy` | Inspect hierarchy data for the active scene or an asset path. |
-| `query.object` | `UnityAgenticTools.Query.Scene.Object` | Inspect one GameObject in a scene or prefab asset. |
+| `query.assets [filter] [foldersCsv] [maxResults]` | `UnityAgenticTools.Query.Assets.Find` | Find assets with Unity AssetDatabase filters. |
+| `query.asset <assetPath>` | `UnityAgenticTools.Query.Assets.Info` | Inspect basic AssetDatabase metadata for an asset path. |
+| `query.scene [assetPath] [maxDepth] [includeInactive]` | `UnityAgenticTools.Query.Scene.Hierarchy` | Inspect hierarchy data for the active scene or an asset path. |
+| `query.object <assetPath> <gameObjectPath>` | `UnityAgenticTools.Query.Scene.Object` | Inspect one GameObject in a scene or prefab asset. |
 
 ## create
 
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
-| `create.scene` | `UnityAgenticTools.Create.Scenes.Scene` | Create a scene asset. |
-| `create.gameobject` | `UnityAgenticTools.Create.Scenes.GameObject` | Create a GameObject in a scene or prefab. |
-| `create.component` | `UnityAgenticTools.Create.Scenes.Component` | Add a component to a GameObject. |
-| `create.component-copy` | `UnityAgenticTools.Create.Scenes.ComponentCopy` | Copy a component between GameObjects. |
-| `create.prefab` | `UnityAgenticTools.Create.Prefabs.Prefab` | Create a prefab asset. |
-| `create.prefab-instance` | `UnityAgenticTools.Create.Prefabs.PrefabInstance` | Instantiate a prefab into a scene. |
-| `create.prefab-variant` | `UnityAgenticTools.Create.Prefabs.PrefabVariant` | Create a prefab variant. |
-| `create.scriptable-object` | `UnityAgenticTools.Create.Assets.ScriptableObject` | Create a ScriptableObject asset. |
-| `create.meta` | `UnityAgenticTools.Create.Assets.Meta` | Create a meta file for an asset. |
-| `create.material` | `UnityAgenticTools.Create.Assets.Material` | Create a material asset. |
-| `create.input-actions` | `UnityAgenticTools.Create.Assets.InputActions` | Create an Input Actions asset. |
-| `create.animation` | `UnityAgenticTools.Create.Assets.Animation` | Create an AnimationClip asset. |
-| `create.animator` | `UnityAgenticTools.Create.Assets.Animator` | Create an AnimatorController asset. |
+| `create.scene <assetPath> [includeDefaults]` | `UnityAgenticTools.Create.Scenes.Scene` | Create a scene asset. |
+| `create.gameobject <assetPath> <name> [parentPath]` | `UnityAgenticTools.Create.Scenes.GameObject` | Create a GameObject in a scene or prefab. |
+| `create.component <assetPath> <gameObjectPath> <componentType>` | `UnityAgenticTools.Create.Scenes.Component` | Add a component to a GameObject. |
+| `create.component-copy <assetPath> <sourceGameObjectPath> <sourceComponentType> <sourceComponentIndex> <targetGameObjectPath>` | `UnityAgenticTools.Create.Scenes.ComponentCopy` | Copy a component between GameObjects. |
+| `create.prefab <assetPath> [name]` | `UnityAgenticTools.Create.Prefabs.Prefab` | Create a prefab asset. |
+| `create.prefab-instance <assetPath> <prefabPath> [parentPath] [instanceName] [localPosX] [localPosY] [localPosZ]` | `UnityAgenticTools.Create.Prefabs.PrefabInstance` | Instantiate a prefab into a scene. |
+| `create.prefab-variant <sourcePrefabPath> <outputPath> [variantName]` | `UnityAgenticTools.Create.Prefabs.PrefabVariant` | Create a prefab variant. |
+| `create.scriptable-object <assetPath> <script> [initialValuesJson]` | `UnityAgenticTools.Create.Assets.ScriptableObject` | Create a ScriptableObject asset. |
+| `create.meta <scriptPath>` | `UnityAgenticTools.Create.Assets.Meta` | Create a meta file for an asset. |
+| `create.material <assetPath> <shaderGuid> [materialName]` | `UnityAgenticTools.Create.Assets.Material` | Create a material asset. |
+| `create.input-actions <assetPath> <name>` | `UnityAgenticTools.Create.Assets.InputActions` | Create an Input Actions asset. |
+| `create.animation <assetPath> [clipName] [sampleRate] [loopTime]` | `UnityAgenticTools.Create.Assets.Animation` | Create an AnimationClip asset. |
+| `create.animator <assetPath> [controllerName] [layerName]` | `UnityAgenticTools.Create.Assets.Animator` | Create an AnimatorController asset. |
 
 ## update
 
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
-| `update.object` | `UnityAgenticTools.Update.Objects.GameObject` | Update a serialized GameObject property. |
-| `update.component` | `UnityAgenticTools.Update.Objects.Component` | Update a serialized component property. |
-| `update.transform` | `UnityAgenticTools.Update.Objects.Transform` | Update position, rotation, or scale. |
-| `update.parent` | `UnityAgenticTools.Update.Objects.Parent` | Reparent a GameObject. |
-| `update.sibling-index` | `UnityAgenticTools.Update.Objects.SiblingIndex` | Set a GameObject sibling index. |
-| `update.array` | `UnityAgenticTools.Update.Serialized.Array` | Edit a serialized array property. |
-| `update.batch` | `UnityAgenticTools.Update.Serialized.Batch` | Batch-edit GameObject serialized properties. |
-| `update.batch-components` | `UnityAgenticTools.Update.Serialized.BatchComponents` | Batch-edit component serialized properties. |
-| `update.managed-reference` | `UnityAgenticTools.Update.Serialized.ManagedReference` | Set or append a managed reference value. |
-| `update.prefab.unpack` | `UnityAgenticTools.Update.Prefabs.PrefabUnpack` | Unpack a prefab instance. |
-| `update.prefab.override` | `UnityAgenticTools.Update.Prefabs.PrefabOverride` | Set a prefab instance override. |
-| `update.prefab.batch-overrides` | `UnityAgenticTools.Update.Prefabs.PrefabBatchOverrides` | Batch-edit prefab overrides. |
-| `update.prefab.managed-reference` | `UnityAgenticTools.Update.Prefabs.PrefabManagedReference` | Set a managed reference prefab override. |
-| `update.prefab.remove-override` | `UnityAgenticTools.Update.Prefabs.PrefabRemoveOverride` | Remove a prefab override. |
-| `update.prefab.remove-component` | `UnityAgenticTools.Update.Prefabs.PrefabRemoveComponent` | Mark a prefab component as removed. |
-| `update.prefab.restore-component` | `UnityAgenticTools.Update.Prefabs.PrefabRestoreComponent` | Restore a removed prefab component. |
-| `update.prefab.remove-gameobject` | `UnityAgenticTools.Update.Prefabs.PrefabRemoveGameObject` | Mark a prefab GameObject as removed. |
-| `update.prefab.restore-gameobject` | `UnityAgenticTools.Update.Prefabs.PrefabRestoreGameObject` | Restore a removed prefab GameObject. |
+| `update.object <assetPath> <gameObjectPath> <propertyPath> <value>` | `UnityAgenticTools.Update.Objects.GameObject` | Update a serialized GameObject property. |
+| `update.component <assetPath> <gameObjectPath> <componentType> <componentIndex> <propertyPath> <value>` | `UnityAgenticTools.Update.Objects.Component` | Update a serialized component property. |
+| `update.transform <assetPath> <gameObjectPath> [position] [rotation] [scale]` | `UnityAgenticTools.Update.Objects.Transform` | Update position, rotation, or scale. |
+| `update.parent <assetPath> <gameObjectPath> [newParentPath]` | `UnityAgenticTools.Update.Objects.Parent` | Reparent a GameObject. |
+| `update.sibling-index <assetPath> <gameObjectPath> <index>` | `UnityAgenticTools.Update.Objects.SiblingIndex` | Set a GameObject sibling index. |
+| `update.array <assetPath> <gameObjectPath> <componentType> <componentIndex> <arrayProperty> <action> [payloadJson]` | `UnityAgenticTools.Update.Serialized.Array` | Edit a serialized array property. |
+| `update.batch <assetPath> <editsJson>` | `UnityAgenticTools.Update.Serialized.Batch` | Batch-edit GameObject serialized properties. |
+| `update.batch-components <assetPath> <editsJson>` | `UnityAgenticTools.Update.Serialized.BatchComponents` | Batch-edit component serialized properties. |
+| `update.managed-reference <assetPath> <gameObjectPath> <componentType> <componentIndex> <fieldPath> <typeName> [initialValuesJson] [append]` | `UnityAgenticTools.Update.Serialized.ManagedReference` | Set or append a managed reference value. |
+| `update.prefab.unpack <assetPath> <prefabInstancePath> [mode]` | `UnityAgenticTools.Update.Prefabs.PrefabUnpack` | Unpack a prefab instance. |
+| `update.prefab.override <assetPath> <gameObjectPath> <componentType> <componentIndex> <propertyPath> <value>` | `UnityAgenticTools.Update.Prefabs.PrefabOverride` | Set a prefab instance override. |
+| `update.prefab.batch-overrides <assetPath> <editsJson>` | `UnityAgenticTools.Update.Prefabs.PrefabBatchOverrides` | Batch-edit prefab overrides. |
+| `update.prefab.managed-reference <assetPath> <gameObjectPath> <componentType> <componentIndex> <fieldPath> <typeName> [initialValuesJson] [append]` | `UnityAgenticTools.Update.Prefabs.PrefabManagedReference` | Set a managed reference prefab override. |
+| `update.prefab.remove-override <assetPath> <gameObjectPath> <componentType> <componentIndex> <propertyPath>` | `UnityAgenticTools.Update.Prefabs.PrefabRemoveOverride` | Remove a prefab override. |
+| `update.prefab.remove-component <assetPath> <gameObjectPath> <componentType> <componentIndex>` | `UnityAgenticTools.Update.Prefabs.PrefabRemoveComponent` | Mark a prefab component as removed. |
+| `update.prefab.restore-component <assetPath> <gameObjectPath> <componentType> <componentIndex>` | `UnityAgenticTools.Update.Prefabs.PrefabRestoreComponent` | Restore a removed prefab component. |
+| `update.prefab.remove-gameobject <assetPath> <gameObjectPath>` | `UnityAgenticTools.Update.Prefabs.PrefabRemoveGameObject` | Mark a prefab GameObject as removed. |
+| `update.prefab.restore-gameobject <assetPath> <gameObjectPath>` | `UnityAgenticTools.Update.Prefabs.PrefabRestoreGameObject` | Restore a removed prefab GameObject. |
 
 ## delete
 
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
-| `delete.gameobject` | `UnityAgenticTools.Delete.Objects.GameObject` | Delete a GameObject from a scene or prefab. |
-| `delete.component` | `UnityAgenticTools.Delete.Objects.Component` | Delete a component from a GameObject. |
-| `delete.asset` | `UnityAgenticTools.Delete.Assets.Asset` | Delete an asset and its meta file through AssetDatabase. |
+| `delete.gameobject <assetPath> <gameObjectPath>` | `UnityAgenticTools.Delete.Objects.GameObject` | Delete a GameObject from a scene or prefab. |
+| `delete.component <assetPath> <gameObjectPath> <componentType> [componentIndex]` | `UnityAgenticTools.Delete.Objects.Component` | Delete a component from a GameObject. |
+| `delete.asset <assetPath>` | `UnityAgenticTools.Delete.Assets.Asset` | Delete an asset and its meta file through AssetDatabase. |
 
 ## play
 
@@ -94,30 +94,30 @@ Use aliases before raw public static C# targets.
 
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
-| `ui.snapshot` | `UnityAgenticTools.Util.UI.Snapshot` | Return UI refs and metadata. |
-| `ui.query` | `UnityAgenticTools.Util.UI.Query` | Query a UI ref. |
-| `ui.interact` | `UnityAgenticTools.Util.UI.Interact` | Interact with a UI ref. |
+| `ui.snapshot [maxElements]` | `UnityAgenticTools.Util.UI.Snapshot` | Return UI refs and metadata. |
+| `ui.query <refStr> <query>` | `UnityAgenticTools.Util.UI.Query` | Query a UI ref. |
+| `ui.interact <refStr> <action> [text] [value] [option] [byIndex] [direction] [amount]` | `UnityAgenticTools.Util.UI.Interact` | Interact with a UI ref. |
 
 ## input
 
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
-| `input.map` | `UnityAgenticTools.Util.Input.Map` | Inspect available input actions and legacy axes. |
-| `input.key` | `UnityAgenticTools.Util.Input.Key` | Send a key input event. |
-| `input.mouse` | `UnityAgenticTools.Util.Input.Mouse` | Send a mouse input event. |
-| `input.touch` | `UnityAgenticTools.Util.Input.Touch` | Send a touch input event. |
-| `input.action` | `UnityAgenticTools.Util.Input.Action` | Trigger an input action. |
+| `input.map [filter] [includeLegacyAxes]` | `UnityAgenticTools.Util.Input.Map` | Inspect available input actions and legacy axes. |
+| `input.key <key> [mode]` | `UnityAgenticTools.Util.Input.Key` | Send a key input event. |
+| `input.mouse <x> <y> [mode]` | `UnityAgenticTools.Util.Input.Mouse` | Send a mouse input event. |
+| `input.touch <x> <y> [mode]` | `UnityAgenticTools.Util.Input.Touch` | Send a touch input event. |
+| `input.action <name> [value]` | `UnityAgenticTools.Util.Input.Action` | Trigger an input action. |
 
 ## screenshot
 
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
-| `screenshot.take` | `UnityAgenticTools.Util.Screenshot.Take` | Capture a Game view screenshot. |
-| `screenshot.annotated` | `UnityAgenticTools.Util.Screenshot.Annotated` | Capture a screenshot with UI annotations. |
+| `screenshot.take <outputPath> <superSize>` | `UnityAgenticTools.Util.Screenshot.Take` | Capture a Game view screenshot. |
+| `screenshot.annotated <outputPath>` | `UnityAgenticTools.Util.Screenshot.Annotated` | Capture a screenshot with UI annotations. |
 
 ## tests
 
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
-| `tests.run` | `UnityAgenticTools.Util.TestRunner.Run` | Run Unity tests. |
+| `tests.run [mode] [filter]` | `UnityAgenticTools.Util.TestRunner.Run` | Run Unity tests. |
 | `tests.results` | `UnityAgenticTools.Util.TestRunner.GetResults` | Read the latest Unity test results. |
