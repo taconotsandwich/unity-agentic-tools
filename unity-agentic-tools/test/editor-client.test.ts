@@ -14,6 +14,13 @@ interface MockRpcError {
 interface MockPortBehavior {
     reachable?: boolean;
     reachable_sequence?: boolean[];
+    /**
+     * Unreachable until this many ms after the mock is installed, then reachable.
+     * Models a domain reload. Prefer this over reachable_sequence when the assertion
+     * is about how long the client waits: discovery opens a variable number of
+     * connections per attempt, so a count-based sequence cannot express a duration.
+     */
+    reachable_after_ms?: number;
     bridge_info?: Record<string, unknown>;
     rpc_result?: unknown;
     rpc_error?: MockRpcError;
@@ -27,6 +34,7 @@ function install_mock_websocket(port_behaviors: Record<number, MockPortBehavior>
         Object.entries(port_behaviors).map(([port, behavior]) => [Number(port), behavior]),
     );
     const connection_counts = new Map<number, number>();
+    const installed_at = Date.now();
 
     class MockWebSocket {
         public url: string;
@@ -41,7 +49,7 @@ function install_mock_websocket(port_behaviors: Record<number, MockPortBehavior>
             const behavior = behavior_map.get(port);
             const connection_count = (connection_counts.get(port) ?? 0) + 1;
             connection_counts.set(port, connection_count);
-            const reachable = resolve_reachable(behavior, connection_count);
+            const reachable = resolve_reachable(behavior, connection_count, installed_at);
 
             setTimeout(() => {
                 if (reachable && behavior) {
@@ -131,9 +139,17 @@ function install_mock_websocket(port_behaviors: Record<number, MockPortBehavior>
     globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
 }
 
-function resolve_reachable(behavior: MockPortBehavior | undefined, connection_count: number): boolean {
+function resolve_reachable(
+    behavior: MockPortBehavior | undefined,
+    connection_count: number,
+    installed_at: number,
+): boolean {
     if (!behavior) {
         return false;
+    }
+
+    if (behavior.reachable_after_ms !== undefined) {
+        return Date.now() - installed_at >= behavior.reachable_after_ms;
     }
 
     return resolve_sequence_value(behavior.reachable_sequence, behavior.reachable !== false, connection_count) !== false;
@@ -146,6 +162,30 @@ function resolve_sequence_value<T>(sequence: T[] | undefined, fallback: T, conne
     }
 
     return fallback;
+}
+
+/** Above macOS's default maximum pid, so process.kill(pid, 0) always reports ESRCH. */
+const DEAD_PID = 999_999;
+
+/**
+ * Longer than the default profile's fixed retry budget (500 + 1000ms of backoff),
+ * so only the reload-tolerance path can outlast it.
+ */
+const RELOAD_WINDOW_MS = 2_500;
+
+function write_lockfile(dir: string, port: number, pid: number): void {
+    const config_dir = join(dir, '.unity-agentic');
+    mkdirSync(config_dir, { recursive: true });
+    writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({ port, pid, version: '0.1.0' }), 'utf-8');
+}
+
+/** Mirrors what cli.ts sends: the real target lives inside params.args, not the method. */
+function registry_run_params(target: string, args: string[] = []): Record<string, unknown> {
+    return {
+        type: 'UnityAgenticTools.Commands.Registry',
+        member: 'Run',
+        args: JSON.stringify([target, JSON.stringify(args)]),
+    };
 }
 
 describe('editor-client', () => {
@@ -392,7 +432,10 @@ describe('editor-client', () => {
             expect(response.result).toEqual({ ok: true, port: 53786 });
         });
 
-        test('transition-tolerant read actions keep retrying through temporary discovery loss', async () => {
+        // The CLI always sends method 'editor.invoke' with the real target inside
+        // params.args, so classification has to read the target out of args. An
+        // earlier version matched on dotted method names that were never sent.
+        test('read invokes keep retrying through temporary discovery loss', async () => {
             install_mock_websocket({
                 53785: {
                     reachable_sequence: [false, false, false, true, true],
@@ -409,12 +452,126 @@ describe('editor-client', () => {
 
             const response = await call_editor({
                 project_path: tmp_dir,
-                method: 'editor.playMode.getState',
+                method: 'editor.invoke',
                 timeout: 100,
+                params: registry_run_params('scene.hierarchy'),
             });
 
             expect(response.error).toBeUndefined();
             expect(response.result).toEqual({ state: 'Playing' });
+        });
+
+        test('mutating invokes keep the shorter default recovery window', async () => {
+            install_mock_websocket({
+                53785: {
+                    reachable_sequence: [false, false, false, true, true],
+                    bridge_info: {
+                        port: 53785,
+                        pid: 2222,
+                        version: '0.1.0',
+                        project_path: tmp_dir,
+                        project_name: 'editor-client-test',
+                    },
+                    rpc_result: { success: true },
+                },
+            });
+
+            const response = await call_editor({
+                project_path: tmp_dir,
+                method: 'editor.invoke',
+                timeout: 100,
+                params: registry_run_params('scene.save'),
+            });
+
+            expect(response.result).toBeUndefined();
+            expect(response.error).toBeDefined();
+        });
+
+        // Entering play mode reloads the domain, which takes the server down for
+        // longer than any of the fixed retry budgets. StopForReload leaves the
+        // lockfile in place and the Unity process survives, so a live pid is the
+        // signal that waiting is worthwhile.
+        test('a live editor pid extends retries past the fixed count while it reloads', async () => {
+            write_lockfile(tmp_dir, 53785, process.pid);
+
+            install_mock_websocket({
+                53785: {
+                    reachable_after_ms: RELOAD_WINDOW_MS,
+                    bridge_info: {
+                        port: 53785,
+                        pid: process.pid,
+                        version: '0.1.0',
+                        project_path: tmp_dir,
+                        project_name: 'editor-client-test',
+                    },
+                    rpc_result: { success: true },
+                },
+            });
+
+            const response = await call_editor({
+                project_path: tmp_dir,
+                method: 'editor.invoke',
+                timeout: 100,
+                params: registry_run_params('scene.save'),
+            });
+
+            expect(response.error).toBeUndefined();
+            expect(response.result).toEqual({ success: true });
+        });
+
+        test('a dead editor pid fails fast instead of waiting out a reload', async () => {
+            write_lockfile(tmp_dir, 53785, DEAD_PID);
+
+            install_mock_websocket({
+                53785: {
+                    reachable_after_ms: RELOAD_WINDOW_MS,
+                    bridge_info: {
+                        port: 53785,
+                        pid: DEAD_PID,
+                        version: '0.1.0',
+                        project_path: tmp_dir,
+                        project_name: 'editor-client-test',
+                    },
+                    rpc_result: { success: true },
+                },
+            });
+
+            const response = await call_editor({
+                project_path: tmp_dir,
+                method: 'editor.invoke',
+                timeout: 100,
+                params: registry_run_params('scene.save'),
+            });
+
+            expect(response.error).toBeDefined();
+        });
+
+        test('an explicit retries option caps waiting even for a live editor', async () => {
+            write_lockfile(tmp_dir, 53785, process.pid);
+
+            install_mock_websocket({
+                53785: {
+                    reachable_after_ms: RELOAD_WINDOW_MS,
+                    bridge_info: {
+                        port: 53785,
+                        pid: process.pid,
+                        version: '0.1.0',
+                        project_path: tmp_dir,
+                        project_name: 'editor-client-test',
+                    },
+                    rpc_result: { success: true },
+                },
+            });
+
+            const response = await call_editor({
+                project_path: tmp_dir,
+                method: 'editor.invoke',
+                timeout: 100,
+                retries: 0,
+                params: registry_run_params('scene.save'),
+            });
+
+            expect(response.error).toBeDefined();
         });
 
         test('command actions keep the shorter default recovery window', async () => {

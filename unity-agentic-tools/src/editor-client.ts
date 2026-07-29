@@ -1,5 +1,6 @@
 import {
     discover_editor_config,
+    read_editor_config,
 } from './editor-discovery';
 import {
     DEFAULT_EDITOR_REQUEST_TIMEOUT_MS,
@@ -48,14 +49,36 @@ const TRANSITION_TOLERANT_COMMAND_SEMANTICS: EditorActionSemantics = {
     discovery_timeout_ms: 250,
 };
 
-const TRANSITION_TOLERANT_READ_METHODS = new Set<string>([
-    'editor.playMode.getState',
-    'editor.console.getLogs',
-    'editor.hierarchy.snapshot',
-    'editor.hierarchy.query',
-    'editor.ui.snapshot',
-    'editor.ui.query',
-    'editor.input.map',
+/**
+ * Read-only Registry targets, by alias and by backing API name.
+ *
+ * This cannot be prefix-based: scene.hierarchy and scene.query are reads while
+ * scene.open and scene.save are commands. Deriving it from the C# Registry is
+ * ROADMAP Phase 1 work -- it needs a bridge round-trip and introduces version skew.
+ */
+const READ_RUN_TARGETS = new Set<string>([
+    'scene.hierarchy',
+    'scene.query',
+    'query.assets',
+    'query.asset',
+    'query.scene',
+    'query.object',
+    'play.state',
+    'ui.snapshot',
+    'ui.query',
+    'input.map',
+    'tests.results',
+    'UnityAgenticTools.Util.Hierarchy.Snapshot',
+    'UnityAgenticTools.Util.Hierarchy.Query',
+    'UnityAgenticTools.Query.Assets.Find',
+    'UnityAgenticTools.Query.Assets.Info',
+    'UnityAgenticTools.Query.Scene.Hierarchy',
+    'UnityAgenticTools.Query.Scene.Object',
+    'UnityAgenticTools.Util.PlayMode.GetState',
+    'UnityAgenticTools.Util.UI.Snapshot',
+    'UnityAgenticTools.Util.UI.Query',
+    'UnityAgenticTools.Util.Input.Map',
+    'UnityAgenticTools.Util.TestRunner.GetResults',
 ]);
 
 const PLAY_MODE_RUN_TARGETS = new Set<string>([
@@ -78,28 +101,81 @@ const COMMAND_RETRYABLE_CODES = new Set([-32002, CLIENT_DISCOVERY_UNAVAILABLE_CO
 const TRANSITION_TOLERANT_COMMAND_RETRYABLE_CODES = new Set([-32000, -32002, -32003, CLIENT_DISCOVERY_UNAVAILABLE_CODE]);
 
 /**
+ * Wall-clock budget for waiting out a domain reload, spent only while the Editor
+ * process is provably alive.
+ *
+ * Entering play mode reloads the domain, which stops the server; measured against a
+ * large project the unreachable window runs 4-7s, wider than the fixed retry budgets
+ * above (5.25-6.25s). That margin is why transition-time reads failed roughly 1 call
+ * in 100. A deadline covers a slow reload without hard-coding a retry count that a
+ * bigger project would outgrow again.
+ */
+const RELOAD_TOLERANCE_MS = 30_000;
+
+/**
+ * Poll interval while waiting out a reload. Shorter than the profiles' backoff
+ * delays on purpose: once the server is back, this is the latency we add before
+ * noticing, and each poll is only a TCP connect with a sub-second timeout.
+ */
+const RELOAD_POLL_INTERVAL_MS = 500;
+
+/**
  * Send a single JSON-RPC request to the Unity Editor and return the result.
  * Automatically retries on transient connection errors (e.g., server restarting after assembly reload).
  */
 export async function call_editor(options: CallEditorOptions): Promise<RpcResponse> {
     const semantics = get_action_semantics(options.method, 'unary', options.params);
-    const maxRetries = options.retries ?? semantics.default_retries;
+    const explicit_retries = options.retries !== undefined;
+    const max_retries = options.retries ?? semantics.default_retries;
+    const delays = semantics.retry_delays_ms;
+    const started = Date.now();
 
-    let lastResponse: RpcResponse | undefined;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        lastResponse = await call_editor_once(options, semantics);
+    let last_response: RpcResponse | undefined;
 
-        if (!should_retry_response(lastResponse, semantics)) {
-            return lastResponse;
+    for (let attempt = 0; ; attempt++) {
+        last_response = await call_editor_once(options, semantics);
+
+        if (!should_retry_response(last_response, semantics)) {
+            return last_response;
         }
 
-        if (attempt < maxRetries) {
-            const delay = semantics.retry_delays_ms[Math.min(attempt, semantics.retry_delays_ms.length - 1)];
-            await new Promise<void>(r => setTimeout(r, delay));
+        if (attempt < max_retries) {
+            await sleep(delays[Math.min(attempt, delays.length - 1)]);
+            continue;
         }
+
+        // An explicit retries option is a hard cap; otherwise keep waiting out a
+        // domain reload while the Editor is still alive.
+        if (explicit_retries || !within_reload_tolerance(options, started)) {
+            return last_response;
+        }
+
+        await sleep(RELOAD_POLL_INTERVAL_MS);
+    }
+}
+
+/**
+ * True while it is worth waiting out a domain reload.
+ *
+ * StopForReload deliberately leaves the lockfile in place and the Unity process
+ * survives an assembly reload, so a live pid with an unreachable server means
+ * "reloading". A closed or crashed Editor still fails fast, because
+ * read_editor_config rejects a missing lockfile or a dead pid.
+ */
+function within_reload_tolerance(options: CallEditorOptions, started: number): boolean {
+    if (options.port !== undefined) {
+        return false;
     }
 
-    return lastResponse!;
+    if (Date.now() - started >= RELOAD_TOLERANCE_MS) {
+        return false;
+    }
+
+    return !('error' in read_editor_config(options.project_path));
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise<void>(r => setTimeout(r, ms));
 }
 
 /**
@@ -235,7 +311,7 @@ function get_action_semantics(
         };
     }
 
-    if (TRANSITION_TOLERANT_READ_METHODS.has(method)) {
+    if (is_read_invoke(method, params)) {
         return TRANSITION_TOLERANT_READ_SEMANTICS;
     }
 
@@ -244,6 +320,27 @@ function get_action_semantics(
     }
 
     return DEFAULT_ACTION_SEMANTICS;
+}
+
+/**
+ * Classify a Registry.Run invoke as a read.
+ *
+ * The CLI always sends method 'editor.invoke' and puts the real target inside
+ * params.args, so classifying on the JSON-RPC method name alone never matches --
+ * an earlier method-name set sat here and was unreachable for exactly that reason.
+ */
+function is_read_invoke(method: string, params?: Record<string, unknown>): boolean {
+    if (method !== 'editor.invoke' || !params) {
+        return false;
+    }
+
+    if (params.type !== 'UnityAgenticTools.Commands.Registry' || params.member !== 'Run') {
+        return false;
+    }
+
+    const target = parse_registry_run_target(params.args);
+
+    return typeof target === 'string' && READ_RUN_TARGETS.has(target);
 }
 
 function is_play_mode_transition_invoke(method: string, params?: Record<string, unknown>): boolean {
