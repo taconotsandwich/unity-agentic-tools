@@ -18,6 +18,7 @@ yarn-debug.log*
 yarn-error.log*
 
 # Build artifacts
+coverage/
 dist/
 bin/
 obj/
