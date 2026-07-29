@@ -46,6 +46,69 @@ namespace UnityAgenticTools.Tests
         }
 
         [Test]
+        public void JsonRpcParser_DeepContainerNesting_SurvivesNormalization()
+        {
+            const int levels = 40;
+            var root = new Dictionary<string, object>();
+            var current = root;
+            for (var i = 0; i < levels; i++)
+            {
+                var child = new Dictionary<string, object>();
+                current["children"] = new List<object> { child };
+                current = child;
+            }
+
+            current["leaf"] = 42;
+
+            Assert.That(JsonRpcParser.IsTransportSafeValue(root), Is.True,
+                "Deep plain container trees are transport-safe (was capped at depth 8).");
+
+            var cursor = JsonRpcParser.NormalizeValueForTransport(root) as Dictionary<string, object>;
+            for (var i = 0; i < levels; i++)
+            {
+                Assert.That(cursor, Is.Not.Null, $"Level {i} should normalize to a dictionary, not ToString().");
+                var children = cursor["children"] as List<object>;
+                Assert.That(children, Is.Not.Null, $"Level {i} children should stay a list.");
+                cursor = children[0] as Dictionary<string, object>;
+            }
+
+            Assert.That(cursor, Is.Not.Null);
+            Assert.That(cursor["leaf"], Is.EqualTo(42));
+            Assert.That(JsonRpcParser.SerializeValue(root), Does.Contain("\"leaf\":42"),
+                "Serialization must reach the deepest node (was the Dictionary ToString hierarchy regression).");
+        }
+
+        [Test]
+        public void JsonRpcParser_SelfReferencingContainer_DoesNotRecurseForever()
+        {
+            var cyclic = new Dictionary<string, object> { { "label", "root" } };
+            cyclic["self"] = cyclic;
+
+            Assert.That(JsonRpcParser.IsTransportSafeValue(cyclic), Is.False,
+                "Cyclic payloads must be rejected by the fast path, not hang.");
+
+            var normalized = JsonRpcParser.NormalizeValueForTransport(cyclic) as Dictionary<string, object>;
+            Assert.That(normalized, Is.Not.Null);
+            Assert.That(normalized["label"], Is.EqualTo("root"));
+            Assert.That(normalized["self"], Is.EqualTo("<cyclic>"));
+        }
+
+        [Test]
+        public void JsonRpcParser_SharedSiblingReference_SerializesBothOccurrences()
+        {
+            var shared = new Dictionary<string, object> { { "value", 7 } };
+            var payload = new Dictionary<string, object> { { "first", shared }, { "second", shared } };
+
+            Assert.That(JsonRpcParser.IsTransportSafeValue(payload), Is.True,
+                "A DAG (shared reference without a cycle) is not a cycle.");
+
+            var normalized = JsonRpcParser.NormalizeValueForTransport(payload) as Dictionary<string, object>;
+            Assert.That(normalized, Is.Not.Null);
+            Assert.That((normalized["first"] as Dictionary<string, object>)["value"], Is.EqualTo(7));
+            Assert.That((normalized["second"] as Dictionary<string, object>)["value"], Is.EqualTo(7));
+        }
+
+        [Test]
         public async Task Dispatch_MissingMethod_ReturnsInvalidRequest()
         {
             var request = "{\"jsonrpc\":\"2.0\",\"id\":\"1\"}";

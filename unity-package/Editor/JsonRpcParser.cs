@@ -9,6 +9,9 @@ namespace UnityAgenticTools
 {
     public static class JsonRpcParser
     {
+        private const int MaxReflectionDepth = 8;
+        private const string CyclicValuePlaceholder = "<cyclic>";
+
         public static JsonRpcRequest ParseRequest(string json)
         {
             var request = new JsonRpcRequest
@@ -102,12 +105,12 @@ namespace UnityAgenticTools
 
         public static object NormalizeValueForTransport(object value)
         {
-            return NormalizeValueForTransport(value, 0);
+            return NormalizeValueForTransport(value, 0, null);
         }
 
         public static bool IsTransportSafeValue(object value)
         {
-            return IsTransportSafeValue(value, 0);
+            return IsTransportSafeValue(value, null);
         }
 
         private static string ExtractStringField(string json, string field)
@@ -413,13 +416,10 @@ namespace UnityAgenticTools
             return -1;
         }
 
-        private static object NormalizeValueForTransport(object value, int depth)
+        // Containers recurse without a depth cap (scene hierarchies nest arbitrarily);
+        // `path` breaks reference cycles, and only reflection hops consume the depth budget.
+        private static object NormalizeValueForTransport(object value, int reflectionDepth, HashSet<object> path)
         {
-            if (depth > 8)
-            {
-                return value == null ? null : value.ToString();
-            }
-
             if (value == null ||
                 value is string ||
                 value is bool ||
@@ -450,59 +450,111 @@ namespace UnityAgenticTools
 
             if (value is Dictionary<string, object> typedDict)
             {
-                var normalized = new Dictionary<string, object>();
-                foreach (var kvp in typedDict)
+                path = path ?? new HashSet<object>(ReferenceComparer.Instance);
+                if (!path.Add(value))
                 {
-                    normalized[kvp.Key] = NormalizeValueForTransport(kvp.Value, depth + 1);
+                    return CyclicValuePlaceholder;
                 }
 
-                return normalized;
+                try
+                {
+                    var normalized = new Dictionary<string, object>();
+                    foreach (var kvp in typedDict)
+                    {
+                        normalized[kvp.Key] = NormalizeValueForTransport(kvp.Value, reflectionDepth, path);
+                    }
+
+                    return normalized;
+                }
+                finally
+                {
+                    path.Remove(value);
+                }
             }
 
             if (value is IDictionary dictionary)
             {
-                var normalized = new Dictionary<string, object>();
-                foreach (DictionaryEntry entry in dictionary)
+                path = path ?? new HashSet<object>(ReferenceComparer.Instance);
+                if (!path.Add(value))
                 {
-                    var key = entry.Key == null ? "null" : entry.Key.ToString();
-                    normalized[key] = NormalizeValueForTransport(entry.Value, depth + 1);
+                    return CyclicValuePlaceholder;
                 }
 
-                return normalized;
+                try
+                {
+                    var normalized = new Dictionary<string, object>();
+                    foreach (DictionaryEntry entry in dictionary)
+                    {
+                        var key = entry.Key == null ? "null" : entry.Key.ToString();
+                        normalized[key] = NormalizeValueForTransport(entry.Value, reflectionDepth, path);
+                    }
+
+                    return normalized;
+                }
+                finally
+                {
+                    path.Remove(value);
+                }
             }
 
             if (value is Array array)
             {
-                var normalized = new List<object>();
-                foreach (var item in array)
+                path = path ?? new HashSet<object>(ReferenceComparer.Instance);
+                if (!path.Add(value))
                 {
-                    normalized.Add(NormalizeValueForTransport(item, depth + 1));
+                    return CyclicValuePlaceholder;
                 }
 
-                return normalized;
+                try
+                {
+                    var normalized = new List<object>();
+                    foreach (var item in array)
+                    {
+                        normalized.Add(NormalizeValueForTransport(item, reflectionDepth, path));
+                    }
+
+                    return normalized;
+                }
+                finally
+                {
+                    path.Remove(value);
+                }
             }
 
             if (value is IEnumerable enumerable)
             {
-                var normalized = new List<object>();
-                foreach (var item in enumerable)
+                path = path ?? new HashSet<object>(ReferenceComparer.Instance);
+                if (!path.Add(value))
                 {
-                    normalized.Add(NormalizeValueForTransport(item, depth + 1));
+                    return CyclicValuePlaceholder;
                 }
 
-                return normalized;
+                try
+                {
+                    var normalized = new List<object>();
+                    foreach (var item in enumerable)
+                    {
+                        normalized.Add(NormalizeValueForTransport(item, reflectionDepth, path));
+                    }
+
+                    return normalized;
+                }
+                finally
+                {
+                    path.Remove(value);
+                }
             }
 
-            return NormalizeObject(value, depth);
+            if (reflectionDepth >= MaxReflectionDepth)
+            {
+                return value.ToString();
+            }
+
+            return NormalizeObject(value, reflectionDepth, path);
         }
 
-        private static bool IsTransportSafeValue(object value, int depth)
+        private static bool IsTransportSafeValue(object value, HashSet<object> path)
         {
-            if (depth > 8)
-            {
-                return false;
-            }
-
             if (value == null ||
                 value is string ||
                 value is bool ||
@@ -528,54 +580,106 @@ namespace UnityAgenticTools
 
             if (value is Dictionary<string, object> typedDict)
             {
-                foreach (var kvp in typedDict)
+                path = path ?? new HashSet<object>(ReferenceComparer.Instance);
+                if (!path.Add(value))
                 {
-                    if (!IsTransportSafeValue(kvp.Value, depth + 1))
-                    {
-                        return false;
-                    }
+                    return false;
                 }
 
-                return true;
+                try
+                {
+                    foreach (var kvp in typedDict)
+                    {
+                        if (!IsTransportSafeValue(kvp.Value, path))
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                }
+                finally
+                {
+                    path.Remove(value);
+                }
             }
 
             if (value is IDictionary dictionary)
             {
-                foreach (DictionaryEntry entry in dictionary)
+                path = path ?? new HashSet<object>(ReferenceComparer.Instance);
+                if (!path.Add(value))
                 {
-                    if (!(entry.Key is string) || !IsTransportSafeValue(entry.Value, depth + 1))
-                    {
-                        return false;
-                    }
+                    return false;
                 }
 
-                return true;
+                try
+                {
+                    foreach (DictionaryEntry entry in dictionary)
+                    {
+                        if (!(entry.Key is string) || !IsTransportSafeValue(entry.Value, path))
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                }
+                finally
+                {
+                    path.Remove(value);
+                }
             }
 
             if (value is Array array)
             {
-                foreach (var item in array)
+                path = path ?? new HashSet<object>(ReferenceComparer.Instance);
+                if (!path.Add(value))
                 {
-                    if (!IsTransportSafeValue(item, depth + 1))
-                    {
-                        return false;
-                    }
+                    return false;
                 }
 
-                return true;
+                try
+                {
+                    foreach (var item in array)
+                    {
+                        if (!IsTransportSafeValue(item, path))
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                }
+                finally
+                {
+                    path.Remove(value);
+                }
             }
 
             if (value is IEnumerable enumerable)
             {
-                foreach (var item in enumerable)
+                path = path ?? new HashSet<object>(ReferenceComparer.Instance);
+                if (!path.Add(value))
                 {
-                    if (!IsTransportSafeValue(item, depth + 1))
-                    {
-                        return false;
-                    }
+                    return false;
                 }
 
-                return true;
+                try
+                {
+                    foreach (var item in enumerable)
+                    {
+                        if (!IsTransportSafeValue(item, path))
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                }
+                finally
+                {
+                    path.Remove(value);
+                }
             }
 
             return false;
@@ -684,10 +788,10 @@ namespace UnityAgenticTools
 
         private static string SerializeObject(object obj)
         {
-            return SerializeValue(NormalizeObject(obj, 0));
+            return SerializeValue(NormalizeObject(obj, 0, null));
         }
 
-        private static Dictionary<string, object> NormalizeObject(object obj, int depth)
+        private static Dictionary<string, object> NormalizeObject(object obj, int reflectionDepth, HashSet<object> path)
         {
             var type = obj.GetType();
             var fields = type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
@@ -697,7 +801,7 @@ namespace UnityAgenticTools
             foreach (var field in fields)
             {
                 var value = field.GetValue(obj);
-                normalized[field.Name] = NormalizeValueForTransport(value, depth + 1);
+                normalized[field.Name] = NormalizeValueForTransport(value, reflectionDepth + 1, path);
             }
 
             foreach (var property in properties)
@@ -710,7 +814,7 @@ namespace UnityAgenticTools
                 try
                 {
                     var value = property.GetValue(obj);
-                    normalized[property.Name] = NormalizeValueForTransport(value, depth + 1);
+                    normalized[property.Name] = NormalizeValueForTransport(value, reflectionDepth + 1, path);
                 }
                 catch
                 {
@@ -718,6 +822,21 @@ namespace UnityAgenticTools
             }
 
             return normalized;
+        }
+
+        private sealed class ReferenceComparer : IEqualityComparer<object>
+        {
+            public static readonly ReferenceComparer Instance = new ReferenceComparer();
+
+            bool IEqualityComparer<object>.Equals(object x, object y)
+            {
+                return ReferenceEquals(x, y);
+            }
+
+            int IEqualityComparer<object>.GetHashCode(object obj)
+            {
+                return System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
+            }
         }
 
         private static string EscapeString(string value)
