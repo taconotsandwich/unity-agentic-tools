@@ -76,7 +76,13 @@ Examples:
 
 `check:classids` fetches Unity's ClassID reference over the network, so it fails without a connection rather than because your change is wrong.
 
-Two things CI does not cover, because they need a local Unity install: `bun run build:unity-package` (compiles the C# bridge package) and `bun run test:integration:unity` (headless Editor validation, which needs `--unity-bin` or `UNITY_BIN` pointing at a Unity executable). Run them yourself when you touch `unity-package/`.
+Three things CI does not cover, because they need a local Unity install:
+
+- `bun run build:unity-package` — compiles the C# bridge package.
+- `bun run test:integration:unity` — headless Editor validation. Needs `--unity-bin` or `UNITY_BIN` pointing at a Unity executable.
+- `bun run test:integration:stress` — drives an already-open Editor through play mode while issuing reads, then reports transient failures and per-target latency. Needs `--project` or `UNITY_PROJECT` pointing at a project whose Editor is running with the bridge installed. Exits non-zero if any call failed.
+
+Run the first two yourself when you touch `unity-package/`, and the third when you touch retry or transport behaviour in `src/editor-client.ts`.
 
 ## Release Format
 
