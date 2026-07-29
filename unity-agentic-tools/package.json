@@ -26,6 +26,7 @@
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:unity-headless": "bun test/run-headless-validation.ts",
+    "test:unity-editor-tests": "bun test/run-editor-tests.ts",
     "test:stress": "bun test/run-bridge-stress.ts"
   },
   "dependencies": {

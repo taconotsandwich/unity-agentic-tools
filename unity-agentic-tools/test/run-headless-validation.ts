@@ -1,6 +1,11 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
-import { spawn } from 'child_process';
+import { existsSync, rmSync, writeFileSync } from 'fs';
 import { isAbsolute, join, resolve } from 'path';
+import {
+    build_log_excerpt,
+    copy_fixture_project,
+    require_arg_value,
+    run_unity_batchmode,
+} from './unity-batchmode';
 
 export interface RunnerOptions {
     unity_bin: string;
@@ -37,24 +42,6 @@ const MANIFEST_NAME = 'UATValidationTargets.json';
 const SCENE_ASSET_PATH = 'Assets/Scenes/ValidationScene.unity';
 const UNITY_EXECUTE_METHOD = 'UnityAgenticTools.Editor.HeadlessValidator.RunValidation';
 const DEFAULT_TIMEOUT_MS = 600_000;
-const COPY_EXCLUDES = new Set(['Library', 'Logs', 'Temp', '.DS_Store']);
-const LOG_POLL_INTERVAL_MS = 1_000;
-const PROCESS_KILL_GRACE_MS = 5_000;
-
-function filter_fixture_copy(source_path: string): boolean {
-    const segments = source_path.split(/[\\/]/);
-    const last_segment = segments[segments.length - 1];
-
-    if (COPY_EXCLUDES.has(last_segment)) {
-        return false;
-    }
-
-    if (last_segment.endsWith('.csproj') || last_segment.endsWith('.sln')) {
-        return false;
-    }
-
-    return true;
-}
 
 export function parse_args(args: string[], env: Record<string, string | undefined> = process.env): RunnerOptions {
     let unity_bin = env.UNITY_BIN ?? '';
@@ -103,14 +90,6 @@ export function parse_args(args: string[], env: Record<string, string | undefine
     return { unity_bin, scenario, timeout_ms, keep_temp };
 }
 
-function require_arg_value(args: string[], index: number, flag: string): string {
-    const value = args[index];
-    if (!value || value.startsWith('--')) {
-        throw new Error(`Missing value for ${flag}`);
-    }
-    return value;
-}
-
 function print_help(): void {
     console.log(`Usage: bun test/run-headless-validation.ts --unity-bin <absolute-path> [options]
 
@@ -120,14 +99,6 @@ Options:
   --timeout-ms <n>             Unity process timeout in milliseconds (default: ${DEFAULT_TIMEOUT_MS})
   --keep-temp                  Preserve temp projects after execution
   --help                       Show this help text`);
-}
-
-function copy_fixture_project(): string {
-    mkdirSync(TEMP_ROOT, { recursive: true });
-    const temp_dir = mkdtempSync(join(TEMP_ROOT, 'headless-validation-'));
-    rmSync(temp_dir, { recursive: true, force: true });
-    cpSync(FIXTURE_ROOT, temp_dir, { recursive: true, filter: filter_fixture_copy });
-    return temp_dir;
 }
 
 function write_validation_manifest(project_path: string, targets: string[]): void {
@@ -198,143 +169,27 @@ function unique_lines(lines: string[]): string[] {
     return Array.from(new Set(lines.filter((line) => line.trim() !== '')));
 }
 
-function build_log_excerpt(log_text: string): string {
-    const lines = log_text.trim().split(/\r?\n/);
-    return lines.slice(Math.max(0, lines.length - 40)).join('\n');
-}
-
-function detect_early_unity_failure(log_text: string): { kind: 'licensing'; message: string } | null {
-    if (/com\.unity\.editor\.headless/i.test(log_text)) {
-        return {
-            kind: 'licensing',
-            message: [
-                'Unity licensing/headless entitlement failure detected.',
-                'The log contains "com.unity.editor.headless was not found", which means batchmode could not obtain the required local licensing entitlement.',
-                'Open Unity Hub, confirm the editor license is active, open the editor once normally, and then retry.',
-            ].join(' '),
-        };
-    }
-
-    if (/No valid Unity Editor license found/i.test(log_text)) {
-        return {
-            kind: 'licensing',
-            message: [
-                'Unity licensing failure detected.',
-                'No valid Unity Editor license was found in the batchmode log.',
-                'Confirm the editor is activated in Unity Hub and retry after opening the editor normally once.',
-            ].join(' '),
-        };
-    }
-
-    if (/offline grace period/i.test(log_text) || /Activation of your license failed/i.test(log_text)) {
-        return {
-            kind: 'licensing',
-            message: [
-                'Unity licensing failure detected.',
-                'The batchmode log indicates an offline-grace or activation problem.',
-                'Reconnect Unity Hub, verify activation, and retry.',
-            ].join(' '),
-        };
-    }
-
-    return null;
-}
-
 async function run_unity_validation(unity_bin: string, project_path: string, timeout_ms: number): Promise<{ success: boolean; log_path: string; summary: UnityLogSummary; exit_code: number | null; message?: string }> {
     const log_path = join(project_path, 'unity-validation.log');
-    const child = spawn(unity_bin, [
-        '-batchmode',
-        '-quit',
-        '-projectPath',
+    const run = await run_unity_batchmode({
+        unity_bin,
         project_path,
-        '-executeMethod',
-        UNITY_EXECUTE_METHOD,
-        '-logFile',
+        args: ['-quit', '-executeMethod', UNITY_EXECUTE_METHOD],
         log_path,
-        '-silent-crashes',
-    ], {
-        cwd: project_path,
-        stdio: 'ignore',
+        timeout_ms,
     });
 
-    let spawn_error: Error | null = null;
-    let exit_code: number | null = null;
-    let termination_message: string | undefined;
-    let timeout_handle: NodeJS.Timeout | null = null;
-    let kill_handle: NodeJS.Timeout | null = null;
-    let poll_handle: NodeJS.Timeout | null = null;
-
-    const clear_handles = (): void => {
-        if (timeout_handle) {
-            clearTimeout(timeout_handle);
-            timeout_handle = null;
-        }
-        if (kill_handle) {
-            clearTimeout(kill_handle);
-            kill_handle = null;
-        }
-        if (poll_handle) {
-            clearInterval(poll_handle);
-            poll_handle = null;
-        }
-    };
-
-    const terminate_child = (message: string): void => {
-        if (termination_message || child.exitCode !== null) {
-            return;
-        }
-
-        termination_message = message;
-        child.kill('SIGTERM');
-        kill_handle = setTimeout(() => {
-            if (child.exitCode === null) {
-                child.kill('SIGKILL');
-            }
-        }, PROCESS_KILL_GRACE_MS);
-    };
-
-    await new Promise<void>((resolve_promise) => {
-        child.once('error', (error) => {
-            spawn_error = error;
-            clear_handles();
-            resolve_promise();
-        });
-
-        child.once('exit', (code) => {
-            exit_code = code;
-            clear_handles();
-            resolve_promise();
-        });
-
-        timeout_handle = setTimeout(() => {
-            terminate_child(`Unity validation timed out after ${timeout_ms}ms.`);
-        }, timeout_ms);
-
-        poll_handle = setInterval(() => {
-            if (!existsSync(log_path)) {
-                return;
-            }
-
-            const log_text = readFileSync(log_path, 'utf-8');
-            const early_failure = detect_early_unity_failure(log_text);
-            if (early_failure) {
-                terminate_child(early_failure.message);
-            }
-        }, LOG_POLL_INTERVAL_MS);
-    });
-
-    if (spawn_error) {
+    if (run.spawn_error) {
         return {
             success: false,
             log_path,
             summary: { validation_errors: [], validation_warnings: [], compiler_errors: [], fatal_errors: [], licensing_errors: [] },
-            exit_code,
-            message: spawn_error.message,
+            exit_code: run.exit_code,
+            message: run.spawn_error,
         };
     }
 
-    const log_text = existsSync(log_path) ? readFileSync(log_path, 'utf-8') : '';
-    const summary = analyze_unity_log(log_text);
+    const summary = analyze_unity_log(run.log_text);
     const has_errors =
         summary.validation_errors.length > 0 ||
         summary.compiler_errors.length > 0 ||
@@ -342,11 +197,11 @@ async function run_unity_validation(unity_bin: string, project_path: string, tim
         summary.licensing_errors.length > 0;
 
     return {
-        success: exit_code === 0 && !has_errors && !termination_message,
+        success: run.exit_code === 0 && !has_errors && !run.termination_message,
         log_path,
         summary,
-        exit_code,
-        message: termination_message ?? (has_errors ? build_log_excerpt(log_text) : undefined),
+        exit_code: run.exit_code,
+        message: run.termination_message ?? (has_errors ? build_log_excerpt(run.log_text) : undefined),
     };
 }
 
@@ -390,7 +245,7 @@ function expected_failure_matched(result: { summary: UnityLogSummary }, scenario
 
 async function run_scenario(name: string, options: RunnerOptions): Promise<boolean> {
     const scenario = SCENARIOS[name];
-    const project_path = copy_fixture_project();
+    const project_path = copy_fixture_project(FIXTURE_ROOT, TEMP_ROOT, 'headless-validation-');
     const scene_path = join(project_path, SCENE_ASSET_PATH);
     const context: ScenarioContext = {
         project_path,

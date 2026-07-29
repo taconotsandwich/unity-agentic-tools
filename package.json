@@ -11,6 +11,7 @@
     "test:all": "bun run test && bun run test:integration",
     "test:integration": "cd unity-agentic-tools && bash test/cli-integration.test.sh",
     "test:integration:unity": "cd unity-agentic-tools && bun run test:unity-headless",
+    "test:integration:unity-tests": "cd unity-agentic-tools && bun run test:unity-editor-tests",
     "test:integration:stress": "cd unity-agentic-tools && bun run test:stress",
     "check:classids": "bun scripts/check-classid-drift.js",
     "release:preflight": "bun scripts/release-preflight.js",

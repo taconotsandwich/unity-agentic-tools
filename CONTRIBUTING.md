@@ -82,13 +82,20 @@ Examples:
 
 `check:classids` fetches Unity's ClassID reference over the network, so it fails without a connection rather than because your change is wrong.
 
-Three things CI does not cover, because they need a local Unity install:
+Four things CI does not cover, because they need a local Unity install:
 
 - `bun run build:unity-package` — compiles the C# bridge package.
 - `bun run test:integration:unity` — headless Editor validation. Needs `--unity-bin` or `UNITY_BIN` pointing at a Unity executable.
+- `bun run test:integration:unity-tests` — runs the bridge package's EditMode tests in a throwaway Unity project. Same `--unity-bin`/`UNITY_BIN` contract. Reports total/passed/failed/skipped and exits non-zero on any failure, on a run that never reached the test runner, and on a run that executed zero tests. That last case matters: Unity exits 0 when a filter matches nothing.
 - `bun run test:integration:stress` — drives an already-open Editor through play mode while issuing reads, then reports transient failures and per-target latency. Needs `--project` or `UNITY_PROJECT` pointing at a project whose Editor is running with the bridge installed. Exits non-zero if any call failed.
 
-Run the first two yourself when you touch `unity-package/`, and the third when you touch retry or transport behaviour in `src/editor-client.ts`.
+Run the first three when you touch `unity-package/`, and the fourth when you touch retry or transport behaviour in `src/editor-client.ts`.
+
+These stay local on purpose, not as a gap waiting on CI. Running them in CI means a Unity licence in a GitHub secret and a licensing round trip on every job, for tests whose whole value is that a real Editor executed them. They are a pre-release gate a human runs, and `test/editor-tests-harness.test.ts` keeps the harness's own parsing under CI without needing Unity.
+
+```bash
+bun run test:integration:unity-tests -- --unity-bin /Applications/Unity/Hub/Editor/6000.4.0f1/Unity.app/Contents/MacOS/Unity
+```
 
 ## Release Format
 
