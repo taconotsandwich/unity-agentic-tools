@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { program } from 'commander';
+import { is_record, parse_batch_spec, payload_reports_failure, run_batch, type BatchItem } from './batch';
 import { install_bridge_package, type BridgeInstallOptions } from './bridge-install';
 import { cleanup } from './cleanup';
 import { call_editor, stream_editor, ping_editor, discover_editor_config, read_editor_readiness } from './editor-client';
@@ -23,6 +24,7 @@ interface RunCommandOptions extends BridgeCommandOptions {
     set?: string;
     raw?: boolean;
     wait?: boolean;
+    batch?: string;
 }
 
 interface ListCommandOptions extends BridgeCommandOptions {
@@ -123,22 +125,6 @@ function output_rpc_response(response: RpcResponse, pretty: boolean): void {
     }
 }
 
-function payload_reports_failure(payload: unknown): boolean {
-    if (!is_record(payload)) {
-        return false;
-    }
-
-    if (payload.success === false) {
-        return true;
-    }
-
-    return payload_reports_failure(payload.result);
-}
-
-function is_record(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function strip_command_listing_details(payload: unknown): unknown {
     if (!is_record(payload)) {
         return payload;
@@ -231,7 +217,7 @@ program.command('list [query]')
         output_rpc_response(response, options.pretty === true);
     });
 
-program.command('run <target> [args...]')
+program.command('run [target] [args...]')
     .description('Run a named Unity command or raw static method/property')
     .option('-p, --project <path>', 'Path to Unity project (defaults to cwd)')
     .option('--timeout <ms>', 'WebSocket timeout in ms', '60000')
@@ -240,8 +226,73 @@ program.command('run <target> [args...]')
     .option('--set <value>', 'Set a static property value')
     .option('--raw', 'Allow invoking an unregistered public static member (logged in the Editor console)')
     .option('--no-wait', 'Fire and forget -- return immediately without waiting for result')
+    .option('--batch <json>', 'JSON array of [target, ...args] items; runs sequentially, stops on first error')
     .option('--pretty', 'Pretty-print JSON output')
-    .action(async (target: string, args: string[], options: RunCommandOptions) => {
+    .action(async (target: string | undefined, args: string[], options: RunCommandOptions) => {
+        if (options.batch !== undefined) {
+            const conflicts: string[] = [];
+            if (target !== undefined) {
+                conflicts.push('a positional target');
+            }
+            if (options.args !== undefined) {
+                conflicts.push('--args');
+            }
+            if (options.set !== undefined) {
+                conflicts.push('--set');
+            }
+            if (options.raw === true) {
+                conflicts.push('--raw');
+            }
+            if (options.wait === false) {
+                conflicts.push('--no-wait');
+            }
+            if (conflicts.length > 0) {
+                print_json({
+                    success: false,
+                    error: `--batch cannot be combined with ${conflicts.join(', ')}.`,
+                }, options.pretty === true);
+                process.exitCode = 1;
+                return;
+            }
+
+            let items: BatchItem[];
+            try {
+                items = parse_batch_spec(options.batch);
+            } catch (err: unknown) {
+                print_json({
+                    success: false,
+                    error: err instanceof Error ? err.message : String(err),
+                }, options.pretty === true);
+                process.exitCode = 1;
+                return;
+            }
+
+            const bridge = resolve_bridge_options(options);
+            const outcome = await run_batch(items, (item: BatchItem) => call_editor({
+                ...bridge,
+                method: 'editor.invoke',
+                params: {
+                    type: 'UnityAgenticTools.Commands.Registry',
+                    member: 'Run',
+                    args: build_registry_args([item.target, JSON.stringify(item.args), 'false']),
+                },
+            }));
+            print_json(outcome, options.pretty === true);
+            if (!outcome.success) {
+                process.exitCode = 1;
+            }
+            return;
+        }
+
+        if (target === undefined) {
+            print_json({
+                success: false,
+                error: 'run requires a command target unless --batch is provided.',
+            }, options.pretty === true);
+            process.exitCode = 1;
+            return;
+        }
+
         const bridge = resolve_bridge_options(options);
         const command_args_json = options.args || JSON.stringify(args);
         const allow_raw = options.raw === true ? 'true' : 'false';

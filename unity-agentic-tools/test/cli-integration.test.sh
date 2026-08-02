@@ -52,7 +52,7 @@ echo "Test 1: Top-level help shows only runner commands"
 if run_cli "help" bun dist/cli.js --help; then
     help_output="$(cat "$tmp_dir/help.out")"
     if echo "$help_output" | grep -q "list \\[options\\] \\[query\\]" \
-        && echo "$help_output" | grep -q "run \\[options\\] <target> \\[args...\\]" \
+        && echo "$help_output" | grep -q "run \\[options\\] \\[target\\] \\[args...\\]" \
         && echo "$help_output" | grep -q "stream \\[options\\] \\[topic\\]" \
         && echo "$help_output" | grep -q "cleanup \\[options\\]" \
         && ! echo "$help_output" | grep -q "read \\[options\\]" \
@@ -79,7 +79,16 @@ echo "Test 3: Stream topic validation happens before bridge connection"
 expect_failure_contains "stream-invalid-topic" "Invalid stream topic" bun dist/cli.js stream bad-topic --duration 1
 
 echo ""
-echo "Test 4: Status returns bridge-shaped JSON"
+echo "Test 4: run --batch validation happens before bridge connection"
+expect_failure_contains "batch-invalid-json" "not valid JSON" bun dist/cli.js run --batch 'not-json'
+expect_failure_contains "batch-empty" "non-empty JSON array" bun dist/cli.js run --batch '[]'
+expect_failure_contains "batch-bad-item" "must start with a command target string" bun dist/cli.js run --batch '[[42]]'
+expect_failure_contains "batch-set-conflict" "cannot be combined with --set" bun dist/cli.js run --batch '[["scene.hierarchy"]]' --set foo
+expect_failure_contains "batch-target-conflict" "cannot be combined with a positional target" bun dist/cli.js run scene.save --batch '[["scene.hierarchy"]]'
+expect_failure_contains "run-no-target" "requires a command target" bun dist/cli.js run
+
+echo ""
+echo "Test 5: Status returns bridge-shaped JSON"
 if run_cli "status" bun dist/cli.js status; then
     status_output="$(cat "$tmp_dir/status.out")"
     if echo "$status_output" | grep -q '"runtime":[[:space:]]*"bun"' \

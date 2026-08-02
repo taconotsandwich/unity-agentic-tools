@@ -64,7 +64,7 @@ describe('command runner surface', () => {
         const help = run_cli(['--help']);
 
         expect(help).toContain('list [options] [query]');
-        expect(help).toContain('run [options] <target> [args...]');
+        expect(help).toContain('run [options] [target] [args...]');
         expect(help).toContain('stream [options] [topic]');
         expect(help).toContain('install [options]');
         expect(help).toContain('uninstall [options]');
