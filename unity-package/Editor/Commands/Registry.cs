@@ -16,7 +16,7 @@ namespace UnityAgenticTools.Commands
 
         private static readonly BuiltInCommand[] BuiltIns =
         {
-            new BuiltInCommand("project.refresh", "UnityEditor.AssetDatabase", "Refresh", "Refresh the Unity AssetDatabase."),
+            new BuiltInCommand("project.refresh", "UnityEditor.AssetDatabase", "Refresh", "Refresh the Unity AssetDatabase. Only needed after out-of-band file changes; bridge mutations import their own."),
             new BuiltInCommand("project.save-assets", "UnityEditor.AssetDatabase", "SaveAssets", "Save modified project assets."),
             new BuiltInCommand("project.build.add", "UnityAgenticTools.Create.Project", "Build", "Add a scene to build settings."),
             new BuiltInCommand("project.package.add", "UnityAgenticTools.Create.Project", "Package", "Add or update a package dependency."),
@@ -68,7 +68,7 @@ namespace UnityAgenticTools.Commands
             new BuiltInCommand("delete.component", "UnityAgenticTools.Delete.Objects", "Component", "Delete a component from a GameObject."),
             new BuiltInCommand("delete.asset", "UnityAgenticTools.Delete.Assets", "Asset", "Delete an asset and its meta file through AssetDatabase."),
 
-            new BuiltInCommand("play.enter", "UnityAgenticTools.Util.PlayMode", "Enter", "Enter play mode."),
+            new BuiltInCommand("play.enter", "UnityAgenticTools.Util.PlayMode", "Enter", "Enter play mode. Scene edits made in play mode are discarded on exit."),
             new BuiltInCommand("play.exit", "UnityAgenticTools.Util.PlayMode", "Exit", "Exit play mode."),
             new BuiltInCommand("play.pause", "UnityAgenticTools.Util.PlayMode", "Pause", "Toggle pause state."),
             new BuiltInCommand("play.step", "UnityAgenticTools.Util.PlayMode", "Step", "Step one frame in play mode."),

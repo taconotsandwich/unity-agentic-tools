@@ -8,7 +8,7 @@ These aliases run without `--raw`. Any target not listed here is a raw public st
 
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
-| `project.refresh` | `UnityEditor.AssetDatabase.Refresh` | Refresh the Unity AssetDatabase. |
+| `project.refresh` | `UnityEditor.AssetDatabase.Refresh` | Refresh the Unity AssetDatabase. Only needed after out-of-band file changes; bridge mutations import their own. |
 | `project.save-assets` | `UnityEditor.AssetDatabase.SaveAssets` | Save modified project assets. |
 | `project.build.add <scenePath> [position]` | `UnityAgenticTools.Create.Project.Build` | Add a scene to build settings. |
 | `project.package.add <name> <version>` | `UnityAgenticTools.Create.Project.Package` | Add or update a package dependency. |
@@ -84,7 +84,7 @@ These aliases run without `--raw`. Any target not listed here is a raw public st
 
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
-| `play.enter` | `UnityAgenticTools.Util.PlayMode.Enter` | Enter play mode. |
+| `play.enter` | `UnityAgenticTools.Util.PlayMode.Enter` | Enter play mode. Scene edits made in play mode are discarded on exit. |
 | `play.exit` | `UnityAgenticTools.Util.PlayMode.Exit` | Exit play mode. |
 | `play.pause` | `UnityAgenticTools.Util.PlayMode.Pause` | Toggle pause state. |
 | `play.step` | `UnityAgenticTools.Util.PlayMode.Step` | Step one frame in play mode. |

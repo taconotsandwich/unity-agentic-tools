@@ -36,6 +36,15 @@ By default, `install` writes the GitHub package URL. For local bridge package de
 4. `unity-agentic-tools run <target> ... -p <project>`
 5. Verify with the matching query, snapshot, screenshot, tests, or console stream.
 
+## Workflow Rules
+
+1. Author in edit mode against asset paths. Scene edits made in play mode are discarded on exit.
+2. Verify structure with `query.object` or `scene.hierarchy`, not play mode or screenshots. Screenshots are for visual layout; take `ui.snapshot` first and reserve `screenshot.annotated` for when element geometry matters.
+3. Play mode is for behavior. Each transition is a domain reload, so batch authoring before `play.enter`, run queries after, and never interleave authoring with transitions.
+4. Prefer `tests.run` for behavior checks over manually driving `input.*` and reading screenshots.
+5. Never sleep-and-repoll: `wait.for` blocks on the condition (ui, ui-gone, scene, log, compile, delay) in one call, and `run --batch` executes a command sequence in one process.
+6. Skip `project.refresh` after bridge mutations; they import their own changes. It is only needed after files change outside the bridge.
+
 ## Examples
 
 ```bash
