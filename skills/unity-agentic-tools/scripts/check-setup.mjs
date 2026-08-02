@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 
 import { execFileSync } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 const errors = [];
 const warnings = [];
@@ -63,6 +65,18 @@ try {
 } catch {
     errors.push(
         `Could not run unity-agentic-tools status for ${project}. Ensure the binary is installed and working.`
+    );
+}
+
+// Check 4: Claude Code skill present. Warning only: Claude Code plugin
+// installs ship the skill from the plugin repo, not ~/.claude/skills.
+const skill_manifest = join(homedir(), ".claude", "skills", "unity-agentic-tools", "SKILL.md");
+if (existsSync(skill_manifest)) {
+    console.log("[ok] unity-agentic-tools skill installed for Claude Code");
+} else {
+    warnings.push(
+        "unity-agentic-tools skill not found at ~/.claude/skills/unity-agentic-tools. " +
+        "Run bun run sync-skill from a source checkout, or npx skills add taconotsandwich/unity-agentic-tools -g for a released install."
     );
 }
 

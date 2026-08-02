@@ -24,7 +24,12 @@ npm install -g unity-agentic-tools
 ### skills
 
 ```bash
-npx skills install taconotsandwich/unity-agentic-tools
+npx skills add taconotsandwich/unity-agentic-tools -g
+```
+
+From a local checkout:
+
+```bash
 npx skills add "./skills/unity-agentic-tools" -g --copy
 ```
 
@@ -38,7 +43,7 @@ cd unity-agentic-tools
 bun run setup-dev
 ```
 
-`setup-dev` links the built CLI into Bun's global bin and enables the repo's git hooks. If it reports that Bun's global bin is not on `PATH`, add the printed directory before relying on `unity-agentic-tools` by name.
+`setup-dev` links the built CLI into Bun's global bin, enables the repo's git hooks, and installs the Claude Code skill through the skills CLI. If it reports that Bun's global bin is not on `PATH`, add the printed directory before relying on `unity-agentic-tools` by name.
 
 The `--recurse-submodules` flag matters: `test/fixtures/external` is a submodule containing a real Unity project that several tests read from. If you already cloned without it, run `git submodule update --init --recursive`.
 

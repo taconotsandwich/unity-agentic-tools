@@ -29,7 +29,7 @@ bun run test:integration:stress -- --project <path> --cycles 5  # play mode cycl
 bun run setup-dev
 ```
 
-`setup-dev` links the built CLI into Bun's global bin. If it reports that Bun's global bin is not on `PATH`, add the printed directory before relying on `unity-agentic-tools` by name.
+`setup-dev` links the built CLI into Bun's global bin and installs the Claude Code skill (`bun run sync-skill`). If it reports that Bun's global bin is not on `PATH`, add the printed directory before relying on `unity-agentic-tools` by name.
 
 `unity-agentic-tools install` defaults to the GitHub package URL. For local bridge package development, use `unity-agentic-tools install --local -p <project>`; `--local` auto-detects this checkout's `unity-package/`.
 
@@ -101,7 +101,7 @@ tools/dotnet-unity-compile/ Dotnet compile harness for the Unity package
 
 - The repo ships one unified skill at `skills/unity-agentic-tools` for CLI setup, command discovery, command execution, live bridge workflows, scene and prefab mutation, UI testing, screenshots, tests, logs, and troubleshooting.
 - **Generated command reference**: run `bun run generate:agent-guidance` after changing Unity command aliases so `skills/unity-agentic-tools/reference/command-reference.md` stays in sync with `Registry.cs`.
-- **Sync to global install**: `bun run sync-skill` copies the skill (SKILL.md, `reference/`, `scripts/`) to `~/.claude/skills/`.
+- **Sync to global install**: `bun run sync-skill` regenerates the command reference and installs the skill to `~/.claude/skills/` with `bunx skills add --copy`.
 - **Verification**:
   - `bun skills/unity-agentic-tools/scripts/check-setup.mjs`
 

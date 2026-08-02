@@ -17,7 +17,7 @@
     "release:preflight": "bun scripts/release-preflight.js",
     "generate:agent-guidance": "bun scripts/generate-agent-guidance.js",
     "type-check": "cd unity-agentic-tools && tsc --noEmit",
-    "setup-dev": "bun install && bun run hooks && bun run build && bun run build:unity-package && bun scripts/link-dev-cli.js",
+    "setup-dev": "bun install && bun run hooks && bun run build && bun run build:unity-package && bun scripts/link-dev-cli.js && bun run sync-skill",
     "teardown-dev": "bun scripts/link-dev-cli.js --unlink && bun scripts/install-hooks.js --uninstall && rm -rf unity-agentic-tools/dist",
     "hooks": "bun scripts/install-hooks.js",
     "sync-skill": "bash scripts/sync-skill.sh"
