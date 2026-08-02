@@ -29,7 +29,7 @@ bun run test:integration:stress -- --project <path> --cycles 5  # play mode cycl
 bun run setup-dev
 ```
 
-`setup-dev` links the built CLI into Bun's global bin and installs the Claude Code skill (`bun run sync-skill`). If it reports that Bun's global bin is not on `PATH`, add the printed directory before relying on `unity-agentic-tools` by name.
+`setup-dev` links the built CLI through `npm link`, so the dev command lands in npm's global bin — the same directory `npm install -g unity-agentic-tools` uses. Bun is the dev runtime and tooling; npm is the distribution channel, so the link goes through npm on purpose. It also installs the Claude Code skill (`bun run sync-skill`).
 
 `unity-agentic-tools install` defaults to the GitHub package URL. For local bridge package development, use `unity-agentic-tools install --local -p <project>`; `--local` auto-detects this checkout's `unity-package/`.
 
