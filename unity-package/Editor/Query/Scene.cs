@@ -14,7 +14,7 @@ namespace UnityAgenticTools.Query
                 return Util.Hierarchy.Snapshot(maxDepth, includeInactive);
             }
 
-            using (var context = AssetMutationContext.Open(assetPath))
+            using (var context = AssetMutationContext.Open(assetPath, forMutation: false))
             {
                 var roots = new List<object>();
                 foreach (var root in context.GetRootGameObjects())
@@ -33,7 +33,7 @@ namespace UnityAgenticTools.Query
 
         public static object Object(string assetPath, string gameObjectPath)
         {
-            using (var context = AssetMutationContext.Open(assetPath))
+            using (var context = AssetMutationContext.Open(assetPath, forMutation: false))
             {
                 var gameObject = MutationUtility.ResolveGameObject(context, gameObjectPath);
                 return DescribeGameObject(gameObject, 0, context.AssetPath);
