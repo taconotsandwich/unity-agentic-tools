@@ -98,6 +98,12 @@ These aliases run without `--raw`. Any target not listed here is a raw public st
 | `ui.query <refStr> <query>` | `UnityAgenticTools.Util.UI.Query` | Query a UI ref. |
 | `ui.interact <refStr> <action> [text] [value] [option] [byIndex] [direction] [amount]` | `UnityAgenticTools.Util.UI.Interact` | Interact with a UI ref. |
 
+## wait
+
+| Alias | Backing API | Purpose |
+|-------|-------------|---------|
+| `wait.for <condition> [refStr] [name] [text] [timeout] [ms]` | `UnityAgenticTools.Util.UI.Wait` | Wait for a condition: ui, ui-gone, scene, log, compile, delay. |
+
 ## input
 
 | Alias | Backing API | Purpose |
@@ -121,3 +127,10 @@ These aliases run without `--raw`. Any target not listed here is a raw public st
 |-------|-------------|---------|
 | `tests.run [mode] [filter]` | `UnityAgenticTools.Util.TestRunner.Run` | Run Unity tests. |
 | `tests.results` | `UnityAgenticTools.Util.TestRunner.GetResults` | Read the latest Unity test results. |
+
+## logs
+
+| Alias | Backing API | Purpose |
+|-------|-------------|---------|
+| `logs.tail [count] [type] [contains] [includeStackTrace]` | `UnityAgenticTools.Bridge.Handlers.ConsoleHandler.GetLogs` | Read recent console logs (pull, no streaming). |
+| `logs.clear` | `UnityAgenticTools.Bridge.Handlers.ConsoleHandler.Clear` | Clear the Unity console and the captured log buffer. |

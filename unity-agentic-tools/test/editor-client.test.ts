@@ -106,6 +106,58 @@ describe('call_editor', () => {
         expect(response.result).toEqual({ state: 'Playing' });
     });
 
+    test('wait.for invokes classify as reads and retry through discovery loss', async () => {
+        install_mock_websocket({
+            53785: {
+                reachable_sequence: [false, false, false, true, true],
+                bridge_info: {
+                    port: 53785,
+                    pid: 2222,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true, waited: 50 },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('wait.for', ['delay']),
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true, waited: 50 });
+    });
+
+    test('logs.tail invokes classify as reads and retry through discovery loss', async () => {
+        install_mock_websocket({
+            53785: {
+                reachable_sequence: [false, false, false, true, true],
+                bridge_info: {
+                    port: 53785,
+                    pid: 2222,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { count: 0, logs: [] },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('logs.tail'),
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ count: 0, logs: [] });
+    });
+
     test('mutating invokes keep the shorter default recovery window', async () => {
         install_mock_websocket({
             53785: {

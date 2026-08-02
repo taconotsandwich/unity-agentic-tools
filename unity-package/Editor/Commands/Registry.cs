@@ -78,6 +78,8 @@ namespace UnityAgenticTools.Commands
             new BuiltInCommand("ui.query", "UnityAgenticTools.Util.UI", "Query", "Query a UI ref."),
             new BuiltInCommand("ui.interact", "UnityAgenticTools.Util.UI", "Interact", "Interact with a UI ref."),
 
+            new BuiltInCommand("wait.for", "UnityAgenticTools.Util.UI", "Wait", "Wait for a condition: ui, ui-gone, scene, log, compile, delay."),
+
             new BuiltInCommand("input.map", "UnityAgenticTools.Util.Input", "Map", "Inspect available input actions and legacy axes."),
             new BuiltInCommand("input.key", "UnityAgenticTools.Util.Input", "Key", "Send a key input event."),
             new BuiltInCommand("input.mouse", "UnityAgenticTools.Util.Input", "Mouse", "Send a mouse input event."),
@@ -87,7 +89,10 @@ namespace UnityAgenticTools.Commands
             new BuiltInCommand("screenshot.take", "UnityAgenticTools.Util.Screenshot", "Take", "Capture a Game view screenshot."),
             new BuiltInCommand("screenshot.annotated", "UnityAgenticTools.Util.Screenshot", "Annotated", "Capture a screenshot with UI annotations."),
             new BuiltInCommand("tests.run", "UnityAgenticTools.Util.TestRunner", "Run", "Run Unity tests."),
-            new BuiltInCommand("tests.results", "UnityAgenticTools.Util.TestRunner", "GetResults", "Read the latest Unity test results.")
+            new BuiltInCommand("tests.results", "UnityAgenticTools.Util.TestRunner", "GetResults", "Read the latest Unity test results."),
+
+            new BuiltInCommand("logs.tail", "UnityAgenticTools.Bridge.Handlers.ConsoleHandler", "GetLogs", "Read recent console logs (pull, no streaming)."),
+            new BuiltInCommand("logs.clear", "UnityAgenticTools.Bridge.Handlers.ConsoleHandler", "Clear", "Clear the Unity console and the captured log buffer.")
         };
 
         public static object List(string query = "", bool includeRaw = false)

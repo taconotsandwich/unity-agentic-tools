@@ -71,6 +71,8 @@ const READ_RUN_TARGETS = new Set<string>([
     'ui.query',
     'input.map',
     'tests.results',
+    'wait.for',
+    'logs.tail',
     'UnityAgenticTools.Util.Hierarchy.Snapshot',
     'UnityAgenticTools.Util.Hierarchy.Query',
     'UnityAgenticTools.Query.Assets.Find',
@@ -82,6 +84,8 @@ const READ_RUN_TARGETS = new Set<string>([
     'UnityAgenticTools.Util.UI.Query',
     'UnityAgenticTools.Util.Input.Map',
     'UnityAgenticTools.Util.TestRunner.GetResults',
+    'UnityAgenticTools.Util.UI.Wait',
+    'UnityAgenticTools.Bridge.Handlers.ConsoleHandler.GetLogs',
 ]);
 
 const PLAY_MODE_RUN_TARGETS = new Set<string>([
