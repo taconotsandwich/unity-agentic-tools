@@ -68,6 +68,7 @@ function collect_cs_files(directory: string): string[] {
  */
 function strip_comments(source: string): string {
     return source
+        .replace(/\r\n?/g, '\n')
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .split('\n')
         .map((line) => line.replace(/\/\/.*$/, ''))
@@ -79,6 +80,12 @@ describe('active scene access ban', () => {
 
     it('finds the bridge sources', () => {
         expect(source_files.length).toBeGreaterThan(20);
+    });
+
+    it('strips line comments from CRLF source files', () => {
+        const source = '// GetActiveScene()\r\nvar value = 1; // new GameObject(\r\n';
+
+        expect(strip_comments(source)).toBe('\nvar value = 1; \n');
     });
 
     it.each(BANNED_CALLS)('confines $call to its one sanctioned site', ({ call, allowed, rule }) => {
