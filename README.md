@@ -1,19 +1,54 @@
 # Unity Agentic Tools
 
-A compact CLI and Unity Editor bridge for inspecting and changing Unity projects through one small command runner surface: `list`, `run`, `stream`, `install`, `uninstall`, `cleanup`, and `status`.
+Unity Agentic Tools is a compact command runner for AI agents and scripts that need to inspect, change, and verify a Unity project through an already-running Unity Editor.
 
-## Features
+The project has two runtime components:
 
-- **Small Command Surface** - Discover with `list`, execute with `run`, and watch live bridge events with `stream`.
-- **Unity Script Execution** - Run built-in aliases, attributed project commands, or raw public static C# methods/properties.
-- **Live Editor Bridge** - WebSocket transport to a running Unity Editor for scene, prefab, UI, play mode, screenshots, tests, and console access.
-- **Project Editor Script Commands** - Add `[AgenticCommand]` to public static editor methods/properties and expose them without adding new CLI tools.
-- **Built-In Unity Operations** - Create, update, delete, and query scenes, prefabs, assets, GameObjects, components, UI refs, and test results through one runner.
-- **Bridge-First Mutation** - Unity project changes go through the Editor bridge; the npm package no longer ships local serialized-file mutation helpers.
-- **Real-Time Console Watch** - `stream console` follows Unity logs over WebSocket, with topic and log-type filtering.
-- **Reload-Tolerant Reads** - Domain reloads take the bridge down for seconds at a time. Reads and play mode transitions wait that window out while the Editor is alive, instead of failing.
+- a Bun/TypeScript CLI with seven top-level commands: `list`, `run`, `stream`, `install`, `uninstall`, `cleanup`, and `status`
+- a Unity 2022.3+ UPM package that executes commands inside the Editor on Unity's main thread
+
+Its automation scope starts with an existing project. Installing or removing the bridge can happen while the project is closed; every bridge-backed Unity operation targets an open Editor. The tool does not install Unity Editors or modules, manage licenses, or replace a CI build service. Project-specific build and tooling workflows can still join the same runner through `[AgenticCommand]`.
+
+## How It Works
+
+```mermaid
+flowchart LR
+    Caller["Agent or shell"] --> CLI["Bun CLI<br/>list · run · stream · status"]
+    CLI --> Discovery["Project-aware discovery<br/>lockfile · persisted cache · port probe"]
+    Discovery -.->|"selects project endpoint"| Bridge
+    CLI <-->|"JSON-RPC over loopback WebSocket"| Bridge["Unity Editor UPM bridge"]
+    Bridge -->|"list / run"| MainThread["Editor stability check<br/>and main-thread queue"]
+    MainThread --> Registry["Command registry<br/>built-ins · AgenticCommand · opt-in raw"]
+    Registry --> APIs["Unity APIs<br/>scenes · prefabs · assets · UI · play mode · tests"]
+    APIs --> Project["Project and Editor state"]
+    Bridge -->|"status"| Readiness["Editor readiness"]
+    Events["Console · play mode · test events"] --> Bridge
+```
+
+`install` is the setup path: it adds the UPM bridge to the target project's package manifest. After Unity loads the package, the bridge starts through `[InitializeOnLoad]` and advertises the local Editor session under `.unity-agentic/`.
+
+The supported operating loop is:
+
+1. Check the Editor with `status`.
+2. Discover a focused command set with `list <query> --brief`.
+3. Inspect current state with `query.*`, `scene.hierarchy`, `ui.snapshot`, screenshots, or logs.
+4. Change state with `run <target> ...`.
+5. Verify the result with a matching query, screenshot, test, or event stream.
+
+### Local security model
+
+The bridge binds only to loopback and is intended for a trusted local development machine. The supported CLI requires `--raw` for unregistered public static members, but the bridge is not an authentication boundary for other local processes that speak its JSON-RPC protocol directly.
+
+## What It Provides
+
+- **One command runner** — built-in aliases, project `[AgenticCommand]` methods, and opt-in raw public static C# members all use `list` and `run`.
+- **In-Editor execution** — mutations run through the bridge; Unity owns scene, prefab, GameObject, and component serialization instead of the CLI rewriting their YAML.
+- **Live inspection and interaction** — query hierarchies and UI, enter Play mode, interact with UI and input, capture screenshots, run tests, inspect logs, and follow push events.
+- **Explicit lifecycle behavior** — recognized built-in reads and Play mode commands retry through normal reloads, streams reconnect separately, and ordinary mutation commands are not replayed after ambiguous transport errors.
 
 ## Installation
+
+Requires Bun 1.0 or newer for the CLI and Unity 2022.3 or newer for the Editor bridge.
 
 ### npm
 
@@ -21,7 +56,7 @@ A compact CLI and Unity Editor bridge for inspecting and changing Unity projects
 npm install -g unity-agentic-tools
 ```
 
-### skills
+### Optional agent skill
 
 ```bash
 npx skills add taconotsandwich/unity-agentic-tools -g
@@ -55,12 +90,14 @@ Base usage:
 unity-agentic-tools [options] <command>
 ```
 
+Project-scoped commands default to the current directory. Pass `-p <path>` or `--project <path>` to target another Unity project.
+
 Visible top-level commands:
 
 | Command | Purpose |
 |---------|---------|
 | `list [query]` | List runnable Unity commands and project script commands |
-| `run <target> [args...]` | Run a named command alias, or a raw public static C# method/property with `--raw` |
+| `run [target] [args...]` | Run a named command, an opt-in raw static member, or a sequential `--batch` list |
 | `stream [topic]` | Stream bridge events over WebSocket |
 | `install` | Install the Unity bridge package into a project |
 | `uninstall` | Remove the Unity bridge package from a project |
@@ -76,13 +113,23 @@ unity-agentic-tools install -p /path/to/UnityProject
 unity-agentic-tools status -p /path/to/UnityProject
 ```
 
-When the bridge answers, `status` also reports readiness inside `bridge`:
+When the bridge answers, `status` reports Editor readiness inside `bridge`. Abridged output:
 
 ```json
-{"runtime":"bun","version":"0.6.1","project_path":"...","bridge":{
- "port":53782,"pid":95468,"version":"0.1.0","source":"lockfile","reachable":true,
- "readiness":{"is_playing":false,"is_paused":false,"is_compiling":false,"is_updating":false,
- "is_playmode_transitioning":false,"is_reloading":false,"is_stable":true}}}
+{
+  "bridge": {
+    "reachable": true,
+    "readiness": {
+      "is_playing": false,
+      "is_paused": false,
+      "is_compiling": false,
+      "is_updating": false,
+      "is_playmode_transitioning": false,
+      "is_reloading": false,
+      "is_stable": true
+    }
+  }
+}
 ```
 
 `reachable: true` with `is_stable: false` means the bridge is up but the Editor is busy — wait rather than reinstall.
@@ -110,7 +157,7 @@ unity-agentic-tools list create
 unity-agentic-tools list UnityEditor.AssetDatabase --raw
 ```
 
-`list` returns JSON with the command name, backing C# type/member, source, and description. Built-in aliases include `project.*`, `scene.*`, `query.*`, `create.*`, `update.*`, `delete.*`, `play.*`, `ui.*`, `input.*`, `screenshot.*`, and `tests.*`.
+`list` returns JSON with the command name, backing C# type/member, source, and description. Built-in aliases include `project.*`, `scene.*`, `query.*`, `create.*`, `update.*`, `delete.*`, `play.*`, `ui.*`, `wait.*`, `input.*`, `screenshot.*`, `tests.*`, and `logs.*`.
 
 ### Run
 
@@ -132,6 +179,12 @@ unity-agentic-tools run update.batch-components Assets/Scenes/Main.unity '[{"gam
 ```
 
 `--args '<json array>'` sends the same payload with the escaping done by hand. Reach for it only when an argument starts with `-`, which the option parser would otherwise claim.
+
+Run dependent commands sequentially with `--batch`. Each item is `[target, ...args]`; execution stops at the first failure:
+
+```bash
+unity-agentic-tools run --batch '[["create.gameobject","Assets/Scenes/Main.unity","EnemyRoot","Gameplay"],["update.transform","Assets/Scenes/Main.unity","Gameplay/EnemyRoot","1,2,3"]]'
+```
 
 Run raw public static C# APIs without adding a CLI command. This reaches any public static member on any loaded type, so it requires `--raw` and is logged as a warning in the Unity console:
 
@@ -167,7 +220,7 @@ Topics:
 | Topic | Events |
 |-------|--------|
 | `console` | Unity log events, optionally filtered with `--type Log|Warning|Error|Assert|Exception` |
-| `events` | Console, editor state, play mode, pause, and test events |
+| `events` | Console, play mode, pause, and test events |
 | `playmode` | Play mode and pause state changes |
 | `tests` | Unity test runner events |
 
@@ -195,17 +248,30 @@ unity-agentic-tools list build
 unity-agentic-tools run build.addressables Production
 ```
 
-## Project Structure
+## How It Fits with Unity's Tools
+
+As of August 2026, Unity's official CLI is experimental and Unity Pipeline is beta. They are the first option to evaluate for general automation on Unity 6.0 or newer. Unity Agentic Tools is a separate, compact runner for projects that want this repository's command aliases, `[AgenticCommand]` extension point, `ui.snapshot` / `ui.interact` reference workflow, WebSocket event streams, and tested domain-reload behavior.
+
+| Option | Runtime model | Best fit |
+|--------|---------------|----------|
+| Unity Agentic Tools | Bun CLI connected to an already-running Editor through a loopback WebSocket bridge | The workflow above, including Unity 2022.3 projects and project-specific commands on one small surface |
+| [Official Unity CLI and Unity Pipeline](https://docs.unity.com/en-us/unity-cli/unity-cli-reference) | Official Editor/project management, batch builds and tests, an MCP server, and typed commands for a connected Editor; the [Pipeline package requires Unity 6.0+](https://docs.unity.com/en-us/unity-production-pipeline/local-tools-cli/unity-pipeline-package) | The official route, including CI, C# evaluation, and Development Player automation |
+| [Unity Editor command-line arguments](https://docs.unity3d.com/Manual/EditorCommandLineArguments.html) | Starts or controls an Editor process with flags such as `-batchmode` and `-executeMethod` | Builds, imports, tests, and other process-level or CI entry points |
+
+These options can coexist. For example, use Editor command-line arguments to launch a CI job and use one connected-Editor runner for interactive inspection. Avoid exposing the same project operation through multiple custom surfaces unless they serve distinct workflows.
+
+## Repository Layout
 
 ```
-unity-agentic-tools/     TypeScript CLI + tests
-unity-package/           Unity Editor bridge C# UPM package
+unity-agentic-tools/         Published TypeScript CLI and tests
+unity-package/               Unity Editor bridge C# UPM package
+skills/unity-agentic-tools/  Agent workflow and generated command reference
 tools/dotnet-unity-compile/  Local .NET compile harness for the Unity package
 ```
 
 ## Development
 
-Requires: Bun runtime, and — for `build:unity-package` only — a local Unity Editor install plus the .NET SDK.
+Requires Bun. Building the bridge and running Unity-backed suites also require a local Unity Editor; bridge compilation additionally uses the .NET SDK.
 
 ```bash
 bun run build                # build the TypeScript CLI
@@ -217,9 +283,10 @@ bun run check:classids       # Unity ClassID drift check (needs network)
 bun run hooks                # enable the repo's git hooks
 ```
 
-Two suites are opt-in and not run by CI, alongside `build:unity-package`:
+Three Unity-backed suites are opt-in and not run by CI:
 
 - `bun run test:integration:unity` runs headless Editor validation and needs a Unity executable via `--unity-bin` or `UNITY_BIN`.
+- `bun run test:integration:unity-tests` runs the package's Editor tests, including representative scene and prefab serialization cases.
 - `bun run test:integration:stress` drives play mode enter/exit cycles against an *open* Editor and reports per-call latency and failures by JSON-RPC error code. Run it when changing retry or transport behaviour in `unity-agentic-tools/src/editor-client.ts`.
 
 ```bash

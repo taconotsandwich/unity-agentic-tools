@@ -51,13 +51,15 @@
   },
   "keywords": [
     "unity",
-    "yaml",
-    "parser",
     "scene",
     "prefab",
     "gameobject",
     "ai",
-    "cli"
+    "cli",
+    "automation",
+    "editor",
+    "agentic",
+    "websocket"
   ],
   "license": "Apache-2.0"
 }

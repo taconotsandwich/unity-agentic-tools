@@ -1,642 +1,140 @@
 # Unity Agentic Tools Roadmap
 
-This document tracks the current editor-bridge problems, the intended connection architecture on the Unity Editor side, and the rollout plan to get there.
+This roadmap describes the current implementation, its remaining limits, and the order in which larger architecture changes should be evaluated. The root README is the source of truth for the public command surface and current runtime flow.
 
-## Why This Exists
+## Current State
 
-The current editor bridge works, but recent stress testing showed that it is still too dependent on Unity's in-process lifecycle.
+The supported product is a compact command runner connected to an already-running Unity Editor:
 
-What is already true:
+- the public CLI surface is `list`, `run`, `stream`, `install`, `uninstall`, `cleanup`, and `status`
+- `list` and `run` resolve built-in aliases, project `[AgenticCommand]` members, and explicitly opted-in raw public static members through the Unity-side command registry
+- scene, prefab, asset, GameObject, component, UI, play mode, screenshot, test, and log operations execute inside Unity
+- scene, prefab, GameObject, and component mutations use Unity serialization; file-backed asset helpers still run inside the Editor and refresh or import through `AssetDatabase`; the CLI does not expose the removed local YAML mutation surface
+- command discovery uses `.unity-agentic/editor.json`, the persisted `.unity-agentic/editor.last.json` cache, and a project-matched scan of ports 53782-53791
+- recognized built-in reads and Play mode transitions wait through a domain reload for up to 30 seconds while the Editor PID remains alive
+- streams reconnect on the same bounded budget
+- ordinary mutations are not replayed after errors that could mean Unity already started executing them
+- raw public static invocation requires `--raw` through the supported CLI and produces a Unity console warning
 
-- compile-triggered domain reload recovery is much better than before
-- play enter/exit recovery is much better than before
-- project-aware bridge discovery is in place
-- read actions and command actions now have different retry behavior
+The bridge remains in the Unity Editor process. A domain reload still creates a short interval in which no server exists; the client now treats that as a bounded lifecycle transition instead of immediate bridge loss.
 
-What is not yet good enough:
+## Evidence Baseline
 
-- some short read operations like `editor play-state` can still miss the bridge during the first part of a play-mode transition
-- discovery is still too tied to Unity-owned process state
-- transport concerns and action semantics are still not cleanly separated
+The current reliability bar is measured with committed test harnesses rather than inferred from the transport design.
 
-## Current Problems
+`bun run test:integration:stress -- --project <path> --cycles 5` repeatedly enters and exits Play mode while reading play state, hierarchy, UI snapshots, and assets. Its acceptance bar is `total_failures: 0` and `transient_reads: 0` across repeated cycles.
 
-These are based on actual debugging and live stress runs against a real Unity project.
+`bun run test:integration:unity-tests` exercises representative scene and prefab mutations through `Registry.Run`, forces Unity re-imports, and verifies that serialized values round-trip even when names contain YAML metacharacters and embedded newlines.
 
-### 1. In-process bridge lifetime is still the root fragility
+These harnesses define a regression method, not a permanent performance claim. Record the Unity version, project, revision, and options with measured results, and re-run after changing discovery, transport, retry, or main-thread dispatch behavior.
 
-The WebSocket server lives inside Unity editor scripting. During assembly reload and some play-mode transitions, the server disappears because the whole editor-domain lifecycle is being torn down and rebuilt.
+## Known Limits
 
-Impact:
+### 1. Action semantics are split across layers
 
-- even when recovery succeeds, there can still be a short unavailable window
-- changing transport alone does not fix this if the server stays inside Unity
+The Unity-side registry defines which commands exist, but retry and lifecycle behavior is still classified in the TypeScript client. Because every call uses the JSON-RPC method `editor.invoke`, the client must inspect the target inside `params` to decide whether the action is a recognized read, a Play mode transition, or the conservative default command class.
 
-### 2. Discovery has been too dependent on `editor.json`
+This works, but the command contract does not yet advertise enough metadata for clients to derive behavior directly.
 
-Historically, the CLI treated `.unity-agentic/editor.json` as the source of truth. If it disappeared during reload, the CLI often failed immediately.
+### 2. One transport carries different interaction patterns
 
-Recent fixes improved this:
+Unary requests and persistent event streams both use JSON-RPC over WebSocket. Screenshot commands return file paths, so large artifacts already avoid the control response, but control, stream, and artifact behavior are not modeled as explicit contracts.
 
-- project-aware port probing was added
-- a last-known bridge cache was added
-- reload transitions now preserve `editor.json` instead of deleting it
+### 3. The server shares Unity's scripting lifecycle
 
-Remaining issue:
+Client recovery covers normal compile and Play mode reloads, but it cannot eliminate the interval in which Unity tears down the in-process bridge. A permanently broken bridge in a still-running Editor can consume the full reload deadline before failing.
 
-- a short live miss still happens in some play-entry probes even after these fixes
+### 4. The bridge assumes a trusted local machine
 
-### 3. Process-local caching is not enough for a CLI
-
-Each CLI call is a fresh process. That means in-memory recovery state is not sufficient by itself.
-
-Impact:
-
-- any recovery hint needed across invocations must be persisted on disk or owned by a long-lived sidecar
-
-### 4. All editor actions were treated too similarly
-
-`play-state` and `play` should not have the same retry model.
-
-Read-like actions need to tolerate brief transition windows.
-Command-like actions should fail faster to avoid accidental double-execution or confusing long waits.
-
-Recent fixes improved this:
-
-- transition-tolerant retry semantics were added for read actions
-- shorter retry behavior remains for command actions
-
-### 5. The current architecture still conflates contract and transport
-
-The editor API surface is mostly method-name based. The CLI knows how to call methods, but the system does not yet treat actions as first-class semantic contracts with lifecycle rules.
-
-Impact:
-
-- retry decisions are harder than they should be
-- future transport splits are harder than they should be
-- stream vs unary vs artifact-returning behavior is not modeled centrally
-
-### 6. The current blocker is a loaded-file blocker, not a mutation-safety blocker
-
-The existing protection in `loaded-protection.ts` is useful, but it mostly answers one question:
-
-- "is this `.unity` or `.prefab` currently loaded in the editor?"
-
-That is not the same as answering the more important question:
-
-- "is this mutation path safe enough to let a lower-level model perform it without producing invalid Unity YAML?"
-
-Current gap:
-
-- a low-level model can still choose a file-based mutation path that is syntactically or semantically risky
-- `--bypass-loaded-protection` is a transport/lifecycle escape hatch, not a true write-safety model
-- YAML-level writes are still too available relative to their risk profile
-
-Impact:
-
-- the tool can still be used in ways that produce invalid YAML
-- current protection is stronger against editor state conflicts than against invalid serialization output
-
-## Stress-Test Findings
-
-These numbers come from `bun run test:integration:stress`
-(`unity-agentic-tools/test/run-bridge-stress.ts`), against a live Editor. Earlier
-figures in this file came from an ad hoc script that was never committed and so
-could not be reproduced.
-
-Baseline, before any fix, 3 play cycles at 8 reads per phase:
-
-- `total_calls=102`, `transient_reads=1`, all of it `-32010` during the entering phase
-
-Localized with `--no-retry`, which strips the retry budget and exposes the raw
-transition window:
-
-- `total_calls=196`, `transient_reads=48` — every read target failed exactly 12
-  times, i.e. 100% of entering-phase reads, and 0% of exiting-phase reads
-
-That asymmetry is the whole story: entering play mode reloads the domain and
-takes the server down for 4-7s, while exiting does not (`play.exit` returns in
-~6ms). The fixed retry budgets spanned 5.25-6.25s, so they covered the window
-most of the time and missed it occasionally — a ~1-in-102 failure rate.
-
-After replacing the count-based budget with a deadline gated on lockfile PID
-aliveness:
-
-- 5 play cycles, `total_calls=170`, `total_failures=0`, `transient_reads=0`
-- a compile-and-reload run: 166 calls, 0 failures, worst read wait 6438ms against
-  a 30s budget
-
-Interpretation:
-
-- the transient-read problem was a budget-shape problem, not a bridge-loss problem
-- a count of retries cannot express "survive a domain reload"; only a deadline can
+The server binds to loopback. The supported CLI gates unregistered targets with `--raw`, but direct local JSON-RPC callers are not authenticated and can invoke the bridge reflection handler. The registry is a supported-client safety boundary, not a transport security boundary.
 
 ## Design Principles
 
-### 1. Define actions by semantics, not by transport
+1. **Keep the public CLI small.** Add Unity operations to the registry instead of creating new top-level command groups.
+2. **Describe actions by semantics.** Read, mutation, transition, stream, and artifact behavior should not be inferred from transport names.
+3. **Let Unity own scene and prefab serialization.** Do not restore a default raw YAML mutation path for scenes, prefabs, GameObjects, or components.
+4. **Do not replay uncertain mutations.** A timeout or disconnect can mean the Unity main thread already began the work.
+5. **Keep transport internal.** Users should not choose between WebSocket, HTTP, gRPC, or a sidecar per command.
+6. **Measure before replacing working infrastructure.** A new transport is justified only by a demonstrated lifecycle, throughput, or integration requirement.
 
-The editor layer should define what an action is and what guarantees it needs.
-The transport should be an implementation detail.
+## Next Priorities
 
-### 2. Split by interaction pattern
+### Phase 1: Add semantic metadata to the command registry
 
-There are three main classes of editor actions:
+Status: next
 
-- unary control/query
-- streaming/subscription
-- artifact or bulk output
+Extend command definitions with lifecycle metadata such as:
 
-### 3. Preserve CLI stability
-
-The CLI surface should not expose transport choices like "use WebSocket for this command, use gRPC for that command".
-Users should call editor actions the same way regardless of transport internals.
-
-### 4. Prefer local loopback simplicity
-
-For local editor automation, local HTTP/gRPC or a local socket is preferable to HTTPS.
-TLS on localhost adds complexity without fixing the Unity lifecycle issue.
-
-### 5. Block by mutation safety, not only by editor loaded-state
-
-The tool should make the safe path the default path.
-
-That means:
-
-- prefer editor-side mutations whenever Unity serialization is available
-- remove file-based YAML mutation from the default command surface
-- make risky write paths explicit and harder to reach
-- prevent lower-level models from selecting raw mutation paths by default
-
-### 6. Capability should be tiered by trust level
-
-Not every caller should get the same write surface.
-
-Suggested trust model:
-
-- high-level orchestrator: can choose between editor mutation and gated file mutation
-- lower-level model: should get safe semantic actions, not raw YAML-shaping power
-- human operator: can still use force/bypass options explicitly
-
-## Target Editor-Side Connection Model
-
-This is the intended more complete design.
-
-### A. Semantic action registry
-
-Every editor action should have metadata in the editor layer, not only a method string.
-
-Suggested fields:
-
-- `action_id`
-- `kind`: `read | command | stream | artifact`
+- `kind`: `read | mutation | transition | stream | artifact`
 - `requires_main_thread`
 - `allowed_mode`: `edit | play | both`
 - `idempotent`
-- `default_timeout_class`: `short | normal | long`
-- `retry_profile`: `none | transition_tolerant | reconnect_required`
-- `reload_behavior`: `safe_to_retry | must_fail_fast | resume_stream`
+- `timeout_class`: `short | normal | long`
+- `retry_profile`: `none | transition_tolerant | reconnect`
+- `reload_behavior`: `safe_to_retry | result_unknown | resume_stream`
 - `project_scoped`
 
-Examples:
+Then derive TypeScript client behavior from the advertised definition instead of maintaining target-name lists in `editor-client.ts`.
 
-- `editor.playMode.getState`
-  - `kind=read`
-  - `allowed_mode=both`
-  - `retry_profile=transition_tolerant`
-- `editor.playMode.enter`
-  - `kind=command`
-  - `allowed_mode=edit`
-  - `retry_profile=must_fail_fast`
-- `editor.console.subscribe`
-  - `kind=stream`
-  - `allowed_mode=both`
-  - `reload_behavior=resume_stream`
-- `editor.screenshot.take`
-  - `kind=artifact`
-  - `allowed_mode=both`
+Acceptance criteria:
 
-### B. Three logical connection planes
+- the Unity registry is the source of truth for lifecycle semantics
+- built-in and project commands expose the same metadata shape
+- mutation no-replay behavior remains the default
+- existing command names and top-level CLI commands do not change
 
-These are logical planes. They may share one transport initially.
+### Phase 2: Model control, stream, and artifact paths explicitly
 
-#### 1. Control plane
+Status: after Phase 1
 
-Use for unary requests:
+Define three logical interaction paths while allowing them to share the current WebSocket implementation:
 
-- play mode
-- queries
-- invoke
-- scene operations
-- console snapshot
-- screenshots request initiation
+- **control** for unary queries, mutations, Play mode, and command discovery
+- **stream** for console, Play mode, pause, and test notifications
+- **artifact** for screenshots and future large or file-backed results
 
-Good future transport:
+Acceptance criteria:
 
-- local unary RPC
-- local HTTP/gRPC
-- or current JSON-RPC over WebSocket until migration
+- stream reconnection rules do not leak into unary call behavior
+- artifact commands return paths or handles instead of large control-channel payloads
+- transport choices remain invisible at the CLI surface
 
-#### 2. Stream plane
+### Phase 3: Evaluate a stable local sidecar
 
-Use for subscriptions:
+Status: optional, evidence required
 
-- console follow
-- test progress
-- future hierarchy watch
-- future UI watch
+A sidecar would own stable project/session identity outside Unity's scripting domain, accept bridge reconnections, and provide a persistent endpoint for the CLI. It should be introduced only if measured workflows still fail the current lifecycle bar or require subscriptions that must survive longer Unity outages.
 
-Good future transport:
+Evaluation questions:
 
-- WebSocket
-- server stream
-- sidecar-mediated stream
+- Does the current 30-second recovery model fail real projects despite the passing stress baseline?
+- Do clients need subscriptions or queued work to survive an Editor restart rather than a domain reload?
+- Is the operational cost of another process lower than the remaining failure cost?
+- Would authentication or multi-client coordination justify the sidecar independently?
 
-#### 3. Artifact plane
+If the answers do not justify another long-lived process, keep the in-process bridge.
 
-Use for large or file-backed outputs:
+### Phase 4: Change transport only behind the semantic contract
 
-- screenshots
-- exported snapshots
-- large test reports
+Status: optional after Phases 1-3
 
-Rule:
+HTTP, gRPC, a local socket, or a split transport may be appropriate later. Do not migrate transport before action semantics and session ownership are explicit, and do not introduce localhost TLS without a concrete threat or deployment requirement.
 
-- return file paths, references, or handles
-- avoid pushing large blobs through the same channel as normal control traffic
+## Completed Milestones
 
-### C. Discovery should become advisory, not critical
+- bridge-first Unity mutation surface replaced the old local serialized-file mutation commands
+- project-aware three-tier Editor discovery
+- PID-gated, deadline-based reload recovery for recognized built-in reads and Play mode transitions
+- persistent stream reconnection with surfaced terminal failures
+- honest Play mode responses that distinguish requested state from live state
+- status readiness reporting for compilation, import, reload, and Play mode transitions
+- explicit `--raw` gate and Unity console audit warning for unregistered public static invocation
+- safe-surface Unity re-import and serialization regression coverage
 
-Current discovery artifacts:
+## Non-Goals
 
-- `.unity-agentic/editor.json`
-- `.unity-agentic/editor.last.json`
-
-These should remain useful, but they should not be the only way a fresh CLI process finds the right editor.
-
-Longer-term target:
-
-- stable project identity owned outside the Unity reload boundary
-- editor-side reconnection should update the stable owner rather than re-establish the entire world from zero
-
-## Target Mutation-Safety Blocker Model
-
-This is the intended design for preventing invalid YAML from lower-level tool use.
-
-### A. Classify mutation actions by serialization authority
-
-Every mutation should declare where truth comes from.
-
-#### 1. Editor-owned mutations
-
-These should prefer Unity serialization whenever the editor is available.
-
-Examples:
-
-- scene GameObject/component/transform edits
-- prefab instance/override edits
-- ScriptableObject field edits
-- imported asset metadata edits where Unity already has a canonical object model
-
-Rule:
-
-- if editor is connected, mutate through the editor
-- do not default to file-based YAML editing for these
-
-#### 2. File-owned structured mutations
-
-These are file-based mutations where the tool has strong structural knowledge and can validate shape well.
-
-Examples:
-
-- some project settings files
-- build settings scene list edits
-- package manifest edits
-- tightly-scoped asset file operations with a native parser-backed writer
-
-Rule:
-
-- allow file mutation only through structured operations, never arbitrary text shaping
-- require post-write structural validation
-
-#### 3. Unsafe or weakly-typed raw mutations
-
-These are mutations where the model is effectively shaping YAML without enough semantic guarantees.
-
-Examples:
-
-- raw batch edits against unknown structures
-- generic property writes on poorly typed YAML blocks
-- commands that can alter serialized references without a strong schema
-
-Rule:
-
-- do not expose these as first-class low-level model tools
-- require explicit force/unsafe mode or human/orchestrator approval
-
-### B. Introduce blocker levels
-
-The blocker should return a decision, not just "loaded or not loaded".
-
-Suggested levels:
-
-#### Level 0. Allow
-
-The mutation is safe enough to run directly.
-
-#### Level 1. Redirect
-
-The mutation is valid in intent, but must run through the editor path instead of file YAML mutation.
-
-Example:
-
-- editor is connected
-- target is a loaded scene or prefab
-- semantic editor action exists
-
-#### Level 2. Gate with validation
-
-The mutation may run file-based, but only with validation gates.
-
-Required steps:
-
-- preflight type/shape validation
-- write to temp or staged output
-- native Unity-YAML structural validation
-- if possible, Unity import validation before commit
-
-#### Level 3. Refuse by default
-
-The tool should refuse unless the caller explicitly opts into an unsafe path.
-
-Examples:
-
-- raw mutation of weakly-typed structures
-- edits that can invalidate references without a full object model
-- batch operations from low-level models without a semantic action wrapper
-
-### C. Make editor-first mutation a first-class path
-
-The current design still leans too hard on file editing.
-
-Target behavior:
-
-- if the editor is connected and a semantic editor mutation exists, use that path first
-- file mutation is not exposed as the primary path for editor-owned assets
-
-Benefits:
-
-- Unity owns serialization correctness
-- fewer invalid YAML outcomes
-- less need for downstream repair or import validation
-
-### D. Separate safe semantic tools from unsafe raw tools
-
-A lower-level model should not choose from the full mutation surface.
-
-Instead, expose:
-
-- safe semantic actions
-- typed parameters
-- small, validated edit scopes
-
-Keep hidden or restricted:
-
-- generic raw property mutation on complex YAML
-- unrestricted batch mutation
-- force/bypass flags
-
-### E. Add staged commit semantics for file mutations
-
-For any remaining file-based mutation path, use a transaction-like flow.
-
-Suggested flow:
-
-1. Resolve mutation intent into a typed operation.
-2. Run blocker classification.
-3. If redirected, execute editor mutation.
-4. If file-based, write staged output.
-5. Run structural validation.
-6. If editor/headless validation is available, import-validate.
-7. Commit only after validation passes.
-
-This turns validation into part of mutation, not an optional afterthought.
-
-### F. Record mutation receipts
-
-Each mutation should be able to produce a receipt describing:
-
-- path used: `editor` or `file`
-- blocker decision
-- validations run
-- whether Unity import validation was executed
-- whether the action used an unsafe override
-
-This makes it easier to debug model behavior and tool failures later.
-
-## Recommended Architecture Evolution
-
-### Phase 0. Harden the current in-process bridge
-
-Status: complete
-
-Work:
-
-- keep `editor.json` during reload/play transitions
-- keep project-aware discovery
-- keep persisted last-known bridge cache
-- keep semantic retry differences for read vs command calls
-- reduce remaining play-entry read misses
-
-Success criteria:
-
-- no lost bridge across repeated compile reloads — met
-- no lost bridge across repeated play enter/exit cycles — met
-- `editor play-state` should not miss during normal play transitions — met,
-  `transient_reads=0` across 5 play cycles (see Stress-Test Findings)
-
-### Phase 0.5. Replace the loaded-file blocker with a mutation-safety blocker
-
-Status: not started
-
-Work:
-
-- classify mutation commands by serialization authority and risk
-- introduce blocker decisions: allow, redirect, gate-with-validation, refuse
-- make editor-first mutation the default for editor-owned assets
-- reduce lower-level model access to raw YAML-shaping commands
-- add staged validation to remaining file-based write paths
-
-Success criteria:
-
-- lower-level model flows cannot trivially produce invalid YAML through the default tool surface
-- loaded-edit protection becomes one input into the blocker, not the blocker itself
-- file-based mutation is no longer the default path for editor-owned assets when the editor is connected
-
-### Phase 1. Introduce a real semantic action registry
-
-Status: not started
-
-Work:
-
-- define action metadata in the editor package
-- teach the CLI client to derive retry/timeout/stream behavior from action metadata
-- stop scattering action behavior rules across ad hoc client code
-
-Success criteria:
-
-- retry behavior is data-driven
-- stream/unary/artifact behavior is explicit
-- raw `run <full.static.target>` remains an escape hatch, not the primary contract
-
-### Phase 2. Split logical planes while keeping current transport if needed
-
-Status: not started
-
-Work:
-
-- define control, stream, and artifact pathways in the editor package
-- allow the same underlying WebSocket transport temporarily
-- separate handler responsibilities accordingly
-
-Success criteria:
-
-- streaming features do not share the same assumptions as unary queries
-- artifact-producing actions avoid oversized RPC payloads
-
-### Phase 3. Add a stable local sidecar
-
-Status: recommended
-
-This is the design change that actually addresses Unity lifecycle fragility.
-
-Sidecar responsibilities:
-
-- own stable project identity and editor session mapping
-- expose control and stream endpoints to the CLI
-- accept reconnects from the Unity package after reload
-- keep subscriptions and session state alive across Unity-domain resets where possible
-
-Unity package responsibilities:
-
-- act as an adapter to Unity editor APIs
-- reconnect to the sidecar after reload
-- push events and answer calls while available
-
-CLI responsibilities:
-
-- talk to the sidecar first, not directly to Unity
-- rely on action semantics, not transport details
-
-Success criteria:
-
-- CLI can survive Unity reloads without rediscovering everything from scratch
-- project identity remains stable across reloads
-- stream subscriptions can reconnect cleanly
-
-### Phase 4. Migrate transports behind the semantic contract
-
-Status: optional after sidecar
-
-Potential outcome:
-
-- control plane: local gRPC or HTTP RPC
-- stream plane: WebSocket or gRPC streaming
-- artifact plane: files on disk plus metadata returned over control plane
-
-Important:
-
-- do not introduce HTTPS on localhost unless there is a clear security or deployment requirement
-- do not expose transport choice in the CLI interface
-
-## What Not To Do
-
-- Do not split CLI commands by "WebSocket commands" vs "gRPC commands".
-- Do not treat transport change as the fix for Unity reload behavior by itself.
-- Do not rely on a process-local cache as the main recovery mechanism for a short-lived CLI.
-- Do not make raw static invocation the primary path for all future features.
-
-## Near-Term Tasks
-
-These are the next concrete tasks worth doing.
-
-1. Eliminate the remaining play-entry `play-state` transition miss.
-2. Add automated regression coverage for transition-time read calls against the live bridge or a higher-fidelity harness.
-3. Introduce a semantic action registry in the editor package.
-4. Refactor the client so action behavior is derived from that registry.
-5. Design the sidecar session model and project identity model.
-6. Replace the current loaded-file blocker with a semantic mutation-safety blocker.
-7. Define which mutation commands are editor-owned, file-owned, or unsafe.
-8. Add staged validation/commit flow for remaining file-based writes.
-
-## Acceptance Bar For "Bridge Is Stable"
-
-The editor bridge should not be considered stable until all of the following are true:
-
-- met: repeated compile reload cycles keep the bridge available
-- met: repeated play enter/exit cycles keep the bridge available
-- met: unary reads like `play-state`, `console-logs`, and `hierarchy-snapshot` do not transiently fail during normal transitions
-- met: stream subscriptions reconnect without manual intervention
-- met: discovery is no longer critically dependent on a single Unity-owned file
-- met: lower-level model mutation flows cannot produce invalid YAML through the default safe tool surface
-- met: force/unsafe mutation paths are explicit and auditable
-
-The discovery item was stale as written. `discover_editor_config`
-(`unity-agentic-tools/src/editor-discovery.ts`) has three tiers: the Unity-owned
-`editor.json` lockfile, the CLI-owned `editor.last.json` cache, and a full
-53782-53791 port scan matched on `project_path`. Losing the lockfile costs a port
-scan, not the connection.
-
-The part that really did depend on the lockfile was the *retry* path, not
-discovery: reload tolerance re-read `editor.json` on every poll to decide whether
-the Editor was still alive, so an unreadable lockfile mid-reload ended the wait in
-exactly the window the budget exists to cover. That now resolves a pid once per
-call from the lockfile or the cache, whichever answers.
-
-The YAML item predates the bridge-first migration. Every mutation on the safe
-surface now runs through Unity's own `SerializedObject` and `AssetDatabase`
-writers, so Unity emits the YAML and the local-mutation corruption class this
-criterion was written against no longer has a code path.
-
-That is now tested rather than assumed.
-`unity-package/Tests/Editor/SafeSurfaceYamlTests.cs` drives `create.scene`,
-`create.gameobject`, `create.component`, `update.transform`, `update.component`,
-`update.batch`, `update.object`, `create.prefab`, `create.prefab-instance`, and
-`update.prefab.override` through `Registry.Run` using names full of YAML
-metacharacters -- including embedded newlines, the classic way to split one
-scalar into several -- then forces a re-import and asserts every value round
-trips. Run it with `bun run test:integration:unity-tests`.
-
-The unsafe-path item was open because `Registry.Run` resolved any public static
-member on any loaded type with no opt-in and no record: `run System.IO.File.Delete
-<path>` was indistinguishable from `run scene.save` at the API surface. Raw
-resolution is already tagged as a distinct source in `CommandDefinition`; that tag
-is now enforced. An unregistered target is refused with a message naming `--raw`,
-and an opted-in one logs a console warning carrying the type, member, and args, so
-the audit trail lands in the Editor log rather than only in the caller's response.
-`MessageDispatcherTests` covers all three: refusal without the flag, success with
-it, and the warning itself.
-
-This is bounded to the command surface, which is what the criterion is about.
-`editor.invoke` remains a reflection gateway at the transport layer -- it has to
-be, because reaching `Registry` at all goes through it -- so anything speaking
-JSON-RPC directly to the bridge still has full reach. The bridge is
-localhost-only and the CLI is the supported client, but that is a trust boundary
-worth stating rather than papering over.
-
-All seven items are now met, which closes the bar as written.
-
-## Current Recommendation
-
-Short term:
-
-- keep the current WebSocket bridge
-- continue hardening the editor lifecycle behavior
-- finish the semantic action model
-- redesign the blocker around mutation safety instead of only loaded-file state
-
-Long term:
-
-- move to a sidecar-owned session model
-- split control, stream, and artifact planes behind the semantic contract
-- move editor-owned mutations to editor serialization through the semantic command runner
-- only change transport after the semantic contract and session model are clear
+- restoring a second CLI surface that performs the same Unity operations through local file mutation
+- adding one top-level CLI command per Unity API
+- exposing transport selection to callers
+- treating the supported CLI's `--raw` flag as authentication for direct bridge clients
+- optimizing or replacing the bridge without measurements that identify a real bottleneck

@@ -107,7 +107,7 @@ Full detail lives in `reference/troubleshooting.md`. Quick pointers:
 - **Bridge won't connect**: see "Bridge Not Reachable" (install, open Unity, wait for compile, status, cleanup). `reachable: true` with `is_stable: false` means busy, not broken.
 - **Long builds time out**: `run` defaults to 60s; see "Long-running Commands" (`--timeout 1200000`, `--no-wait`).
 - **Play mode looks wrong right after `play.enter`**: the response reports the current state, not the requested one. Poll `play.state`; see "Play Mode Transitions" in `reference/live-editor-workflows.md`.
-- **Reads are slow during a transition**: expected. Reads wait out a domain reload for up to 30s instead of failing; see "Domain reloads" in "Long-running Commands".
+- **Recognized built-in reads are slow during a transition**: expected. Those reads wait out a domain reload for up to 30s instead of failing; project commands and most raw getters use conservative command semantics. See "Domain reloads" in "Long-running Commands".
 - **Stale `@hN`/`@uN` refs**: re-run `scene.hierarchy` or `ui.snapshot`; see "Stale Refs".
 - **Need console logs**: `unity-agentic-tools stream console --duration 5000 -p <project>`.
 - **Need raw APIs**: `unity-agentic-tools list <type-or-namespace> --raw -p <project>` to find one, then `run <target> --raw` to invoke it. `run` refuses an unregistered target without `--raw` and logs a warning in the Unity console when it accepts one. Prefer a registered alias whenever one exists.
