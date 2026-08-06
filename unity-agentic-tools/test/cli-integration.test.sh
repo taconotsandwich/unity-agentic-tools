@@ -88,21 +88,24 @@ expect_failure_contains "batch-target-conflict" "cannot be combined with a posit
 expect_failure_contains "run-no-target" "requires a command target" bun dist/cli.js run
 
 echo ""
-echo "Test 5: Status returns bridge-shaped JSON"
-if run_cli "status" bun dist/cli.js status; then
-    status_output="$(cat "$tmp_dir/status.out")"
+echo "Test 5: Unreachable status returns bridge-shaped JSON and exits non-zero"
+status_out_file="$tmp_dir/status.out"
+if bun dist/cli.js status --port 1 --timeout 100 > "$status_out_file" 2>&1; then
+    echo "[fail] unreachable status unexpectedly succeeded"
+    cat "$status_out_file"
+    failures=$((failures + 1))
+else
+    status_output="$(cat "$status_out_file")"
     if echo "$status_output" | grep -q '"runtime":[[:space:]]*"bun"' \
         && echo "$status_output" | grep -q '"project_path"' \
-        && echo "$status_output" | grep -q '"bridge"'; then
-        echo "[ok] status output is runner-only"
+        && echo "$status_output" | grep -q '"bridge"' \
+        && echo "$status_output" | grep -q '"reachable":[[:space:]]*false'; then
+        echo "[ok] unreachable status is machine-readable"
     else
-        echo "[fail] status output has unexpected shape"
+        echo "[fail] unreachable status output has unexpected shape"
         echo "$status_output"
         failures=$((failures + 1))
     fi
-else
-    echo "[fail] status command failed"
-    failures=$((failures + 1))
 fi
 
 echo ""

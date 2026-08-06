@@ -179,11 +179,17 @@ jobs:
       - name: Verify the published CLI runs
         shell: bash
         run: |
-          OUTPUT=$(unity-agentic-tools status)
+          if OUTPUT=$(unity-agentic-tools status 2>&1); then
+            echo "$OUTPUT"
+            echo "ERROR: status unexpectedly found a reachable Unity bridge"
+            exit 1
+          fi
+
           echo "$OUTPUT"
-          if echo "$OUTPUT" | grep -q '"runtime":[[:space:]]*"bun"'; then
-            echo "Published CLI responded"
+          if echo "$OUTPUT" | grep -q '"runtime":[[:space:]]*"bun"' \
+            && echo "$OUTPUT" | grep -q '"reachable":[[:space:]]*false'; then
+            echo "Published CLI returned the expected unreachable status"
           else
-            echo "ERROR: unity-agentic-tools status did not report a bun runtime"
+            echo "ERROR: unity-agentic-tools status did not return the expected JSON"
             exit 1
           fi
