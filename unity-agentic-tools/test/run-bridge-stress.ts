@@ -1,51 +1,33 @@
 import { existsSync } from 'fs';
-import { isAbsolute } from 'path';
 import { call_editor } from '../src/editor-client';
-import type { RpcResponse } from '../src/types';
+import type { EditorRetryEvent, RpcResponse } from '../src/types';
+import { parse_args } from './bridge-stress-options';
+import type { StressOptions } from './bridge-stress-options';
+import {
+    read_command_error,
+    read_is_compiling,
+    read_is_paused,
+    read_is_playing,
+} from './bridge-stress-state';
+import type { PlayBaseline } from './bridge-stress-state';
+import { summarize, TRANSIENT_ERROR_CODES } from './bridge-stress-summary';
+import type { CallKind, CallRecord, PhaseName } from './bridge-stress-summary';
 
-export type PhaseName = 'entering' | 'playing' | 'exiting' | 'editing' | 'compiling';
-
-export interface StressOptions {
-    project_path: string;
-    cycles: number;
-    reads_per_phase: number;
-    timeout_ms: number;
-    no_retry: boolean;
-    compile_cycles: boolean;
+export interface StressInvokeControls {
+    safe_retries?: boolean;
+    on_retry?: (event: EditorRetryEvent) => void;
 }
 
-/** Reads are the metric; transitions are the load that provokes failures in them. */
-export type CallKind = 'read' | 'transition';
+export type StressInvoker = (
+    target: string,
+    args: string[],
+    controls?: StressInvokeControls,
+) => Promise<RpcResponse>;
 
-export interface CallRecord {
-    target: string;
-    phase: PhaseName;
-    kind: CallKind;
-    latency_ms: number;
-    ok: boolean;
-    /** JSON-RPC error code, set when the transport or server rejected the call. */
-    error_code?: number;
-    /** Unity-side error, set when the RPC succeeded but the command reported failure. */
-    command_error?: string;
-}
-
-export interface TargetStats {
-    target: string;
-    calls: number;
-    failures: number;
-    p50_ms: number;
-    p95_ms: number;
-    max_ms: number;
-}
-
-export interface StressSummary {
-    cycles: number;
-    total_calls: number;
-    total_failures: number;
-    transient_reads: number;
-    failures_by_code: Record<string, number>;
-    failures_by_phase: Record<string, number>;
-    by_target: TargetStats[];
+export interface StressTiming {
+    poll_interval_ms: number;
+    settle_timeout_ms: number;
+    stable_polls: number;
 }
 
 interface ReadTarget {
@@ -53,11 +35,14 @@ interface ReadTarget {
     args: string[];
 }
 
-/** Connection-level codes the client treats as transient. Mirrors editor-client.ts. */
-export const TRANSIENT_ERROR_CODES = new Set([-32000, -32002, -32003, -32010]);
+interface TransitionStatus {
+    settled: boolean;
+}
 
-/** failures_by_code key for a call whose RPC succeeded but whose Unity command reported failure. */
-export const COMMAND_ERROR_KEY = 'command-error';
+interface TimedCallResult {
+    record: CallRecord;
+    response?: RpcResponse;
+}
 
 /** Cheap, read-only targets. Arguments are bounded to keep each call small. */
 const READ_TARGETS: ReadTarget[] = [
@@ -74,172 +59,16 @@ const READ_TARGETS: ReadTarget[] = [
  */
 const COMPILE_TARGET = 'UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation';
 
-const DEFAULT_CYCLES = 3;
-const DEFAULT_READS_PER_PHASE = 8;
-const DEFAULT_TIMEOUT_MS = 15_000;
 const SETTLE_POLL_INTERVAL_MS = 250;
 const SETTLE_TIMEOUT_MS = 60_000;
+const STABLE_STATE_POLLS = 2;
+export const MAX_CONCURRENT_READS = 4;
 
-export function parse_args(args: string[], env: Record<string, string | undefined> = process.env): StressOptions {
-    let project_path = env.UNITY_PROJECT ?? '';
-    let cycles = DEFAULT_CYCLES;
-    let reads_per_phase = DEFAULT_READS_PER_PHASE;
-    let timeout_ms = DEFAULT_TIMEOUT_MS;
-    let no_retry = false;
-    let compile_cycles = false;
-
-    for (let index = 0; index < args.length; index += 1) {
-        const arg = args[index];
-
-        switch (arg) {
-            case '--project':
-                project_path = require_arg_value(args, ++index, arg);
-                break;
-            case '--cycles':
-                cycles = require_positive_int(require_arg_value(args, ++index, arg), arg);
-                break;
-            case '--reads':
-                reads_per_phase = require_positive_int(require_arg_value(args, ++index, arg), arg);
-                break;
-            case '--timeout-ms':
-                timeout_ms = require_positive_int(require_arg_value(args, ++index, arg), arg);
-                break;
-            case '--no-retry':
-                no_retry = true;
-                break;
-            case '--compile-cycles':
-                compile_cycles = true;
-                break;
-            case '--help':
-                print_help();
-                process.exit(0);
-            default:
-                throw new Error(`Unknown argument: ${arg}`);
-        }
-    }
-
-    if (project_path === '') {
-        throw new Error('--project is required');
-    }
-
-    if (!isAbsolute(project_path)) {
-        throw new Error('--project must be an absolute path');
-    }
-
-    return { project_path, cycles, reads_per_phase, timeout_ms, no_retry, compile_cycles };
-}
-
-function require_arg_value(args: string[], index: number, flag: string): string {
-    const value = args[index];
-    if (!value || value.startsWith('--')) {
-        throw new Error(`Missing value for ${flag}`);
-    }
-    return value;
-}
-
-function require_positive_int(value: string, flag: string): number {
-    const parsed = parseInt(value, 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-        throw new Error(`Invalid ${flag} value: ${value}`);
-    }
-    return parsed;
-}
-
-function print_help(): void {
-    console.log(`Usage: bun test/run-bridge-stress.ts --project <absolute-path> [options]
-
-Drives the live Unity bridge through play-mode transitions while issuing reads,
-then reports transient failures and per-target latency. Requires a running Unity
-Editor with the bridge package installed.
-
-Options:
-  --project <absolute-path>  Unity project to target. Can also be set with UNITY_PROJECT.
-  --cycles <n>               Play enter/exit cycles to run (default: ${DEFAULT_CYCLES})
-  --reads <n>                Reads issued per phase (default: ${DEFAULT_READS_PER_PHASE})
-  --timeout-ms <n>           Per-call request timeout (default: ${DEFAULT_TIMEOUT_MS})
-  --no-retry                 Disable client retries to measure the raw transition window
-  --compile-cycles           Also stress script compilation (recompiles the target project)
-  --help                     Show this help text`);
-}
-
-export function percentile(sorted_values: number[], p: number): number {
-    if (sorted_values.length === 0) {
-        return 0;
-    }
-
-    const rank = (p / 100) * (sorted_values.length - 1);
-    const lower = Math.floor(rank);
-    const upper = Math.ceil(rank);
-
-    if (lower === upper) {
-        return sorted_values[lower];
-    }
-
-    return sorted_values[lower] + (rank - lower) * (sorted_values[upper] - sorted_values[lower]);
-}
-
-function round1(value: number): number {
-    return Math.round(value * 10) / 10;
-}
-
-export function summarize(records: CallRecord[], cycles: number): StressSummary {
-    const failures_by_code: Record<string, number> = {};
-    const failures_by_phase: Record<string, number> = {};
-    const latencies_by_target = new Map<string, number[]>();
-    const failures_by_target = new Map<string, number>();
-
-    let total_failures = 0;
-    let transient_reads = 0;
-
-    for (const record of records) {
-        const latencies = latencies_by_target.get(record.target) ?? [];
-        latencies.push(record.latency_ms);
-        latencies_by_target.set(record.target, latencies);
-
-        if (record.ok) {
-            continue;
-        }
-
-        total_failures += 1;
-        failures_by_target.set(record.target, (failures_by_target.get(record.target) ?? 0) + 1);
-
-        const code_key = record.error_code !== undefined
-            ? String(record.error_code)
-            : (record.command_error !== undefined ? COMMAND_ERROR_KEY : 'unknown');
-        failures_by_code[code_key] = (failures_by_code[code_key] ?? 0) + 1;
-        failures_by_phase[record.phase] = (failures_by_phase[record.phase] ?? 0) + 1;
-
-        if (record.kind === 'read' &&
-            record.error_code !== undefined &&
-            TRANSIENT_ERROR_CODES.has(record.error_code)) {
-            transient_reads += 1;
-        }
-    }
-
-    const by_target: TargetStats[] = [...latencies_by_target.entries()]
-        .map(([target, latencies]) => {
-            const sorted = [...latencies].sort((a, b) => a - b);
-            return {
-                target,
-                calls: sorted.length,
-                failures: failures_by_target.get(target) ?? 0,
-                p50_ms: round1(percentile(sorted, 50)),
-                p95_ms: round1(percentile(sorted, 95)),
-                max_ms: round1(sorted[sorted.length - 1] ?? 0),
-            };
-        })
-        .sort((a, b) => a.target.localeCompare(b.target));
-
-    return {
-        cycles,
-        total_calls: records.length,
-        total_failures,
-        transient_reads,
-        failures_by_code,
-        failures_by_phase,
-        by_target,
-    };
-}
+const DEFAULT_TIMING: StressTiming = {
+    poll_interval_ms: SETTLE_POLL_INTERVAL_MS,
+    settle_timeout_ms: SETTLE_TIMEOUT_MS,
+    stable_polls: STABLE_STATE_POLLS,
+};
 
 function build_invoke_params(target: string, args: string[]): Record<string, unknown> {
     return {
@@ -249,123 +78,267 @@ function build_invoke_params(target: string, args: string[]): Record<string, unk
     };
 }
 
-async function invoke(
-    options: StressOptions,
-    target: string,
-    args: string[],
-): Promise<RpcResponse> {
-    return call_editor({
+function create_invoker(options: StressOptions): StressInvoker {
+    return (target, args, controls = {}) => call_editor({
         project_path: options.project_path,
         method: 'editor.invoke',
         timeout: options.timeout_ms,
-        ...(options.no_retry ? { retries: 0 } : {}),
+        ...(options.no_retry && !controls.safe_retries ? { retries: 0 } : {}),
         params: build_invoke_params(target, args),
+        on_retry: controls.on_retry,
     });
 }
 
 async function timed_invoke(
-    options: StressOptions,
+    invoke: StressInvoker,
+    records: CallRecord[],
     target: ReadTarget,
     phase: PhaseName,
     kind: CallKind,
-): Promise<CallRecord> {
+    controls: StressInvokeControls = {},
+): Promise<TimedCallResult> {
     const started = performance.now();
-    const response = await invoke(options, target.name, target.args);
-    const latency_ms = performance.now() - started;
-    const base = { target: target.name, phase, kind, latency_ms };
+    const retry_events: EditorRetryEvent[] = [];
+    let record: CallRecord;
+    let response: RpcResponse | undefined;
 
-    if (response.error) {
-        return { ...base, ok: false, error_code: response.error.code };
-    }
+    try {
+        response = await invoke(target.name, target.args, {
+            ...controls,
+            on_retry: event => {
+                retry_events.push(event);
+                controls.on_retry?.(event);
+            },
+        });
+        const base = {
+            target: target.name,
+            phase,
+            kind,
+            latency_ms: performance.now() - started,
+            retry_events,
+        };
 
-    const command_error = read_command_error(response);
-    if (command_error !== undefined) {
-        return { ...base, ok: false, command_error };
-    }
-
-    return { ...base, ok: true };
-}
-
-/**
- * A Registry command that fails still returns a successful RPC envelope:
- * {"success":true,"result":{"success":false,"error":"..."}}. Without this check
- * the harness would score a Unity-side failure as a healthy call.
- */
-export function read_command_error(response: RpcResponse): string | undefined {
-    const envelope = as_record(response.result);
-    if (envelope === undefined) {
-        return undefined;
-    }
-
-    const inner = as_record(envelope.result) ?? envelope;
-
-    for (const layer of [envelope, inner]) {
-        if (layer.success === false) {
-            return typeof layer.error === 'string' ? layer.error : 'command reported failure';
+        if (response.error) {
+            record = {
+                ...base,
+                ok: false,
+                error_code: response.error.code,
+                error_message: response.error.message,
+            };
+        } else {
+            const command_error = read_command_error(response);
+            record = command_error === undefined
+                ? { ...base, ok: true }
+                : { ...base, ok: false, command_error };
         }
+    } catch (err: unknown) {
+        record = {
+            target: target.name,
+            phase,
+            kind,
+            latency_ms: performance.now() - started,
+            retry_events,
+            ok: false,
+            client_error: err instanceof Error ? err.message : String(err),
+        };
     }
 
-    return undefined;
+    records.push(record);
+    return { record, response };
 }
 
-function as_record(value: unknown): Record<string, unknown> | undefined {
-    return typeof value === 'object' && value !== null
-        ? value as Record<string, unknown>
-        : undefined;
+export async function run_bounded_reads(
+    options: StressOptions,
+    invoke: StressInvoker,
+    records: CallRecord[],
+    phase: PhaseName,
+    count: number = options.reads_per_phase,
+    start_index = 0,
+): Promise<number> {
+    let next_index = 0;
+    const worker_count = Math.min(MAX_CONCURRENT_READS, count);
+    const workers = Array.from({ length: worker_count }, async () => {
+        while (true) {
+            const local_index = next_index;
+            next_index += 1;
+
+            if (local_index >= count) {
+                return;
+            }
+
+            const target = READ_TARGETS[(start_index + local_index) % READ_TARGETS.length];
+            await timed_invoke(invoke, records, target, phase, 'read');
+        }
+    });
+
+    await Promise.all(workers);
+    return start_index + count;
 }
 
-async function hammer_reads(options: StressOptions, phase: PhaseName): Promise<CallRecord[]> {
-    const records: CallRecord[] = [];
-
-    for (let index = 0; index < options.reads_per_phase; index += 1) {
-        const target = READ_TARGETS[index % READ_TARGETS.length];
-        records.push(await timed_invoke(options, target, phase, 'read'));
-    }
-
-    return records;
-}
-
-/**
- * Poll play.state until isPlaying matches. Deliberately excluded from the measured
- * records -- this is control flow, not a sample.
- *
- * Gate on isPlaying rather than the state string: an Editor with the pause toggle
- * armed enters play mode reporting "Paused", which is still play mode.
- */
-async function wait_for_play_mode(options: StressOptions, want_playing: boolean): Promise<boolean> {
-    const deadline = Date.now() + SETTLE_TIMEOUT_MS;
+async function sample_play_transition(
+    options: StressOptions,
+    invoke: StressInvoker,
+    records: CallRecord[],
+    phase: PhaseName,
+    want_playing: boolean,
+    timing: StressTiming,
+): Promise<boolean> {
+    const deadline = Date.now() + timing.settle_timeout_ms;
+    let sample_index = 0;
+    let stable_matches = 0;
 
     while (Date.now() < deadline) {
-        if (read_is_playing(await invoke(options, 'play.state', [])) === want_playing) {
+        const remaining = options.reads_per_phase - sample_index;
+        const batch_size = remaining > 0
+            ? Math.min(MAX_CONCURRENT_READS, remaining)
+            : 1;
+        sample_index = await run_bounded_reads(
+            options,
+            invoke,
+            records,
+            phase,
+            batch_size,
+            sample_index,
+        );
+
+        const control = await timed_invoke(
+            invoke,
+            records,
+            { name: 'play.state', args: [] },
+            phase,
+            'control',
+            { safe_retries: true },
+        );
+        stable_matches = control.response !== undefined &&
+            read_is_playing(control.response) === want_playing
+            ? stable_matches + 1
+            : 0;
+
+        if (sample_index >= options.reads_per_phase && stable_matches >= timing.stable_polls) {
             return true;
         }
-        await sleep(SETTLE_POLL_INTERVAL_MS);
+
+        await sleep(timing.poll_interval_ms);
     }
 
     return false;
 }
 
-export function read_is_playing(response: RpcResponse): boolean | undefined {
-    const payload = read_state_payload(response);
-    const is_playing = payload?.isPlaying;
+async function sample_compile_transition(
+    options: StressOptions,
+    invoke: StressInvoker,
+    records: CallRecord[],
+    trigger_status: TransitionStatus,
+    record_start_index: number,
+    timing: StressTiming,
+): Promise<boolean> {
+    const deadline = Date.now() + timing.settle_timeout_ms;
+    let sample_index = 0;
+    let saw_transition = false;
+    let stable_matches = 0;
 
-    return typeof is_playing === 'boolean' ? is_playing : undefined;
-}
+    while (Date.now() < deadline) {
+        const remaining = options.reads_per_phase - sample_index;
+        const batch_size = remaining > 0
+            ? Math.min(MAX_CONCURRENT_READS, remaining)
+            : 1;
+        sample_index = await run_bounded_reads(
+            options,
+            invoke,
+            records,
+            'compiling',
+            batch_size,
+            sample_index,
+        );
+        saw_transition = saw_transition || records.slice(record_start_index).some(record =>
+            record.phase === 'compiling' &&
+            (record.retry_events.length > 0 ||
+                (record.error_code !== undefined && TRANSIENT_ERROR_CODES.has(record.error_code))),
+        );
 
-export function read_state_string(response: RpcResponse): string | undefined {
-    const state = read_state_payload(response)?.state;
+        const control = await timed_invoke(
+            invoke,
+            records,
+            { name: 'play.state', args: [] },
+            'compiling',
+            'control',
+            {
+                safe_retries: true,
+                on_retry: () => {
+                    saw_transition = true;
+                },
+            },
+        );
+        const is_compiling = control.response === undefined
+            ? undefined
+            : read_is_compiling(control.response);
 
-    return typeof state === 'string' ? state : undefined;
-}
+        if (is_compiling === true) {
+            saw_transition = true;
+            stable_matches = 0;
+        } else if (is_compiling === false && saw_transition && trigger_status.settled) {
+            stable_matches += 1;
+        } else {
+            stable_matches = 0;
+        }
 
-function read_state_payload(response: RpcResponse): Record<string, unknown> | undefined {
-    if (response.error) {
-        return undefined;
+        if (sample_index >= options.reads_per_phase && stable_matches >= timing.stable_polls) {
+            return true;
+        }
+
+        await sleep(timing.poll_interval_ms);
     }
 
-    const envelope = as_record(response.result);
+    return false;
+}
 
-    return envelope === undefined ? undefined : (as_record(envelope.result) ?? envelope);
+/** Gate on isPlaying because an Editor paused in Play Mode is still playing. */
+async function wait_for_stable_play_mode(
+    invoke: StressInvoker,
+    want_playing: boolean,
+    timing: StressTiming,
+): Promise<boolean> {
+    const deadline = Date.now() + timing.settle_timeout_ms;
+    let stable_matches = 0;
+
+    while (Date.now() < deadline) {
+        const response = await invoke('play.state', [], { safe_retries: true });
+        stable_matches = read_is_playing(response) === want_playing
+            ? stable_matches + 1
+            : 0;
+
+        if (stable_matches >= timing.stable_polls) {
+            return true;
+        }
+
+        await sleep(timing.poll_interval_ms);
+    }
+
+    return false;
+}
+
+async function wait_for_stable_pause_state(
+    invoke: StressInvoker,
+    want_paused: boolean,
+    timing: StressTiming,
+): Promise<boolean> {
+    const deadline = Date.now() + timing.settle_timeout_ms;
+    let stable_matches = 0;
+
+    while (Date.now() < deadline) {
+        const response = await invoke('play.state', [], { safe_retries: true });
+        stable_matches = read_is_paused(response) === want_paused
+            ? stable_matches + 1
+            : 0;
+
+        if (stable_matches >= timing.stable_polls) {
+            return true;
+        }
+
+        await sleep(timing.poll_interval_ms);
+    }
+
+    return false;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -373,87 +346,213 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function transition(
-    options: StressOptions,
+    invoke: StressInvoker,
     records: CallRecord[],
     target: string,
     phase: PhaseName,
-): Promise<void> {
-    const record = await timed_invoke(options, { name: target, args: [] }, phase, 'transition');
-    records.push(record);
+): Promise<CallRecord> {
+    const { record } = await timed_invoke(
+        invoke,
+        records,
+        { name: target, args: [] },
+        phase,
+        'transition',
+    );
 
     if (!record.ok) {
         console.error(`  ${target} failed: ${describe_failure(record)}`);
     }
+
+    return record;
 }
 
 function describe_failure(record: CallRecord): string {
     return record.error_code !== undefined
-        ? `rpc ${record.error_code}`
-        : (record.command_error ?? 'unknown failure');
+        ? `rpc ${record.error_code}: ${record.error_message ?? 'unknown error'}`
+        : (record.command_error ?? record.client_error ?? 'unknown failure');
 }
 
-async function run_play_cycle(options: StressOptions, cycle: number): Promise<CallRecord[]> {
-    const records: CallRecord[] = [];
+async function await_transition_phase(
+    trigger: Promise<CallRecord>,
+    sampling: Promise<boolean>,
+    timeout_message: string,
+): Promise<void> {
+    const results = await Promise.allSettled([trigger, sampling]);
+    const rejected = results.find(result => result.status === 'rejected');
+
+    if (rejected?.status === 'rejected') {
+        throw rejected.reason instanceof Error
+            ? rejected.reason
+            : new Error(String(rejected.reason));
+    }
+
+    const sample_result = results[1];
+    if (sample_result.status !== 'fulfilled' || !sample_result.value) {
+        throw new Error(timeout_message);
+    }
+}
+
+export async function run_play_cycle(
+    options: StressOptions,
+    invoke: StressInvoker,
+    records: CallRecord[],
+    cycle: number,
+    timing: StressTiming = DEFAULT_TIMING,
+): Promise<void> {
 
     console.error(`cycle ${cycle}: entering play mode`);
-    await transition(options, records, 'play.enter', 'entering');
-    records.push(...await hammer_reads(options, 'entering'));
-
-    if (!await wait_for_play_mode(options, true)) {
-        throw new Error(`cycle ${cycle}: timed out waiting for play mode to start`);
-    }
-    records.push(...await hammer_reads(options, 'playing'));
+    await await_transition_phase(
+        transition(invoke, records, 'play.enter', 'entering'),
+        sample_play_transition(options, invoke, records, 'entering', true, timing),
+        `cycle ${cycle}: timed out waiting for play mode to start`,
+    );
+    await run_bounded_reads(options, invoke, records, 'playing');
 
     console.error(`cycle ${cycle}: exiting play mode`);
-    await transition(options, records, 'play.exit', 'exiting');
-    records.push(...await hammer_reads(options, 'exiting'));
-
-    if (!await wait_for_play_mode(options, false)) {
-        throw new Error(`cycle ${cycle}: timed out waiting for play mode to stop`);
-    }
-    records.push(...await hammer_reads(options, 'editing'));
-
-    return records;
+    await await_transition_phase(
+        transition(invoke, records, 'play.exit', 'exiting'),
+        sample_play_transition(options, invoke, records, 'exiting', false, timing),
+        `cycle ${cycle}: timed out waiting for play mode to stop`,
+    );
+    await run_bounded_reads(options, invoke, records, 'editing');
 }
 
-async function run_compile_cycle(options: StressOptions, cycle: number): Promise<CallRecord[]> {
-    const records: CallRecord[] = [];
-
+export async function run_compile_cycle(
+    options: StressOptions,
+    invoke: StressInvoker,
+    records: CallRecord[],
+    cycle: number,
+    timing: StressTiming = DEFAULT_TIMING,
+): Promise<void> {
     console.error(`cycle ${cycle}: requesting script compilation`);
-    await transition(options, records, COMPILE_TARGET, 'compiling');
-    records.push(...await hammer_reads(options, 'compiling'));
+    const record_start_index = records.length;
+    const trigger_status: TransitionStatus = { settled: false };
+    const trigger = transition(invoke, records, COMPILE_TARGET, 'compiling')
+        .finally(() => {
+            trigger_status.settled = true;
+        });
 
-    return records;
+    await await_transition_phase(
+        trigger,
+        sample_compile_transition(
+            options, invoke, records, trigger_status, record_start_index, timing,
+        ),
+        `cycle ${cycle}: timed out waiting for script compilation to settle`,
+    );
 }
 
-/** Never leave the Editor in play mode because the harness gave up partway through. */
-async function restore_edit_mode(options: StressOptions): Promise<void> {
-    if (read_is_playing(await invoke(options, 'play.state', [])) !== true) {
-        return;
+function control_error(response: RpcResponse): string | undefined {
+    return response.error?.message ?? read_command_error(response);
+}
+
+async function ensure_play_mode(
+    invoke: StressInvoker,
+    want_playing: boolean,
+    timing: StressTiming,
+    context: string,
+): Promise<void> {
+    const state_response = await invoke('play.state', [], { safe_retries: true });
+    const state_error = control_error(state_response);
+
+    if (state_error !== undefined) {
+        throw new Error(`${context}: could not read play state: ${state_error}`);
     }
 
-    console.error('restoring edit mode after an aborted run');
-    await invoke(options, 'play.exit', []);
-    await wait_for_play_mode(options, false);
+    if (read_is_playing(state_response) !== want_playing) {
+        const target = want_playing ? 'play.enter' : 'play.exit';
+        const response = await invoke(target, [], { safe_retries: true });
+        const error = control_error(response);
+
+        if (error !== undefined) {
+            throw new Error(`${context}: ${error}`);
+        }
+    }
+
+    if (!await wait_for_stable_play_mode(invoke, want_playing, timing)) {
+        throw new Error(`${context}: timed out waiting for ${want_playing ? 'Play' : 'Edit'} Mode`);
+    }
 }
 
-async function assert_bridge_reachable(options: StressOptions): Promise<void> {
+async function ensure_pause_state(
+    invoke: StressInvoker,
+    want_paused: boolean,
+    timing: StressTiming,
+    context: string,
+): Promise<void> {
+    const state_response = await invoke('play.state', [], { safe_retries: true });
+    const state_error = control_error(state_response);
+
+    if (state_error !== undefined) {
+        throw new Error(`${context}: could not read pause state: ${state_error}`);
+    }
+
+    const current_pause = read_is_paused(state_response);
+    if (current_pause === undefined) {
+        throw new Error(`${context}: play.state did not include isPaused`);
+    }
+
+    let pause_error: string | undefined;
+    if (current_pause !== want_paused) {
+        const response = await invoke('play.pause', [], { safe_retries: true });
+        pause_error = control_error(response);
+    }
+
+    if (!await wait_for_stable_pause_state(invoke, want_paused, timing)) {
+        const detail = pause_error === undefined ? '' : `: ${pause_error}`;
+        throw new Error(`${context}: timed out restoring pause state${detail}`);
+    }
+}
+
+export async function restore_play_baseline(
+    invoke: StressInvoker,
+    baseline: PlayBaseline,
+    timing: StressTiming = DEFAULT_TIMING,
+): Promise<void> {
+    const label = baseline.playing
+        ? `${baseline.paused ? 'paused ' : ''}Play Mode`
+        : 'Edit Mode';
+    console.error(`restoring initial ${label} after the stress run`);
+    await ensure_play_mode(invoke, baseline.playing, timing, 'failed to restore initial play state');
+
+    if (baseline.playing) {
+        await ensure_pause_state(invoke, baseline.paused, timing, 'failed to restore initial pause state');
+    }
+}
+
+async function assert_bridge_reachable(
+    options: StressOptions,
+    invoke: StressInvoker,
+    timing: StressTiming,
+): Promise<PlayBaseline> {
     if (!existsSync(options.project_path)) {
         throw new Error(`Project path does not exist: ${options.project_path}`);
     }
 
-    const response = await invoke(options, 'play.state', []);
-    if (response.error) {
+    const response = await invoke('play.state', [], { safe_retries: true });
+    const error = control_error(response);
+    if (error !== undefined) {
         throw new Error(
-            `Bridge is not reachable for ${options.project_path}: ${response.error.message}\n` +
+            `Bridge is not reachable for ${options.project_path}: ${error}\n` +
             'Open the Unity Editor with the bridge package installed before running this harness.',
         );
     }
+
+    const initial_playing = read_is_playing(response);
+    const initial_paused = read_is_paused(response);
+    if (initial_playing === undefined || initial_paused === undefined) {
+        throw new Error('Bridge returned an invalid play.state response.');
+    }
+
+    if (!await wait_for_stable_play_mode(invoke, initial_playing, timing)) {
+        throw new Error('Editor play state did not become stable before the stress run.');
+    }
+
+    return { playing: initial_playing, paused: initial_paused };
 }
 
 async function main(): Promise<void> {
     const options = parse_args(process.argv.slice(2));
-    await assert_bridge_reachable(options);
+    const invoke = create_invoker(options);
 
     console.error(
         `stressing ${options.project_path}: ${options.cycles} cycles, ` +
@@ -462,44 +561,78 @@ async function main(): Promise<void> {
 
     const records: CallRecord[] = [];
     let aborted: Error | undefined;
+    let cleanup_error: Error | undefined;
+    let completed_cycles = 0;
+    let baseline: PlayBaseline | undefined;
 
     try {
+        baseline = await assert_bridge_reachable(options, invoke, DEFAULT_TIMING);
+
+        if (baseline.playing) {
+            console.error('establishing Edit Mode before the stress run');
+            await ensure_play_mode(invoke, false, DEFAULT_TIMING, 'failed to establish Edit Mode');
+        }
+
         for (let cycle = 1; cycle <= options.cycles; cycle += 1) {
-            records.push(...await run_play_cycle(options, cycle));
+            await run_play_cycle(options, invoke, records, cycle);
 
             if (options.compile_cycles) {
-                records.push(...await run_compile_cycle(options, cycle));
+                await run_compile_cycle(options, invoke, records, cycle);
             }
+
+            completed_cycles = cycle;
         }
     } catch (err: unknown) {
         aborted = err instanceof Error ? err : new Error(String(err));
     }
 
-    await restore_edit_mode(options);
+    if (baseline !== undefined) {
+        try {
+            await restore_play_baseline(invoke, baseline);
+        } catch (err: unknown) {
+            cleanup_error = err instanceof Error ? err : new Error(String(err));
+        }
+    }
 
-    // Emit the summary even on an aborted run -- a partial measurement beats none.
-    const summary = summarize(records, options.cycles);
+    const summary = summarize(records, {
+        requested_cycles: options.cycles,
+        completed_cycles,
+        abort_error: aborted?.message,
+        cleanup_error: cleanup_error?.message,
+    });
     console.log(JSON.stringify(summary));
 
     if (aborted) {
         console.error(`\nRun aborted after ${summary.total_calls} call(s): ${aborted.message}`);
-        process.exit(1);
+    }
+
+    if (cleanup_error) {
+        console.error(`\nCleanup failed: ${cleanup_error.message}`);
     }
 
     if (summary.total_failures > 0) {
         console.error(
-            `\n${summary.total_failures} call(s) failed, ${summary.transient_reads} of them transient ` +
+            `\n${summary.total_failures} call(s) failed, ` +
+            `${summary.transient_reads} transient read failure(s), ` +
+            `${summary.recovered_reads} recovered read(s) ` +
             `(${JSON.stringify(summary.failures_by_code)}).`,
         );
-        process.exit(1);
     }
 
-    console.error(`\nAll ${summary.total_calls} calls succeeded.`);
+    if (!summary.success) {
+        process.exitCode = 1;
+        return;
+    }
+
+    console.error(
+        `\nAll ${summary.total_calls} calls succeeded; ` +
+        `${summary.recovered_reads} read(s) recovered through retries.`,
+    );
 }
 
 if (import.meta.main) {
     main().catch((err: unknown) => {
         console.error(err instanceof Error ? err.message : String(err));
-        process.exit(1);
+        process.exitCode = 1;
     });
 }

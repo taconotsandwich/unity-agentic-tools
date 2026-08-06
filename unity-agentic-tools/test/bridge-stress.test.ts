@@ -1,22 +1,49 @@
 import { describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'url';
+import { parse_args } from './bridge-stress-options';
+import type { StressOptions } from './bridge-stress-options';
 import {
-    COMMAND_ERROR_KEY,
-    parse_args,
-    percentile,
-    read_command_error,
-    read_is_playing,
-    read_state_string,
-    summarize,
-    TRANSIENT_ERROR_CODES,
+    restore_play_baseline,
+    run_bounded_reads,
+    run_compile_cycle,
+    run_play_cycle,
 } from './run-bridge-stress';
-import type { CallRecord } from './run-bridge-stress';
-import type { RpcResponse } from '../src/types';
+import type { StressInvoker, StressTiming } from './run-bridge-stress';
+import {
+    CLIENT_ERROR_KEY,
+    COMMAND_ERROR_KEY,
+    percentile,
+    summarize,
+} from './bridge-stress-summary';
+import type { CallRecord, StressRunOutcome } from './bridge-stress-summary';
+import type { EditorRetryEvent, RpcResponse } from '../src/types';
 
 function response(result: unknown): RpcResponse {
     return { jsonrpc: '2.0', id: '1', result };
 }
 
 const PROJECT = '/Users/dev/Projects/demo';
+const OPTIONS: StressOptions = {
+    project_path: PROJECT,
+    cycles: 1,
+    reads_per_phase: 4,
+    timeout_ms: 100,
+    no_retry: false,
+    compile_cycles: false,
+};
+const FAST_TIMING: StressTiming = {
+    poll_interval_ms: 1,
+    settle_timeout_ms: 40,
+    stable_polls: 2,
+};
+
+function outcome(overrides: Partial<StressRunOutcome> = {}): StressRunOutcome {
+    return { requested_cycles: 1, completed_cycles: 1, ...overrides };
+}
+
+function retry(code: number, attempt: number): EditorRetryEvent {
+    return { code, attempt, delay_ms: 10 };
+}
 
 describe('parse_args', () => {
     it('requires --project', () => {
@@ -77,6 +104,34 @@ describe('parse_args', () => {
     it('rejects non-positive counts', () => {
         expect(() => parse_args(['--project', PROJECT, '--cycles', '0'], {})).toThrow('Invalid --cycles value: 0');
     });
+
+    it('rejects partially numeric counts', () => {
+        expect(() => parse_args(['--project', PROJECT, '--reads', '8oops'], {}))
+            .toThrow('Invalid --reads value: 8oops');
+    });
+});
+
+describe('stress CLI', () => {
+    it('emits a JSON result for a preflight failure', () => {
+        const script = fileURLToPath(new URL('./run-bridge-stress.ts', import.meta.url));
+        const missing_project = fileURLToPath(new URL('./__missing_stress_project__', import.meta.url));
+        const result = Bun.spawnSync({
+            cmd: [process.execPath, script, '--project', missing_project, '--cycles', '1'],
+            stdout: 'pipe',
+            stderr: 'pipe',
+        });
+        const stdout = new TextDecoder().decode(result.stdout).trim();
+        const parsed: unknown = JSON.parse(stdout);
+
+        expect(result.exitCode).toBe(1);
+        expect(parsed).toMatchObject({
+            success: false,
+            requested_cycles: 1,
+            completed_cycles: 0,
+            total_calls: 0,
+            abort_error: `Project path does not exist: ${missing_project}`,
+        });
+    });
 });
 
 describe('percentile', () => {
@@ -102,16 +157,26 @@ describe('percentile', () => {
 });
 
 function record(overrides: Partial<CallRecord> = {}): CallRecord {
-    return { target: 'play.state', phase: 'playing', kind: 'read', latency_ms: 10, ok: true, ...overrides };
+    return {
+        target: 'play.state',
+        phase: 'playing',
+        kind: 'read',
+        latency_ms: 10,
+        ok: true,
+        retry_events: [],
+        ...overrides,
+    };
 }
 
 describe('summarize', () => {
     it('reports zeroes for an empty run', () => {
-        const summary = summarize([], 0);
+        const summary = summarize([], outcome({ requested_cycles: 0, completed_cycles: 0 }));
 
+        expect(summary.success).toBe(true);
         expect(summary.total_calls).toBe(0);
         expect(summary.total_failures).toBe(0);
         expect(summary.transient_reads).toBe(0);
+        expect(summary.total_retry_attempts).toBe(0);
         expect(summary.by_target).toEqual([]);
     });
 
@@ -121,7 +186,7 @@ describe('summarize', () => {
             record({ ok: false, error_code: -32000, phase: 'entering' }),
             record({ ok: false, error_code: -32000, phase: 'exiting' }),
             record({ ok: false, error_code: -32003, phase: 'entering' }),
-        ], 1);
+        ], outcome());
 
         expect(summary.total_calls).toBe(4);
         expect(summary.total_failures).toBe(3);
@@ -134,17 +199,17 @@ describe('summarize', () => {
             record({ ok: false, error_code: -32000 }),
             record({ ok: false, error_code: -32001 }),
             record({ ok: false, error_code: -32601 }),
-        ], 1);
+        ], outcome());
 
         expect(summary.total_failures).toBe(3);
         expect(summary.transient_reads).toBe(1);
     });
 
-    it('excludes transition calls from transient_reads but still counts them as failures', () => {
+    it('excludes transition calls from transient read failures but still counts them as failures', () => {
         const summary = summarize([
             record({ target: 'play.enter', kind: 'transition', ok: false, error_code: -32000 }),
             record({ ok: false, error_code: -32000 }),
-        ], 1);
+        ], outcome());
 
         expect(summary.total_failures).toBe(2);
         expect(summary.transient_reads).toBe(1);
@@ -152,7 +217,7 @@ describe('summarize', () => {
     });
 
     it('treats a failure with no code as non-transient but still a failure', () => {
-        const summary = summarize([record({ ok: false })], 1);
+        const summary = summarize([record({ ok: false })], outcome());
 
         expect(summary.total_failures).toBe(1);
         expect(summary.transient_reads).toBe(0);
@@ -163,11 +228,35 @@ describe('summarize', () => {
         const summary = summarize([
             record({ ok: false, command_error: 'Asset not found.' }),
             record({ ok: false, error_code: -32000 }),
-        ], 1);
+        ], outcome());
 
         expect(summary.total_failures).toBe(2);
         expect(summary.transient_reads).toBe(1);
         expect(summary.failures_by_code).toEqual({ [COMMAND_ERROR_KEY]: 1, '-32000': 1 });
+    });
+
+    it('keys unexpected client failures separately', () => {
+        const summary = summarize([record({ ok: false, client_error: 'socket exploded' })], outcome());
+
+        expect(summary.failures_by_code).toEqual({ [CLIENT_ERROR_KEY]: 1 });
+        expect(summary.failures).toEqual([{
+            target: 'play.state',
+            phase: 'playing',
+            kind: 'read',
+            latency_ms: 10,
+            message: 'socket exploded',
+        }]);
+    });
+
+    it('preserves JSON-RPC messages in failure details', () => {
+        const summary = summarize([
+            record({ ok: false, error_code: -32000, error_message: 'Editor domain is reloading' }),
+        ], outcome());
+
+        expect(summary.failures[0]).toMatchObject({
+            error_code: -32000,
+            message: 'Editor domain is reloading',
+        });
     });
 
     it('groups latency per target and sorts by name', () => {
@@ -176,7 +265,7 @@ describe('summarize', () => {
             record({ target: 'play.state', latency_ms: 10 }),
             record({ target: 'play.state', latency_ms: 30 }),
             record({ target: 'play.state', latency_ms: 20, ok: false, error_code: -32002 }),
-        ], 1);
+        ], outcome());
 
         expect(summary.by_target.map(stats => stats.target)).toEqual(['play.state', 'ui.snapshot']);
 
@@ -188,108 +277,279 @@ describe('summarize', () => {
     });
 
     it('measures latency of failed calls too', () => {
-        const summary = summarize([record({ ok: false, error_code: -32001, latency_ms: 900 })], 1);
+        const summary = summarize(
+            [record({ ok: false, error_code: -32001, latency_ms: 900 })],
+            outcome(),
+        );
 
         expect(summary.by_target[0].calls).toBe(1);
         expect(summary.by_target[0].max_ms).toBe(900);
     });
 
-    it('passes the cycle count through', () => {
-        expect(summarize([], 7).cycles).toBe(7);
-    });
-});
+    it('reports requested and completed cycle counts separately', () => {
+        const summary = summarize([], outcome({ requested_cycles: 7, completed_cycles: 3 }));
 
-describe('read_command_error', () => {
-    it('returns undefined for a healthy envelope', () => {
-        expect(read_command_error(response({ success: true, result: { refCount: 3 } }))).toBeUndefined();
+        expect(summary.success).toBe(false);
+        expect(summary.requested_cycles).toBe(7);
+        expect(summary.completed_cycles).toBe(3);
     });
 
-    it('returns undefined when the payload carries no success field', () => {
-        expect(read_command_error(response({ result: { state: 'Stopped' } }))).toBeUndefined();
+    it('reports recovered read retries separately from final failures', () => {
+        const summary = summarize([
+            record({ retry_events: [retry(-32000, 1), retry(-32002, 2)] }),
+            record({
+                target: 'ui.snapshot',
+                retry_events: [retry(-32003, 1)],
+                ok: false,
+                error_code: -32003,
+                phase: 'entering',
+            }),
+            record({
+                target: 'play.enter',
+                kind: 'transition',
+                phase: 'entering',
+                retry_events: [retry(-32002, 1)],
+            }),
+        ], outcome());
+
+        expect(summary.total_retry_attempts).toBe(4);
+        expect(summary.read_retry_attempts).toBe(3);
+        expect(summary.retried_reads).toBe(2);
+        expect(summary.recovered_reads).toBe(1);
+        expect(summary.transient_reads).toBe(1);
+        expect(summary.retries_by_code).toEqual({ '-32000': 1, '-32002': 2, '-32003': 1 });
+        expect(summary.retries_by_phase).toEqual({ playing: 2, entering: 2 });
+
+        const play_state = summary.by_target.find(stats => stats.target === 'play.state');
+        expect(play_state?.retry_attempts).toBe(2);
+        expect(play_state?.recovered_calls).toBe(1);
     });
 
-    it('detects a command failure nested under a successful envelope', () => {
-        const error = read_command_error(response({
-            success: true,
-            result: { success: false, error: 'Asset not found at Assets/Nope.unity.' },
+    it('includes abort and cleanup errors in the machine-readable result', () => {
+        const summary = summarize([], outcome({
+            requested_cycles: 2,
+            completed_cycles: 1,
+            abort_error: 'transition timeout',
+            cleanup_error: 'Editor unavailable',
         }));
 
-        expect(error).toBe('Asset not found at Assets/Nope.unity.');
-    });
-
-    it('detects a failure on the outer envelope', () => {
-        expect(read_command_error(response({ success: false, error: 'unknown target' }))).toBe('unknown target');
-    });
-
-    it('falls back to a generic message when no error string is present', () => {
-        expect(read_command_error(response({ success: true, result: { success: false } })))
-            .toBe('command reported failure');
-    });
-
-    it('returns undefined for a non-object result', () => {
-        expect(read_command_error(response('ok'))).toBeUndefined();
-        expect(read_command_error({ jsonrpc: '2.0', id: '1' })).toBeUndefined();
+        expect(summary.success).toBe(false);
+        expect(summary.abort_error).toBe('transition timeout');
+        expect(summary.cleanup_error).toBe('Editor unavailable');
     });
 });
 
-describe('read_state_string', () => {
-    it('reads state from a nested envelope', () => {
-        expect(read_state_string(response({ success: true, result: { state: 'Playing' } }))).toBe('Playing');
+describe('stress orchestration', () => {
+    it('caps measured read concurrency at four and captures retry callbacks', async () => {
+        const records: CallRecord[] = [];
+        let active = 0;
+        let max_active = 0;
+        let calls = 0;
+        const invoke: StressInvoker = async (_target, _args, controls) => {
+            calls += 1;
+            active += 1;
+            max_active = Math.max(max_active, active);
+
+            if (calls === 1) {
+                controls?.on_retry?.(retry(-32000, 1));
+            }
+
+            await new Promise<void>(resolve => setTimeout(resolve, 2));
+            active -= 1;
+            return response({ success: true, result: {} });
+        };
+
+        await run_bounded_reads(
+            { ...OPTIONS, reads_per_phase: 12 },
+            invoke,
+            records,
+            'playing',
+        );
+
+        expect(records).toHaveLength(12);
+        expect(max_active).toBe(4);
+        expect(records.flatMap(item => item.retry_events)).toEqual([retry(-32000, 1)]);
     });
 
-    it('reads state from a flat payload', () => {
-        expect(read_state_string(response({ state: 'Stopped' }))).toBe('Stopped');
+    it('retains records from a play cycle that times out partway through', async () => {
+        const records: CallRecord[] = [];
+        const invoke: StressInvoker = async (target, _args, controls) => {
+            if (target === 'play.state' && controls?.safe_retries) {
+                return response({
+                    success: true,
+                    result: { state: 'Stopped', isPlaying: false, isCompiling: false },
+                });
+            }
+
+            return response({ success: true, result: {} });
+        };
+
+        await expect(run_play_cycle(
+            { ...OPTIONS, reads_per_phase: 1 },
+            invoke,
+            records,
+            1,
+            { ...FAST_TIMING, settle_timeout_ms: 8 },
+        )).rejects.toThrow('timed out waiting for play mode to start');
+
+        expect(records.some(item => item.target === 'play.enter')).toBe(true);
+        expect(records.some(item => item.kind === 'read' && item.phase === 'entering')).toBe(true);
     });
 
-    it('returns undefined on an RPC error', () => {
-        const errored: RpcResponse = { jsonrpc: '2.0', id: '1', error: { code: -32000, message: 'restarting' } };
+    it('does not finish a compile cycle until compiling was observed and then stable', async () => {
+        const records: CallRecord[] = [];
+        const compile_states = [false, true, true, false, false];
+        const observed_states: boolean[] = [];
+        const order: string[] = [];
+        const invoke: StressInvoker = async (target, _args, controls) => {
+            order.push(target);
 
-        expect(read_state_string(errored)).toBeUndefined();
+            if (target === 'play.state' && controls?.safe_retries) {
+                if (observed_states.length === 0) {
+                    controls.on_retry?.(retry(-32000, 1));
+                }
+                const is_compiling = compile_states[observed_states.length] ?? false;
+                observed_states.push(is_compiling);
+                return response({
+                    success: true,
+                    result: { state: 'Stopped', isPlaying: false, isCompiling: is_compiling },
+                });
+            }
+
+            return response({ success: true, result: {} });
+        };
+
+        await run_compile_cycle(
+            { ...OPTIONS, reads_per_phase: 1 },
+            invoke,
+            records,
+            1,
+            FAST_TIMING,
+        );
+
+        expect(order[0]).toContain('RequestScriptCompilation');
+        expect(observed_states).toEqual(compile_states);
+        expect(records.some(item => item.target.includes('RequestScriptCompilation'))).toBe(true);
+        expect(summarize(records, outcome()).total_retry_attempts).toBe(1);
     });
 
-    it('returns undefined when state is absent or not a string', () => {
-        expect(read_state_string(response({ result: {} }))).toBeUndefined();
-        expect(read_state_string(response({ result: { state: 3 } }))).toBeUndefined();
+    it('does not accept stable false before a slow compile trigger returns', async () => {
+        const records: CallRecord[] = [];
+        let trigger_returned = false;
+        let post_trigger_polls = 0;
+        const invoke: StressInvoker = async (target, _args, controls) => {
+            if (target.includes('RequestScriptCompilation')) {
+                await new Promise<void>(resolve => setTimeout(resolve, 8));
+                trigger_returned = true;
+                return response({ success: true, result: {} });
+            }
+
+            if (target === 'play.state' && controls?.safe_retries) {
+                const post_trigger_states = [true, false, false];
+                const is_compiling = trigger_returned
+                    ? (post_trigger_states[post_trigger_polls++] ?? false)
+                    : false;
+                return response({
+                    success: true,
+                    result: { state: 'Stopped', isPlaying: false, isPaused: false, isCompiling: is_compiling },
+                });
+            }
+
+            return response({ success: true, result: {} });
+        };
+
+        await run_compile_cycle(
+            { ...OPTIONS, reads_per_phase: 1 },
+            invoke,
+            records,
+            1,
+            { ...FAST_TIMING, settle_timeout_ms: 50 },
+        );
+
+        expect(post_trigger_polls).toBeGreaterThanOrEqual(3);
     });
-});
 
-describe('read_is_playing', () => {
-    it('reads isPlaying from the real play.state envelope', () => {
-        const stopped = response({
-            success: true,
-            result: { state: 'Stopped', isPlaying: false, isPaused: false, isCompiling: false },
-        });
+    it('rejects a compile cycle when only an earlier cycle observed a reload', async () => {
+        const records: CallRecord[] = [record({
+            phase: 'compiling',
+            retry_events: [retry(-32000, 1)],
+        })];
+        const invoke: StressInvoker = async (target, _args, controls) => {
+            if (target === 'play.state' && controls?.safe_retries) {
+                return response({
+                    success: true,
+                    result: { state: 'Stopped', isPlaying: false, isPaused: false, isCompiling: false },
+                });
+            }
 
-        expect(read_is_playing(stopped)).toBe(false);
+            return response({ success: true, result: {} });
+        };
+
+        await expect(run_compile_cycle(
+            { ...OPTIONS, reads_per_phase: 1 },
+            invoke,
+            records,
+            1,
+            { ...FAST_TIMING, settle_timeout_ms: 8 },
+        )).rejects.toThrow('timed out waiting for script compilation to settle');
     });
 
-    // The pause toggle makes state "Paused" while the Editor is still in play mode.
-    // Gating on the state string is what made the first live run hang until timeout.
-    it('treats a paused Editor as playing', () => {
-        const paused = response({
-            success: true,
-            result: { state: 'Paused', isPlaying: true, isPaused: true, isCompiling: false },
-        });
+    it('uses safe retries while restoring the original play baseline', async () => {
+        let playing = false;
+        const calls: Array<{ target: string; safe_retries: boolean | undefined }> = [];
+        const invoke: StressInvoker = async (target, _args, controls) => {
+            calls.push({ target, safe_retries: controls?.safe_retries });
 
-        expect(read_is_playing(paused)).toBe(true);
-        expect(read_state_string(paused)).toBe('Paused');
+            if (target === 'play.enter') {
+                playing = true;
+            }
+
+            return response({
+                success: true,
+                result: {
+                    state: playing ? 'Playing' : 'Stopped',
+                    isPlaying: playing,
+                    isPaused: false,
+                    isCompiling: false,
+                },
+            });
+        };
+
+        await restore_play_baseline(invoke, { playing: true, paused: false }, FAST_TIMING);
+
+        expect(calls.some(call => call.target === 'play.enter')).toBe(true);
+        expect(calls.every(call => call.safe_retries === true)).toBe(true);
     });
 
-    it('returns undefined on an RPC error', () => {
-        const errored: RpcResponse = { jsonrpc: '2.0', id: '1', error: { code: -32000, message: 'restarting' } };
+    it('restores a paused Play Mode baseline exactly', async () => {
+        let playing = false;
+        let paused = false;
+        const calls: string[] = [];
+        const invoke: StressInvoker = async target => {
+            calls.push(target);
 
-        expect(read_is_playing(errored)).toBeUndefined();
-    });
+            if (target === 'play.enter') {
+                playing = true;
+            } else if (target === 'play.pause') {
+                paused = !paused;
+            }
 
-    it('returns undefined when isPlaying is absent or not a boolean', () => {
-        expect(read_is_playing(response({ result: { state: 'Stopped' } }))).toBeUndefined();
-        expect(read_is_playing(response({ result: { isPlaying: 'yes' } }))).toBeUndefined();
-    });
-});
+            return response({
+                success: true,
+                result: {
+                    state: paused ? 'Paused' : (playing ? 'Playing' : 'Stopped'),
+                    isPlaying: playing,
+                    isPaused: paused,
+                    isCompiling: false,
+                },
+            });
+        };
 
-describe('TRANSIENT_ERROR_CODES', () => {
-    it('covers the connection-level codes and excludes timeouts', () => {
-        expect([...TRANSIENT_ERROR_CODES].sort((a, b) => a - b)).toEqual([-32010, -32003, -32002, -32000]);
-        expect(TRANSIENT_ERROR_CODES.has(-32001)).toBe(false);
+        await restore_play_baseline(invoke, { playing: true, paused: true }, FAST_TIMING);
+
+        expect(calls).toContain('play.enter');
+        expect(calls).toContain('play.pause');
+        expect(playing).toBe(true);
+        expect(paused).toBe(true);
     });
 });
