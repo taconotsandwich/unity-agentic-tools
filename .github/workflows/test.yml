@@ -36,6 +36,9 @@ jobs:
       - name: Type check
         run: bun run type-check
 
+      - name: Check version sync
+        run: bun scripts/sync-version.js --check
+
       - name: Check Unity ClassID drift
         run: bun run check:classids
 

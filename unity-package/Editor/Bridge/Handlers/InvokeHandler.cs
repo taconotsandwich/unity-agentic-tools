@@ -16,14 +16,7 @@ namespace UnityAgenticTools.Bridge.Handlers
 
         public async Task<object> HandleAsync(string method, Dictionary<string, object> parameters)
         {
-            // Extract per-request timeout from params (default: 30s)
-            int timeoutMs = 30000;
-            if (parameters.TryGetValue("_timeout", out var timeoutObj))
-            {
-                if (timeoutObj is long tl) timeoutMs = (int)Math.Min(tl, int.MaxValue);
-                else if (timeoutObj is double td) timeoutMs = (int)td;
-                else if (timeoutObj is string ts && int.TryParse(ts, out var tp)) timeoutMs = tp;
-            }
+            var timeoutMs = RequestTimeout.ResolveMilliseconds(parameters);
 
             // Fire-and-forget mode: enqueue and return immediately
             if (parameters.TryGetValue("no_wait", out var nwObj) && (nwObj is true || nwObj is string nws && nws == "true"))

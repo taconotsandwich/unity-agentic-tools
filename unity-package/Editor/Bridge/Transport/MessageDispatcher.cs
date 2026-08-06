@@ -64,14 +64,14 @@ namespace UnityAgenticTools.Bridge.Transport
         {
             string id = null;
             string method = null;
-            var timeoutMs = 30000;
+            var timeoutMs = RequestTimeout.DefaultMilliseconds;
 
             try
             {
                 var request = JsonRpcParser.ParseRequest(message);
                 id = request.Id;
                 method = request.Method;
-                timeoutMs = ResolveRequestTimeoutMs(request.Params);
+                timeoutMs = RequestTimeout.ResolveMilliseconds(request.Params);
 
                 if (string.IsNullOrEmpty(request.Method))
                 {
@@ -140,34 +140,5 @@ namespace UnityAgenticTools.Bridge.Transport
             return null;
         }
 
-        private static int ResolveRequestTimeoutMs(Dictionary<string, object> parameters)
-        {
-            if (parameters == null || !parameters.TryGetValue("_timeout", out var timeoutObj))
-            {
-                return 30000;
-            }
-
-            if (timeoutObj is int timeoutInt)
-            {
-                return Math.Max(1, timeoutInt);
-            }
-
-            if (timeoutObj is long timeoutLong)
-            {
-                return (int)Math.Max(1L, Math.Min(timeoutLong, int.MaxValue));
-            }
-
-            if (timeoutObj is double timeoutDouble)
-            {
-                return (int)Math.Max(1d, Math.Min(timeoutDouble, int.MaxValue));
-            }
-
-            if (timeoutObj is string timeoutString && int.TryParse(timeoutString, out var parsedTimeout))
-            {
-                return Math.Max(1, parsedTimeout);
-            }
-
-            return 30000;
-        }
     }
 }

@@ -27,7 +27,7 @@ namespace UnityAgenticTools.Bridge.Handlers
                         {
                             { "port", EditorWebSocketServer.Port },
                             { "pid", Process.GetCurrentProcess().Id },
-                            { "version", "0.1.0" },
+                            { "version", BridgeMetadata.PackageVersion },
                             { "project_path", projectPath },
                             { "project_name", Path.GetFileName(projectPath) ?? string.Empty },
                             { "unity_version", Application.unityVersion },

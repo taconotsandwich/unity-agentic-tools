@@ -60,6 +60,11 @@ namespace UnityAgenticTools.Bridge.Transport
 
         static EditorWebSocketServer()
         {
+            if (EditorProcessContext.IsAssetImportWorker)
+            {
+                return;
+            }
+
             EditorApplication.update += PumpMainThreadQueue;
             EditorApplication.update += MaintainServerHealth;
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
@@ -82,6 +87,11 @@ namespace UnityAgenticTools.Bridge.Transport
 
         public static void Start()
         {
+            if (EditorProcessContext.IsAssetImportWorker)
+            {
+                return;
+            }
+
             if (_running) return;
 
             _cts = new CancellationTokenSource();
@@ -129,6 +139,11 @@ namespace UnityAgenticTools.Bridge.Transport
 
         public static void Stop()
         {
+            if (EditorProcessContext.IsAssetImportWorker)
+            {
+                return;
+            }
+
             SessionState.SetBool(ManualStopKey, true);
             StopInternal(clearRestartIntent: true, removeLockfile: true);
         }
@@ -468,12 +483,22 @@ namespace UnityAgenticTools.Bridge.Transport
 
         private static void RequestServerRecovery()
         {
+            if (EditorProcessContext.IsAssetImportWorker)
+            {
+                return;
+            }
+
             _nextHealthCheckAt = 0;
             EditorApplication.delayCall += EnsureServerState;
         }
 
         private static bool NeedsServerMaintenance()
         {
+            if (EditorProcessContext.IsAssetImportWorker)
+            {
+                return false;
+            }
+
             if (_running)
             {
                 return true;
@@ -494,12 +519,18 @@ namespace UnityAgenticTools.Bridge.Transport
 
         private static void EnsureServerState()
         {
+            if (EditorProcessContext.IsAssetImportWorker)
+            {
+                return;
+            }
+
             if (_running)
             {
-                if (!LockfileManager.Exists())
+                var currentPid = System.Diagnostics.Process.GetCurrentProcess().Id;
+                if (!LockfileManager.MatchesExpectedServer(_port, currentPid))
                 {
-                    LockfileManager.Write(_port, System.Diagnostics.Process.GetCurrentProcess().Id);
-                    Debug.Log("[UnityAgenticTools] Rewrote missing editor lockfile");
+                    LockfileManager.Write(_port, currentPid);
+                    Debug.Log("[UnityAgenticTools] Rewrote missing, stale, or invalid editor lockfile");
                 }
 
                 return;
