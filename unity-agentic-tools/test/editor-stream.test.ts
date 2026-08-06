@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -13,8 +13,8 @@ const CONSOLE_EVENT: Record<string, unknown> = {
 };
 
 async function wait_until(predicate: () => boolean, budget_ms: number): Promise<boolean> {
-    const deadline = Date.now() + budget_ms;
-    while (Date.now() < deadline) {
+    const deadline = performance.now() + budget_ms;
+    while (performance.now() < deadline) {
         if (predicate()) {
             return true;
         }
@@ -33,6 +33,7 @@ describe('stream_editor', () => {
     });
 
     afterEach(() => {
+        vi.restoreAllMocks();
         restore_websocket();
         rmSync(tmp_dir, { recursive: true, force: true });
     });
@@ -111,6 +112,73 @@ describe('stream_editor', () => {
             expect(errors[0]?.message).toContain('Method not found');
         } finally {
             handle.close();
+        }
+    });
+
+    test('open-close flapping cannot reset the reconnect wall-clock deadline', async () => {
+        let now = Date.now();
+        const now_spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+        const sockets = install_mock_websocket({
+            53782: {
+                close_before_response: true,
+            },
+        });
+
+        const errors: Error[] = [];
+        const handle_promise = stream_editor({
+            project_path: tmp_dir,
+            port: 53782,
+            method: 'editor.console.subscribe',
+            timeout: 500,
+            on_event: () => {},
+            on_error: (error) => { errors.push(error); },
+        });
+
+        const handle = await handle_promise;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(sockets[0]?.closed).toBe(true);
+        now += 30_001;
+
+        try {
+            await new Promise((resolve) => setTimeout(resolve, 800));
+            expect(errors).toHaveLength(1);
+            expect(errors[0]?.message).toContain('could not reconnect within 30000ms');
+        } finally {
+            handle.close();
+            now_spy.mockRestore();
+        }
+    });
+
+    test('an open reconnect without a subscription response remains deadline-bounded', async () => {
+        let now = Date.now();
+        const now_spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+        const sockets = install_mock_websocket({
+            53782: {
+                reload_window_ms: { start: 40, end: 60 },
+                omit_response_sequence: [false, true],
+            },
+        });
+
+        const errors: Error[] = [];
+        const handle = await stream_editor({
+            project_path: tmp_dir,
+            port: 53782,
+            method: 'editor.console.subscribe',
+            timeout: 250,
+            on_event: () => {},
+            on_error: (error) => { errors.push(error); },
+        });
+
+        try {
+            expect(await wait_until(() => sockets[1]?.opened === true, 2000)).toBe(true);
+            now += 30_001;
+            expect(await wait_until(() => errors.length > 0, 1000)).toBe(true);
+            expect(errors).toHaveLength(1);
+            expect(errors[0]?.message).toContain('could not reconnect within 30000ms');
+            expect(sockets[1]?.closed).toBe(true);
+        } finally {
+            handle.close();
+            now_spy.mockRestore();
         }
     });
 

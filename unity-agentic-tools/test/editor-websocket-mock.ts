@@ -34,6 +34,8 @@ export interface MockPortBehavior {
     rpc_result?: unknown;
     rpc_error?: MockRpcError;
     rpc_error_sequence?: Array<MockRpcError | null>;
+    omit_response?: boolean;
+    omit_response_sequence?: boolean[];
     close_before_response?: boolean;
     close_before_response_sequence?: boolean[];
     /**
@@ -142,6 +144,15 @@ export function install_mock_websocket(port_behaviors: Record<number, MockPortBe
                             error: { code: -32601, message: 'Method not found: editor.bridge.getInfo' },
                         }),
                     });
+                    return;
+                }
+
+                const omit_response = resolve_sequence_value(
+                    behavior.omit_response_sequence,
+                    behavior.omit_response ?? false,
+                    connection_count,
+                );
+                if (omit_response) {
                     return;
                 }
 
@@ -257,6 +268,6 @@ export function registry_run_params(target: string, args: string[] = []): Record
     return {
         type: 'UnityAgenticTools.Commands.Registry',
         member: 'Run',
-        args: JSON.stringify([target, JSON.stringify(args)]),
+        args: JSON.stringify([target, JSON.stringify(args), 'false']),
     };
 }

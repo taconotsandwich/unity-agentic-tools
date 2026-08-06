@@ -4,6 +4,12 @@ import {
     read_candidate_editor_pid,
 } from './editor-discovery';
 import {
+    CLIENT_DISCOVERY_UNAVAILABLE_CODE,
+    get_action_semantics,
+    should_retry_response,
+    type EditorActionSemantics,
+} from './editor-action-semantics';
+import {
     DEFAULT_EDITOR_REQUEST_TIMEOUT_MS,
     generate_editor_request_id,
     request_editor_at_port,
@@ -21,91 +27,6 @@ import type {
 
 export { discover_editor_config, read_editor_config } from './editor-discovery';
 export { ping_editor } from './editor-transport';
-
-interface EditorActionSemantics {
-    kind: 'read' | 'command' | 'stream';
-    default_retries: number;
-    retry_delays_ms: number[];
-    discovery_timeout_ms: number;
-}
-
-const CLIENT_DISCOVERY_UNAVAILABLE_CODE = -32010;
-
-const DEFAULT_ACTION_SEMANTICS: EditorActionSemantics = {
-    kind: 'command',
-    default_retries: 2,
-    retry_delays_ms: [500, 1000, 2000],
-    discovery_timeout_ms: 350,
-};
-
-const TRANSITION_TOLERANT_READ_SEMANTICS: EditorActionSemantics = {
-    kind: 'read',
-    default_retries: 6,
-    retry_delays_ms: [250, 500, 1000, 1500, 1500, 1500],
-    discovery_timeout_ms: 250,
-};
-
-const TRANSITION_TOLERANT_COMMAND_SEMANTICS: EditorActionSemantics = {
-    kind: 'command',
-    default_retries: 5,
-    retry_delays_ms: [250, 500, 1000, 1500, 2000],
-    discovery_timeout_ms: 250,
-};
-
-/**
- * Read-only Registry targets, by alias and by backing API name.
- *
- * This cannot be prefix-based: scene.hierarchy and scene.query are reads while
- * scene.open and scene.save are commands. Deriving it from the C# Registry is
- * ROADMAP Phase 1 work -- it needs a bridge round-trip and introduces version skew.
- */
-const READ_RUN_TARGETS = new Set<string>([
-    'scene.hierarchy',
-    'scene.query',
-    'query.assets',
-    'query.asset',
-    'query.scene',
-    'query.object',
-    'play.state',
-    'ui.snapshot',
-    'ui.query',
-    'input.map',
-    'tests.results',
-    'wait.for',
-    'logs.tail',
-    'UnityAgenticTools.Util.Hierarchy.Snapshot',
-    'UnityAgenticTools.Util.Hierarchy.Query',
-    'UnityAgenticTools.Query.Assets.Find',
-    'UnityAgenticTools.Query.Assets.Info',
-    'UnityAgenticTools.Query.Scene.Hierarchy',
-    'UnityAgenticTools.Query.Scene.Object',
-    'UnityAgenticTools.Util.PlayMode.GetState',
-    'UnityAgenticTools.Util.UI.Snapshot',
-    'UnityAgenticTools.Util.UI.Query',
-    'UnityAgenticTools.Util.Input.Map',
-    'UnityAgenticTools.Util.TestRunner.GetResults',
-    'UnityAgenticTools.Util.UI.Wait',
-    'UnityAgenticTools.Bridge.Handlers.ConsoleHandler.GetLogs',
-]);
-
-const PLAY_MODE_RUN_TARGETS = new Set<string>([
-    'play.enter',
-    'play.exit',
-    'play.pause',
-    'play.step',
-    'play.state',
-    'UnityAgenticTools.Util.PlayMode.Enter',
-    'UnityAgenticTools.Util.PlayMode.Exit',
-    'UnityAgenticTools.Util.PlayMode.Pause',
-    'UnityAgenticTools.Util.PlayMode.Step',
-    'UnityAgenticTools.Util.PlayMode.GetState',
-    'UnityEditor.EditorApplication.isPlaying',
-]);
-
-/** Error codes that indicate transient connection issues (server restarting after reload). */
-const READ_RETRYABLE_CODES = new Set([-32000, -32002, -32003, CLIENT_DISCOVERY_UNAVAILABLE_CODE]);
-const COMMAND_RETRYABLE_CODES = new Set([-32002, CLIENT_DISCOVERY_UNAVAILABLE_CODE]);
-const TRANSITION_TOLERANT_COMMAND_RETRYABLE_CODES = new Set([-32000, -32002, -32003, CLIENT_DISCOVERY_UNAVAILABLE_CODE]);
 
 /**
  * Wall-clock budget for waiting out a domain reload, spent only while the Editor
@@ -148,12 +69,19 @@ export async function call_editor(options: CallEditorOptions): Promise<RpcRespon
     for (let attempt = 0; ; attempt++) {
         last_response = await call_editor_once(options, semantics);
 
-        if (!should_retry_response(last_response, semantics)) {
+        const error = last_response.error;
+        if (!error || !should_retry_response(last_response, semantics)) {
             return last_response;
         }
 
         if (attempt < max_retries) {
-            await sleep(delays[Math.min(attempt, delays.length - 1)]);
+            const delay_ms = delays[Math.min(attempt, delays.length - 1)];
+            options.on_retry?.({
+                code: error.code,
+                attempt: attempt + 1,
+                delay_ms,
+            });
+            await sleep(delay_ms);
             continue;
         }
 
@@ -163,6 +91,11 @@ export async function call_editor(options: CallEditorOptions): Promise<RpcRespon
             return last_response;
         }
 
+        options.on_retry?.({
+            code: error.code,
+            attempt: attempt + 1,
+            delay_ms: RELOAD_POLL_INTERVAL_MS,
+        });
         await sleep(RELOAD_POLL_INTERVAL_MS);
     }
 }
@@ -258,6 +191,7 @@ export async function stream_editor(options: StreamEditorOptions): Promise<{ clo
     let stopped = false;
     let reconnect_count = 0;
     let reconnect_deadline: number | undefined;
+    let reconnect_deadline_timer: ReturnType<typeof setTimeout> | undefined;
     let active_socket: WebSocket | undefined;
 
     return new Promise<{ close: () => void }>((resolve, reject) => {
@@ -267,6 +201,7 @@ export async function stream_editor(options: StreamEditorOptions): Promise<{ clo
         // promise resolved -- after a reconnect those are different objects.
         function stop(): void {
             stopped = true;
+            clear_reconnect_window();
             try { active_socket?.close(); } catch {}
         }
 
@@ -283,25 +218,46 @@ export async function stream_editor(options: StreamEditorOptions): Promise<{ clo
             on_error?.(error);
         }
 
+        function clear_reconnect_window(): void {
+            if (reconnect_deadline_timer !== undefined) {
+                clearTimeout(reconnect_deadline_timer);
+                reconnect_deadline_timer = undefined;
+            }
+
+            reconnect_deadline = undefined;
+        }
+
+        function ensure_reconnect_window(): boolean {
+            if (reconnect_deadline === undefined) {
+                reconnect_deadline = Date.now() + RELOAD_TOLERANCE_MS;
+                reconnect_deadline_timer = setTimeout(() => {
+                    if (!stopped && reconnect_deadline !== undefined) {
+                        fail(new Error(`Stream lost: could not reconnect within ${RELOAD_TOLERANCE_MS}ms`));
+                    }
+                }, RELOAD_TOLERANCE_MS);
+            }
+
+            if (Date.now() >= reconnect_deadline) {
+                fail(new Error(`Stream lost: could not reconnect within ${RELOAD_TOLERANCE_MS}ms`));
+                return false;
+            }
+
+            return true;
+        }
+
         function schedule_reconnect(): void {
-            if (stopped) return;
+            if (stopped || !ensure_reconnect_window()) return;
 
             // Bound by wall clock rather than an attempt count, for the same reason
             // the unary path is: a reload takes as long as it takes.
-            reconnect_deadline ??= Date.now() + RELOAD_TOLERANCE_MS;
-            if (Date.now() >= reconnect_deadline) {
-                fail(new Error(`Stream lost: could not reconnect within ${RELOAD_TOLERANCE_MS}ms`));
-                return;
-            }
-
             reconnect_count += 1;
             const delay = Math.min(500 * reconnect_count, 3000);
 
             setTimeout(() => {
-                if (stopped) return;
+                if (stopped || !ensure_reconnect_window()) return;
 
                 void resolve_config(options, semantics.discovery_timeout_ms).then((fresh_config) => {
-                    if (stopped) return;
+                    if (stopped || !ensure_reconnect_window()) return;
 
                     // Discovery is unavailable for the whole reload window, so a single
                     // miss is the normal case, not a reason to abandon the stream.
@@ -340,28 +296,30 @@ export async function stream_editor(options: StreamEditorOptions): Promise<{ clo
                 return true;
             }
 
-            // Every attempt gets a connecting timeout, reconnects included. This used
-            // to be skipped once the promise had resolved, so a reconnect that opened
-            // no socket and fired no close event stalled the chain forever.
-            const timer = setTimeout(() => {
-                if (connected || !finish_attempt() || stopped) return;
+            function handle_attempt_timeout(): void {
+                if (!finish_attempt() || stopped) return;
 
                 if (!resolved) {
-                    stopped = true;
+                    stop();
                     reject(new Error(`Timeout connecting to ${url}`));
                     return;
                 }
 
                 try { ws.close(); } catch {}
                 schedule_reconnect();
-            }, timeout);
+            }
+
+            let timer = setTimeout(handle_attempt_timeout, timeout);
 
             ws.onopen = () => {
+                if (attempt_finished || stopped || ws !== active_socket) return;
+
                 connected = true;
-                clearTimeout(timer);
-                reconnect_count = 0;
-                reconnect_deadline = undefined;
+                // A socket open does not prove the subscription was accepted. Keep
+                // any active reconnect deadline until an acknowledgement or event.
                 ws.send(JSON.stringify(request));
+                clearTimeout(timer);
+                timer = setTimeout(handle_attempt_timeout, timeout);
 
                 if (!resolved) {
                     resolved = true;
@@ -370,6 +328,8 @@ export async function stream_editor(options: StreamEditorOptions): Promise<{ clo
             };
 
             ws.onmessage = (event: MessageEvent) => {
+                if (attempt_finished || stopped || ws !== active_socket) return;
+
                 // Ignore non-JSON or partial frames; the bridge may interleave the
                 // initial response with subsequent event notifications we forward.
                 let data: unknown;
@@ -383,21 +343,31 @@ export async function stream_editor(options: StreamEditorOptions): Promise<{ clo
                     return;
                 }
 
-                if ('method' in data && !('id' in data)) {
+                if ('jsonrpc' in data && data.jsonrpc === '2.0' &&
+                    'method' in data && typeof data.method === 'string' &&
+                    !('id' in data)) {
+                    confirm_subscription(ws, timer);
                     on_event(data as RpcEvent);
                     return;
                 }
 
                 // An error response to our own subscribe request was dropped here,
                 // leaving a connected stream that silently never emitted anything.
-                const frame = data as { id?: unknown; error?: { message?: string } };
-                if (frame.id === request_id && frame.error) {
-                    fail(new Error(`Subscription rejected: ${frame.error.message ?? 'unknown error'}`));
+                const frame = data as { id?: unknown; result?: unknown; error?: { message?: string } };
+                if (frame.id === request_id) {
+                    if (frame.error) {
+                        fail(new Error(`Subscription rejected: ${frame.error.message ?? 'unknown error'}`));
+                        return;
+                    }
+
+                    if ('result' in frame) {
+                        confirm_subscription(ws, timer);
+                    }
                 }
             };
 
             ws.onerror = () => {
-                if (connected || !finish_attempt() || stopped) return;
+                if (ws !== active_socket || connected || !finish_attempt() || stopped) return;
 
                 if (!resolved) {
                     stopped = true;
@@ -409,7 +379,7 @@ export async function stream_editor(options: StreamEditorOptions): Promise<{ clo
             };
 
             ws.onclose = () => {
-                if (!finish_attempt() || stopped) return;
+                if (ws !== active_socket || !finish_attempt() || stopped) return;
 
                 // A close before the first open has to settle the promise here:
                 // finish_attempt() just disarmed the timeout that used to do it.
@@ -424,6 +394,16 @@ export async function stream_editor(options: StreamEditorOptions): Promise<{ clo
         }
 
         connect(`ws://127.0.0.1:${config.port}/unity-agentic`);
+
+        function confirm_subscription(ws: WebSocket, attempt_timer: ReturnType<typeof setTimeout>): void {
+            if (ws !== active_socket) {
+                return;
+            }
+
+            clearTimeout(attempt_timer);
+            reconnect_count = 0;
+            clear_reconnect_window();
+        }
     });
 }
 
@@ -457,109 +437,4 @@ async function resolve_config(options: CallEditorOptions, discovery_timeout_ms: 
     }
 
     return discover_editor_config(options.project_path, discovery_timeout_ms);
-}
-
-function get_action_semantics(
-    method: string,
-    kind: 'unary' | 'stream' = 'unary',
-    params?: Record<string, unknown>,
-): EditorActionSemantics {
-    if (kind === 'stream') {
-        return {
-            ...DEFAULT_ACTION_SEMANTICS,
-            kind: 'stream',
-        };
-    }
-
-    if (is_read_invoke(method, params)) {
-        return TRANSITION_TOLERANT_READ_SEMANTICS;
-    }
-
-    if (is_play_mode_transition_invoke(method, params)) {
-        return TRANSITION_TOLERANT_COMMAND_SEMANTICS;
-    }
-
-    return DEFAULT_ACTION_SEMANTICS;
-}
-
-/**
- * Classify a Registry.Run invoke as a read.
- *
- * The CLI always sends method 'editor.invoke' and puts the real target inside
- * params.args, so classifying on the JSON-RPC method name alone never matches --
- * an earlier method-name set sat here and was unreachable for exactly that reason.
- */
-function is_read_invoke(method: string, params?: Record<string, unknown>): boolean {
-    if (method !== 'editor.invoke' || !params) {
-        return false;
-    }
-
-    if (params.type !== 'UnityAgenticTools.Commands.Registry' || params.member !== 'Run') {
-        return false;
-    }
-
-    const target = parse_registry_run_target(params.args);
-
-    return typeof target === 'string' && READ_RUN_TARGETS.has(target);
-}
-
-function is_play_mode_transition_invoke(method: string, params?: Record<string, unknown>): boolean {
-    if (method !== 'editor.invoke' || !params) {
-        return false;
-    }
-
-    if (params.type === 'UnityEditor.EditorApplication' &&
-        params.member === 'isPlaying') {
-        return true;
-    }
-
-    if (params.type === 'UnityAgenticTools.Util.PlayMode' &&
-        typeof params.member === 'string') {
-        return params.member === 'Enter' ||
-            params.member === 'Exit' ||
-            params.member === 'Pause' ||
-            params.member === 'Step' ||
-            params.member === 'GetState';
-    }
-
-    if (params.type === 'UnityAgenticTools.Commands.Registry' &&
-        params.member === 'Run') {
-        const target = parse_registry_run_target(params.args);
-        return typeof target === 'string' && PLAY_MODE_RUN_TARGETS.has(target);
-    }
-
-    return false;
-}
-
-function parse_registry_run_target(args: unknown): string | undefined {
-    if (typeof args !== 'string') {
-        return undefined;
-    }
-
-    try {
-        const parsed: unknown = JSON.parse(args);
-        if (Array.isArray(parsed) && typeof parsed[0] === 'string') {
-            return parsed[0];
-        }
-    } catch {
-        return undefined;
-    }
-
-    return undefined;
-}
-
-function should_retry_response(response: RpcResponse, semantics: EditorActionSemantics): boolean {
-    if (!response.error) {
-        return false;
-    }
-
-    if (semantics === TRANSITION_TOLERANT_COMMAND_SEMANTICS) {
-        return TRANSITION_TOLERANT_COMMAND_RETRYABLE_CODES.has(response.error.code);
-    }
-
-    if (semantics.kind === 'read' || semantics.kind === 'stream') {
-        return READ_RETRYABLE_CODES.has(response.error.code);
-    }
-
-    return COMMAND_RETRYABLE_CODES.has(response.error.code);
 }

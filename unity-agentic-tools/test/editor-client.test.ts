@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { call_editor, read_editor_readiness } from '../src/editor-client';
+import type { EditorRetryEvent } from '../src/types';
 import {
     DEAD_PID,
     RELOAD_WINDOW_MS,
@@ -158,6 +159,61 @@ describe('call_editor', () => {
         expect(response.result).toEqual({ count: 0, logs: [] });
     });
 
+    test('Registry.List retries errors that may arrive during a domain transition', async () => {
+        const sockets = install_mock_websocket({
+            53785: {
+                rpc_error_sequence: [
+                    { code: -32003, message: 'Editor unavailable during reload' },
+                    null,
+                ],
+                rpc_result: { commands: [] },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            port: 53785,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: {
+                type: 'UnityAgenticTools.Commands.Registry',
+                member: 'List',
+                args: JSON.stringify(['', 'false']),
+            },
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ commands: [] });
+        expect(sockets).toHaveLength(2);
+    });
+
+    test.each([
+        'UnityEditor.EditorApplication.isCompiling',
+        'UnityEditor.EditorApplication.isUpdating',
+    ])('%s raw getter uses read retry semantics', async (target) => {
+        const sockets = install_mock_websocket({
+            53785: {
+                rpc_error_sequence: [
+                    { code: -32000, message: 'Connection closed before response' },
+                    null,
+                ],
+                rpc_result: false,
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            port: 53785,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params(target),
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toBe(false);
+        expect(sockets).toHaveLength(2);
+    });
+
     test('mutating invokes keep the shorter default recovery window', async () => {
         install_mock_websocket({
             53785: {
@@ -182,6 +238,37 @@ describe('call_editor', () => {
 
         expect(response.result).toBeUndefined();
         expect(response.error).toBeDefined();
+    });
+
+    test('on_retry observes a retry without changing the final response', async () => {
+        install_mock_websocket({
+            53785: {
+                rpc_error_sequence: [
+                    { code: -32002, message: 'Request was not dispatched' },
+                    null,
+                ],
+                rpc_result: { success: true },
+            },
+        });
+
+        const retries: EditorRetryEvent[] = [];
+        const response = await call_editor({
+            project_path: tmp_dir,
+            port: 53785,
+            method: 'editor.invoke',
+            retries: 1,
+            timeout: 100,
+            params: registry_run_params('play.pause'),
+            on_retry: (event) => { retries.push(event); },
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true });
+        expect(retries).toEqual([{
+            code: -32002,
+            attempt: 1,
+            delay_ms: 500,
+        }]);
     });
 
     // Entering play mode reloads the domain, which takes the server down for
@@ -528,6 +615,65 @@ describe('call_editor', () => {
 
         expect(response.error).toBeUndefined();
         expect(response.result).toEqual({ success: true });
+    });
+
+    test.each([
+        ['play.pause', -32000],
+        ['play.pause', -32003],
+        ['play.step', -32000],
+        ['play.step', -32003],
+    ] as const)('%s does not retry a possibly dispatched %i response', async (target, code) => {
+        const sockets = install_mock_websocket({
+            53785: {
+                rpc_error_sequence: [
+                    { code, message: 'Request may already have been dispatched' },
+                    null,
+                ],
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            port: 53785,
+            method: 'editor.invoke',
+            retries: 5,
+            timeout: 100,
+            params: registry_run_params(target),
+        });
+
+        expect(response.result).toBeUndefined();
+        expect(response.error?.code).toBe(code);
+        expect(sockets).toHaveLength(1);
+    });
+
+    test.each([
+        ['play.pause', -32002],
+        ['play.pause', -32010],
+        ['play.step', -32002],
+        ['play.step', -32010],
+    ] as const)('%s still retries the pre-dispatch %i response', async (target, code) => {
+        const sockets = install_mock_websocket({
+            53785: {
+                rpc_error_sequence: [
+                    { code, message: 'Request was not dispatched' },
+                    null,
+                ],
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            port: 53785,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params(target),
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true });
+        expect(sockets).toHaveLength(2);
     });
 
     test('UnityAgenticTools.Util.PlayMode.GetState invoke retries clean socket closes during play-mode transition', async () => {
