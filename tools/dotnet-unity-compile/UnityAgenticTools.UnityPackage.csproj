@@ -10,6 +10,7 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <UnityManagedDir>$(UnityApp)/Contents/Resources/Scripting/Managed</UnityManagedDir>
     <UnityTemplateCacheDir>$(UnityApp)/Contents/Resources/PackageManager/ProjectTemplates/libcache</UnityTemplateCacheDir>
+    <DefineConstants Condition="'$(UnityHasEntityId)' == 'true'">$(DefineConstants);UNITY_6000_3_OR_NEWER</DefineConstants>
   </PropertyGroup>
 
   <Target Name="ValidateUnityApp" BeforeTargets="ResolveReferences">
