@@ -94,13 +94,13 @@ namespace UnityAgenticTools.Util
                     throw new ArgumentException($"Ref '{refStr}' is not a UI ref. Use @uN refs from ui.snapshot.");
 
                 // UI Toolkit path
-                if (entry.InstanceId == 0 && !string.IsNullOrEmpty(entry.TreePath))
+                if (entry.ObjectId.IsNone && !string.IsNullOrEmpty(entry.TreePath))
                 {
                     return InteractUIToolkit(entry.TreePath, interactAction, refStr, text, value, option, byIndex, direction, amount);
                 }
 
                 // uGUI path
-                var obj = UnityObjectCompat.ResolveObject(entry.InstanceId);
+                var obj = UnityObjectCompat.ResolveObject(entry.ObjectId);
                 if (obj == null)
                     throw new ArgumentException($"Ref '{refStr}' points to a destroyed element. Run ui.snapshot to refresh.");
 
@@ -562,11 +562,7 @@ namespace UnityAgenticTools.Util
 
         private static object ResolveUIToolkitElement(string treePath)
         {
-            // treePath format: "{docInstanceId}/path/to/element"
-            int slashIdx = treePath.IndexOf('/');
-            if (slashIdx < 0) return null;
-
-            string elementPath = treePath.Substring(slashIdx + 1).TrimStart('/');
+            string elementPath = treePath.TrimStart('/');
 
             // Always find UIDocuments dynamically -- cached instance IDs go stale after domain reload
             var uiDocumentType = FindType("UnityEngine.UIElements.UIDocument");
@@ -668,7 +664,7 @@ namespace UnityAgenticTools.Util
                     throw new ArgumentException($"Stale or invalid ref '{refStr}'. Run ui.snapshot to refresh refs.");
 
                 // For UI Toolkit elements
-                if (entry.InstanceId == 0 && !string.IsNullOrEmpty(entry.TreePath))
+                if (entry.ObjectId.IsNone && !string.IsNullOrEmpty(entry.TreePath))
                 {
                     var element = ResolveUIToolkitElement(entry.TreePath);
                     if (element == null)
@@ -678,7 +674,7 @@ namespace UnityAgenticTools.Util
                 }
 
                 // For uGUI
-                var obj = UnityObjectCompat.ResolveObject(entry.InstanceId);
+                var obj = UnityObjectCompat.ResolveObject(entry.ObjectId);
                 if (obj == null)
                     throw new ArgumentException($"Ref '{refStr}' points to a destroyed element. Run ui.snapshot to refresh.");
 
@@ -817,9 +813,9 @@ namespace UnityAgenticTools.Util
             if (!RefManager.TryResolve(refStr, out var entry, out _))
                 return false;
 
-            if (entry.InstanceId == 0) return false; // UI Toolkit resolution would need re-walk
+            if (entry.ObjectId.IsNone) return false; // UI Toolkit resolution would need re-walk
 
-            var obj = UnityObjectCompat.ResolveObject(entry.InstanceId);
+            var obj = UnityObjectCompat.ResolveObject(entry.ObjectId);
             if (obj == null) return false;
 
             if (obj is Component comp) return comp.gameObject.activeInHierarchy;
