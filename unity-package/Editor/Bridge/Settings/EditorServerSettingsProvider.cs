@@ -25,12 +25,34 @@ namespace UnityAgenticTools.Bridge.Settings
             }
 
             EditorGUI.BeginChangeCheck();
-            var port = EditorGUILayout.IntField("Preferred Port", settings.preferredPort);
+            var portText = EditorGUILayout.DelayedTextField(
+                "Preferred Port",
+                settings.preferredPort?.ToString() ?? string.Empty);
             if (EditorGUI.EndChangeCheck())
             {
-                port = Mathf.Clamp(port, 1024, 65535);
-                settings.preferredPort = port;
+                portText = portText.Trim();
+                if (portText.Length == 0)
+                {
+                    settings.preferredPort = null;
+                }
+                else if (int.TryParse(portText, out var port) &&
+                    port >= EditorServerSettings.MinimumPort &&
+                    port <= EditorServerSettings.MaximumPort)
+                {
+                    settings.preferredPort = port;
+                }
+                else
+                {
+                    Debug.LogWarning(
+                        $"[UnityAgenticTools] Preferred port must be blank or between " +
+                        $"{EditorServerSettings.MinimumPort} and {EditorServerSettings.MaximumPort}.");
+                }
             }
+
+            EditorGUILayout.HelpBox(
+                "Leave blank to automatically select an available port. " +
+                "Restart the server after changing this setting.",
+                MessageType.Info);
 
             EditorGUILayout.Space(10);
             EditorGUILayout.LabelField("Status", EditorStyles.boldLabel);

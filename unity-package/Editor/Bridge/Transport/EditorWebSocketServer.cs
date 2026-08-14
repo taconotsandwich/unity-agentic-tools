@@ -87,7 +87,7 @@ namespace UnityAgenticTools.Bridge.Transport
             _cts = new CancellationTokenSource();
             SessionState.EraseBool(ManualStopKey);
 
-            foreach (var port in GetCandidatePorts())
+            foreach (var port in GetCandidatePorts(GetPreferredPort()))
             {
                 try
                 {
@@ -528,24 +528,23 @@ namespace UnityAgenticTools.Bridge.Transport
             _editorUpdating = EditorApplication.isUpdating;
         }
 
-        private static IEnumerable<int> GetCandidatePorts()
+        private static IEnumerable<int> GetCandidatePorts(int? preferredPort)
         {
-            var preferredPort = GetPreferredPort();
-            if (preferredPort >= PortRangeStart && preferredPort <= PortRangeEnd)
+            if (preferredPort.HasValue)
             {
-                yield return preferredPort;
+                yield return preferredPort.Value;
             }
 
             for (int port = PortRangeStart; port <= PortRangeEnd; port++)
             {
-                if (port != preferredPort)
+                if (!preferredPort.HasValue || port != preferredPort.Value)
                 {
                     yield return port;
                 }
             }
         }
 
-        private static int GetPreferredPort()
+        private static int? GetPreferredPort()
         {
             try
             {
@@ -553,7 +552,7 @@ namespace UnityAgenticTools.Bridge.Transport
             }
             catch
             {
-                return PortRangeStart;
+                return null;
             }
         }
     }
