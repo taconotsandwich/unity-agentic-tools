@@ -17,7 +17,7 @@ namespace UnityAgenticTools.Util
 
         public static object Snapshot(int maxElements = 300)
         {
-
+                RefManager.ClearUI();
                 var elements = new List<UIElementInfo>();
 
                 // Walk uGUI

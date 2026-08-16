@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -11,6 +12,7 @@ namespace UnityAgenticTools.Tests
     public class UIInteractionTests
     {
         private GameObject _eventSystemObject;
+        private GameObject _canvasObject;
         private GameObject _selectableObject;
 
         [SetUp]
@@ -31,6 +33,11 @@ namespace UnityAgenticTools.Tests
             if (_eventSystemObject != null)
             {
                 Object.DestroyImmediate(_eventSystemObject);
+            }
+
+            if (_canvasObject != null)
+            {
+                Object.DestroyImmediate(_canvasObject);
             }
 
             RefManager.ClearUI();
@@ -61,6 +68,18 @@ namespace UnityAgenticTools.Tests
             Assert.That(valueChangedCount, Is.EqualTo(1));
         }
 
+        [Test]
+        public void Snapshot_ReplacesPreviousRefs()
+        {
+            _canvasObject = new GameObject("Canvas", typeof(RectTransform), typeof(Canvas));
+            var button = CreateSelectable<Button>("Button");
+            button.transform.SetParent(_canvasObject.transform, false);
+            Register(button);
+
+            AssertSnapshotStartsAtFirstRef(AgenticUI.Snapshot(0));
+            AssertSnapshotStartsAtFirstRef(AgenticUI.Snapshot(0));
+        }
+
         private T CreateSelectable<T>(string name) where T : Selectable
         {
             _selectableObject = new GameObject(name, typeof(RectTransform), typeof(T));
@@ -72,6 +91,20 @@ namespace UnityAgenticTools.Tests
 #pragma warning disable CS0618
             return RefManager.RegisterUI(selectable.GetInstanceID());
 #pragma warning restore CS0618
+        }
+
+        private static void AssertSnapshotStartsAtFirstRef(object result)
+        {
+            var snapshot = result as Dictionary<string, object>;
+            Assert.That(snapshot, Is.Not.Null);
+
+            var elements = snapshot["elements"] as object[];
+            Assert.That(elements, Is.Not.Null.And.Not.Empty);
+            Assert.That(snapshot["refCount"], Is.EqualTo(elements.Length));
+
+            var firstElement = elements[0] as Dictionary<string, object>;
+            Assert.That(firstElement, Is.Not.Null);
+            Assert.That(firstElement["ref"], Is.EqualTo("@u1"));
         }
     }
 }
