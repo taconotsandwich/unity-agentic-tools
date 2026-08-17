@@ -47,7 +47,11 @@ function find_type_source(typeName) {
     }
     const namespaceRegex = new RegExp(`namespace\\s+${escape_regex(typeName.slice(0, lastDot))}\\s*[{;\\r\\n]`);
     const classRegex = new RegExp(`\\bclass\\s+${escape_regex(typeName.slice(lastDot + 1))}\\b`);
-    return editorSources.find((source) => namespaceRegex.test(source) && classRegex.test(source)) ?? null;
+    const matches = editorSources.filter((source) => namespaceRegex.test(source) && classRegex.test(source));
+    if (matches.length === 0) {
+        return null;
+    }
+    return matches.join('\n');
 }
 
 function split_params(raw) {
