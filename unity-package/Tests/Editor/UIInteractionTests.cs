@@ -88,9 +88,7 @@ namespace UnityAgenticTools.Tests
 
         private static string Register(Selectable selectable)
         {
-#pragma warning disable CS0618
-            return RefManager.RegisterUI(selectable.GetInstanceID());
-#pragma warning restore CS0618
+            return RefManager.RegisterUI(UnityObjectCompat.GetObjectId(selectable));
         }
 
         private static void AssertSnapshotStartsAtFirstRef(object result)
