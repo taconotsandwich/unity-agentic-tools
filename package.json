@@ -14,6 +14,7 @@
     "test:integration:unity-tests": "cd unity-agentic-tools && bun run test:unity-editor-tests",
     "test:integration:stress": "cd unity-agentic-tools && bun run test:stress",
     "check:classids": "bun scripts/check-classid-drift.js",
+    "check:agent-guidance": "bun scripts/check-agent-guidance-drift.js",
     "release:preflight": "bun scripts/release-preflight.js",
     "generate:agent-guidance": "bun scripts/generate-agent-guidance.js",
     "type-check": "cd unity-agentic-tools && tsc --noEmit",
