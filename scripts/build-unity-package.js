@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { existsSync, readdirSync } from 'fs';
 import { spawnSync } from 'child_process';
-import { dirname, join, resolve } from 'path';
+import { basename, dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -16,13 +16,16 @@ function main() {
     }
 
     validate_unity_app(unity_app);
-    console.log(`Using Unity app: ${unity_app}`);
+    const unity_version = resolve_unity_version(unity_app);
+    const unity_has_entity_id = is_unity_version_at_least(unity_version, 6000, 3);
+    console.log(`Using Unity app: ${unity_app} (${unity_version})`);
 
     const result = spawnSync('dotnet', [
         'build',
         PROJECT_PATH,
         '--nologo',
         `-p:UnityApp=${unity_app}`,
+        `-p:UnityHasEntityId=${unity_has_entity_id}`,
         ...process.argv.slice(2),
     ], {
         stdio: 'inherit',
@@ -84,6 +87,30 @@ function detect_unity_hub_apps() {
         .filter(candidate => existsSync(candidate.app))
         .sort((left, right) => compare_unity_versions(right.version, left.version))
         .map(candidate => candidate.app);
+}
+
+function resolve_unity_version(unity_app) {
+    const requested_version = process.env.UNITY_EDITOR_VERSION || process.env.UnityEditorVersion;
+    if (requested_version) {
+        return requested_version;
+    }
+
+    const hub_version = basename(dirname(unity_app));
+    if (/^\d+\.\d+\.\d+[abfp]\d+$/.test(hub_version)) {
+        return hub_version;
+    }
+
+    fail(
+        `Could not determine the Unity version from ${unity_app}. ` +
+        'Set UNITY_EDITOR_VERSION alongside UNITY_APP.'
+    );
+}
+
+function is_unity_version_at_least(version, required_major, required_minor) {
+    const parts = parse_version_parts(version);
+    const major = parts[0] ?? 0;
+    const minor = parts[1] ?? 0;
+    return major > required_major || (major === required_major && minor >= required_minor);
 }
 
 function compare_unity_versions(left, right) {

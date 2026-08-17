@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using UnityAgenticTools.Bridge.Transport;
+using UnityAgenticTools.Refs;
 using UnityEngine;
 
 namespace UnityAgenticTools.Tests
@@ -127,7 +128,8 @@ namespace UnityAgenticTools.Tests
                 Assert.That(result, Does.Contain("\"name\":\"AppRoot\""));
                 Assert.That(result, Does.Contain("\"type\":\"GameObject\""));
                 Assert.That(result, Does.Contain("\"path\":\"AppRoot\""));
-                Assert.That(result, Does.Contain("\"instanceId\":"));
+                Assert.That(result, Does.Contain("\"objectId\":\""));
+                Assert.That(result, Does.Not.Contain("\"instanceId\""));
                 Assert.That(result, Does.Not.Contain("\"transform\""));
             }
             finally
@@ -147,7 +149,8 @@ namespace UnityAgenticTools.Tests
                 Assert.That(result, Does.Contain("\"name\":\"AppRoot\""),
                     "Component.name proxies the owning GameObject name.");
                 Assert.That(result, Does.Contain("\"type\":\"BoxCollider\""));
-                Assert.That(result, Does.Contain("\"gameObjectInstanceId\""));
+                Assert.That(result, Does.Contain("\"gameObjectId\":\""));
+                Assert.That(result, Does.Not.Contain("\"gameObjectInstanceId\""));
                 Assert.That(result, Does.Not.Contain("\"gameObjectName\""),
                     "gameObjectName was dropped as redundant with name.");
                 Assert.That(result, Does.Contain("\"path\":\"AppRoot\""));
@@ -197,12 +200,37 @@ namespace UnityAgenticTools.Tests
                     {
                         { "type", "GameObject" },
                         { "name", "AppRoot" },
-                        { "instanceId", 42 }
+                        { "objectId", "42" }
                     }
                 }
             };
 
             Assert.That(JsonRpcParser.IsTransportSafeValue(payload), Is.True);
+        }
+
+        [Test]
+        public void JsonRpcParser_NormalizedObjectId_RoundTripsThroughHierarchyRef()
+        {
+            var gameObject = new GameObject("AppRoot");
+            try
+            {
+                var normalized = JsonRpcParser.NormalizeValueForTransport(gameObject)
+                    as System.Collections.Generic.Dictionary<string, object>;
+
+                Assert.That(normalized, Is.Not.Null);
+                Assert.That(normalized["objectId"], Is.TypeOf<string>());
+                Assert.That(
+                    UnityObjectId.TryDeserialize((string)normalized["objectId"], out UnityObjectId objectId),
+                    Is.True);
+
+                string refStr = RefManager.RegisterHierarchy(objectId);
+                Assert.That(RefManager.ResolveGameObject(refStr), Is.SameAs(gameObject));
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+                RefManager.ClearHierarchy();
+            }
         }
 
         [Test]
