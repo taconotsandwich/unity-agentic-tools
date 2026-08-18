@@ -25,7 +25,7 @@ export interface MockPortBehavior {
     reachable?: boolean;
     reachable_sequence?: boolean[];
     /**
-     * Unreachable until this many ms after the mock is installed, then reachable.
+     * Unreachable until this many ms after the first connection, then reachable.
      * Models a domain reload. Prefer this over reachable_sequence when the assertion
      * is about how long the client waits: discovery opens a variable number of
      * connections per attempt, so a count-based sequence cannot express a duration.
@@ -40,9 +40,9 @@ export interface MockPortBehavior {
     close_before_response?: boolean;
     close_before_response_sequence?: boolean[];
     /**
-     * Models a domain reload, measured from mock install: already-open sockets are
-     * closed at `start`, connections attempted inside the window fail, and the port
-     * behaves normally again after `end`.
+     * Models a domain reload, measured from the first connection: already-open
+     * sockets are closed at `start`, connections attempted inside the window fail,
+     * and the port behaves normally again after `end`.
      */
     reload_window_ms?: MockWindow;
     /**
@@ -60,7 +60,11 @@ export function install_mock_websocket(port_behaviors: Record<number, MockPortBe
     );
     const connection_counts = new Map<number, number>();
     const sockets: MockSocketRecord[] = [];
-    const installed_at = Date.now();
+    // Anchored to the first connection, not to install. A test that installs the
+    // mock and then streams means "N ms after the client connects"; the gap
+    // between the two is scheduling noise, and under full-suite load it grew past
+    // the 40ms reload start often enough to fail the very first connect.
+    let anchor: number | undefined;
 
     class MockWebSocket {
         public url: string;
@@ -77,10 +81,11 @@ export function install_mock_websocket(port_behaviors: Record<number, MockPortBe
             const behavior = behavior_map.get(port);
             const connection_count = (connection_counts.get(port) ?? 0) + 1;
             connection_counts.set(port, connection_count);
-            const elapsed = Date.now() - installed_at;
+            anchor ??= Date.now();
+            const elapsed = Date.now() - anchor;
             const reload = behavior?.reload_window_ms;
             const reachable = !in_window(reload, elapsed)
-                && resolve_reachable(behavior, connection_count, installed_at);
+                && resolve_reachable(behavior, connection_count, anchor);
 
             this.record = { port, opened: false, closed: false };
             sockets.push(this.record);
@@ -216,14 +221,14 @@ function in_window(window: MockWindow | undefined, elapsed: number): boolean {
 function resolve_reachable(
     behavior: MockPortBehavior | undefined,
     connection_count: number,
-    installed_at: number,
+    anchor: number,
 ): boolean {
     if (!behavior) {
         return false;
     }
 
     if (behavior.reachable_after_ms !== undefined) {
-        return Date.now() - installed_at >= behavior.reachable_after_ms;
+        return Date.now() - anchor >= behavior.reachable_after_ms;
     }
 
     return resolve_sequence_value(behavior.reachable_sequence, behavior.reachable !== false, connection_count) !== false;
