@@ -45,6 +45,9 @@ jobs:
       - name: Check command reference drift
         run: bun run check:agent-guidance
 
+      - name: Check bridge package dependencies
+        run: bun run check:package-deps
+
       - name: Run unit tests
         run: bun run test
 
