@@ -309,7 +309,7 @@ namespace UnityAgenticTools
             };
 
             TryAddUnityProperty(payload, "name", () => unityObject.name);
-            TryAddUnityProperty(payload, "instanceId", () => UnityObjectCompat.GetObjectId(unityObject));
+            TryAddUnityProperty(payload, "objectId", () => UnityObjectCompat.GetObjectId(unityObject).Serialize());
 
             if (unityObject is GameObject gameObject)
             {
@@ -325,7 +325,7 @@ namespace UnityAgenticTools
             }
             else if (unityObject is Component component)
             {
-                TryAddUnityProperty(payload, "gameObjectInstanceId", () => UnityObjectCompat.GetObjectId(component.gameObject));
+                TryAddUnityProperty(payload, "gameObjectId", () => UnityObjectCompat.GetObjectId(component.gameObject).Serialize());
                 TryAddUnityProperty(payload, "path", () => GetHierarchyPath(component.transform));
 
                 if (component.gameObject.scene.IsValid())

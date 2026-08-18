@@ -1,7 +1,7 @@
 {
   "name": "unity-agentic-tools",
   "packageManager": "bun@1.3.14",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Compact Unity Editor command runner for AI agents",
   "exports": {
     ".": {
@@ -26,6 +26,7 @@
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:unity-headless": "bun test/run-headless-validation.ts",
+    "test:unity-editor-tests": "bun test/run-editor-tests.ts",
     "test:stress": "bun test/run-bridge-stress.ts"
   },
   "dependencies": {
@@ -50,13 +51,15 @@
   },
   "keywords": [
     "unity",
-    "yaml",
-    "parser",
     "scene",
     "prefab",
     "gameobject",
     "ai",
-    "cli"
+    "cli",
+    "automation",
+    "editor",
+    "agentic",
+    "websocket"
   ],
   "license": "Apache-2.0"
 }

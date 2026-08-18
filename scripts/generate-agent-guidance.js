@@ -6,20 +6,8 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const registryPath = join(root, 'unity-package', 'Editor', 'Commands', 'Registry.cs');
 const editorDir = join(root, 'unity-package', 'Editor');
-const referenceDir = join(root, 'skills', 'unity-agentic-tools', 'reference');
-
-const registry = readFileSync(registryPath, 'utf8');
-const commandRegex = /new BuiltInCommand\("([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)"\)/g;
-const commands = [...registry.matchAll(commandRegex)].map((match) => ({
-    name: match[1],
-    typeName: match[2],
-    memberName: match[3],
-    description: match[4],
-}));
-
-if (commands.length === 0) {
-    throw new Error(`No BuiltInCommand entries found in ${registryPath}`);
-}
+export const referenceDir = join(root, 'skills', 'unity-agentic-tools', 'reference');
+export const referencePath = join(referenceDir, 'command-reference.md');
 
 function collect_cs_sources(dir) {
     const sources = [];
@@ -34,20 +22,22 @@ function collect_cs_sources(dir) {
     return sources;
 }
 
-const editorSources = collect_cs_sources(editorDir);
-
 function escape_regex(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function find_type_source(typeName) {
+function find_type_source(editorSources, typeName) {
     const lastDot = typeName.lastIndexOf('.');
     if (lastDot === -1) {
         return null;
     }
     const namespaceRegex = new RegExp(`namespace\\s+${escape_regex(typeName.slice(0, lastDot))}\\s*[{;\\r\\n]`);
     const classRegex = new RegExp(`\\bclass\\s+${escape_regex(typeName.slice(lastDot + 1))}\\b`);
-    return editorSources.find((source) => namespaceRegex.test(source) && classRegex.test(source)) ?? null;
+    const matches = editorSources.filter((source) => namespaceRegex.test(source) && classRegex.test(source));
+    if (matches.length === 0) {
+        return null;
+    }
+    return matches.join('\n');
 }
 
 function split_params(raw) {
@@ -102,48 +92,67 @@ function extract_arg_hint(source, memberName) {
     return ` ${widest.map(render_param_hint).join(' ')}`;
 }
 
-for (const command of commands) {
-    const inRepo = command.typeName.startsWith('UnityAgenticTools.');
-    const source = inRepo ? find_type_source(command.typeName) : null;
-    const hint = source === null ? null : extract_arg_hint(source, command.memberName);
-    if (inRepo && hint === null) {
-        throw new Error(`Cannot resolve signature for ${command.typeName}.${command.memberName} (alias ${command.name}).`);
+export function render_command_reference() {
+    const registry = readFileSync(registryPath, 'utf8');
+    const commandRegex = /new BuiltInCommand\("([^"]+)",\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)"\)/g;
+    const commands = [...registry.matchAll(commandRegex)].map((match) => ({
+        name: match[1],
+        typeName: match[2],
+        memberName: match[3],
+        description: match[4],
+    }));
+
+    if (commands.length === 0) {
+        throw new Error(`No BuiltInCommand entries found in ${registryPath}`);
     }
-    command.argHint = hint ?? '';
-}
 
-const groups = new Map();
-for (const command of commands) {
-    const group = command.name.includes('.') ? command.name.split('.')[0] : 'other';
-    const existing = groups.get(group) ?? [];
-    existing.push(command);
-    groups.set(group, existing);
-}
+    const editorSources = collect_cs_sources(editorDir);
 
-const lines = [
-    '# Command Reference',
-    '',
-    'Generated from `unity-package/Editor/Commands/Registry.cs`.',
-    '',
-    'Use aliases before raw public static C# targets. Argument hints: `<required>` `[optional]`.',
-    '',
-];
-
-for (const [group, groupCommands] of groups) {
-    lines.push(`## ${group}`);
-    lines.push('');
-    lines.push('| Alias | Backing API | Purpose |');
-    lines.push('|-------|-------------|---------|');
-    for (const command of groupCommands) {
-        const backingApi = `${command.typeName}.${command.memberName}`;
-        lines.push(`| \`${command.name}${command.argHint}\` | \`${backingApi}\` | ${command.description} |`);
+    for (const command of commands) {
+        const inRepo = command.typeName.startsWith('UnityAgenticTools.');
+        const source = inRepo ? find_type_source(editorSources, command.typeName) : null;
+        const hint = source === null ? null : extract_arg_hint(source, command.memberName);
+        if (inRepo && hint === null) {
+            throw new Error(`Cannot resolve signature for ${command.typeName}.${command.memberName} (alias ${command.name}).`);
+        }
+        command.argHint = hint ?? '';
     }
-    lines.push('');
+
+    const groups = new Map();
+    for (const command of commands) {
+        const group = command.name.includes('.') ? command.name.split('.')[0] : 'other';
+        const existing = groups.get(group) ?? [];
+        existing.push(command);
+        groups.set(group, existing);
+    }
+
+    const lines = [
+        '# Command Reference',
+        '',
+        'Generated from `unity-package/Editor/Commands/Registry.cs`.',
+        '',
+        'These aliases run without `--raw`. Any target not listed here is a raw public static C# member, which `run` refuses unless `--raw` is passed and logs a warning in the Unity console when it accepts. Argument hints: `<required>` `[optional]`.',
+        '',
+    ];
+
+    for (const [group, groupCommands] of groups) {
+        lines.push(`## ${group}`);
+        lines.push('');
+        lines.push('| Alias | Backing API | Purpose |');
+        lines.push('|-------|-------------|---------|');
+        for (const command of groupCommands) {
+            const backingApi = `${command.typeName}.${command.memberName}`;
+            lines.push(`| \`${command.name}${command.argHint}\` | \`${backingApi}\` | ${command.description} |`);
+        }
+        lines.push('');
+    }
+
+    return { text: `${lines.join('\n').trim()}\n`, count: commands.length };
 }
 
-const generated = `${lines.join('\n').trim()}\n`;
-mkdirSync(referenceDir, { recursive: true });
-const generatedPath = join(referenceDir, 'command-reference.md');
-writeFileSync(generatedPath, generated);
-
-console.log(`Generated ${commands.length} command reference entries at ${generatedPath}.`);
+if (import.meta.main) {
+    const { text, count } = render_command_reference();
+    mkdirSync(referenceDir, { recursive: true });
+    writeFileSync(referencePath, text);
+    console.log(`Generated ${count} command reference entries at ${referencePath}.`);
+}

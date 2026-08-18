@@ -290,14 +290,13 @@ namespace UnityAgenticTools.Refs
                 var root = rootProp.GetValue(doc);
                 if (root == null) continue;
 
-                int docInstanceId = UnityObjectCompat.GetObjectId(comp);
-                WalkVisualElement(root, results, 0, null, docInstanceId, "");
+                WalkVisualElement(root, results, 0, null, "");
             }
 
             return results;
         }
 
-        private static void WalkVisualElement(object element, List<UIElementInfo> results, int depth, string parentRef, int docInstanceId, string path)
+        private static void WalkVisualElement(object element, List<UIElementInfo> results, int depth, string parentRef, string path)
         {
             if (element == null) return;
 
@@ -312,7 +311,7 @@ namespace UnityAgenticTools.Refs
                 string label = GetUIToolkitLabel(element, typeName);
                 Rect bounds = GetUIToolkitBounds(element);
 
-                string refStr = RefManager.RegisterUI(0, $"{docInstanceId}/{currentPath}");
+                string refStr = RefManager.RegisterUI(UnityObjectId.None, currentPath);
                 results.Add(new UIElementInfo
                 {
                     Ref = refStr,
@@ -341,7 +340,7 @@ namespace UnityAgenticTools.Refs
             {
                 var child = indexer.Invoke(element, new object[] { i });
                 string childPath = $"{path}/{GetElementName(child)}:{i}";
-                WalkVisualElement(child, results, depth + 1, parentRef, docInstanceId, childPath);
+                WalkVisualElement(child, results, depth + 1, parentRef, childPath);
             }
         }
 

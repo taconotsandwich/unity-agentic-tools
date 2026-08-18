@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using UnityEditor;
@@ -6,6 +7,68 @@ using UnityEngine;
 
 namespace UnityAgenticTools
 {
+    public readonly struct UnityObjectId : IEquatable<UnityObjectId>
+    {
+        private readonly ulong _rawValue;
+
+        public static UnityObjectId None => new UnityObjectId(0);
+
+        internal UnityObjectId(ulong rawValue)
+        {
+            _rawValue = rawValue;
+        }
+
+        internal ulong RawValue => _rawValue;
+
+#if UNITY_6000_3_OR_NEWER
+        internal static string StorageFormat => "entity-id";
+#else
+        internal static string StorageFormat => "instance-id";
+#endif
+
+        public bool IsNone => _rawValue == 0;
+
+        public string Serialize()
+        {
+            return _rawValue.ToString(CultureInfo.InvariantCulture);
+        }
+
+        public static bool TryDeserialize(string value, out UnityObjectId objectId)
+        {
+            if (!ulong.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out ulong rawValue))
+            {
+                objectId = None;
+                return false;
+            }
+
+#if !UNITY_6000_3_OR_NEWER
+            if (rawValue > uint.MaxValue)
+            {
+                objectId = None;
+                return false;
+            }
+#endif
+
+            objectId = new UnityObjectId(rawValue);
+            return true;
+        }
+
+        public bool Equals(UnityObjectId other)
+        {
+            return _rawValue == other._rawValue;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is UnityObjectId other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return _rawValue.GetHashCode();
+        }
+    }
+
     internal static class UnityObjectCompat
     {
         private static readonly MethodInfo FindAnyObjectByTypeMethod = typeof(UnityEngine.Object)
@@ -79,28 +142,38 @@ namespace UnityAgenticTools
 #pragma warning restore CS0618
         }
 
-        public static int GetObjectId(UnityEngine.Object obj)
+        public static UnityObjectId GetObjectId(UnityEngine.Object obj)
         {
             if (obj == null)
             {
-                return 0;
+                return UnityObjectId.None;
             }
 
+#if UNITY_6000_3_OR_NEWER
+            return new UnityObjectId(EntityId.ToULong(obj.GetEntityId()));
+#else
 #pragma warning disable CS0618
-            return obj.GetInstanceID();
+            int instanceId = obj.GetInstanceID();
 #pragma warning restore CS0618
+            return new UnityObjectId(unchecked((ulong)(uint)instanceId));
+#endif
         }
 
-        public static UnityEngine.Object ResolveObject(int objectId)
+        public static UnityEngine.Object ResolveObject(UnityObjectId objectId)
         {
-            if (objectId == 0)
+            if (objectId.IsNone)
             {
                 return null;
             }
 
+#if UNITY_6000_3_OR_NEWER
+            return EditorUtility.EntityIdToObject(EntityId.FromULong(objectId.RawValue));
+#else
+            int instanceId = unchecked((int)(uint)objectId.RawValue);
 #pragma warning disable CS0618
-            return EditorUtility.InstanceIDToObject(objectId);
+            return EditorUtility.InstanceIDToObject(instanceId);
 #pragma warning restore CS0618
+#endif
         }
     }
 }

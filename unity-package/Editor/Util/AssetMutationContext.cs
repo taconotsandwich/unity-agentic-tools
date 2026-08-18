@@ -38,7 +38,7 @@ namespace UnityAgenticTools.Util
             IsPrefabAsset = prefabRoot != null;
         }
 
-        public static AssetMutationContext Open(string assetPath)
+        public static AssetMutationContext Open(string assetPath, bool forMutation = true)
         {
             if (string.IsNullOrWhiteSpace(assetPath))
             {
@@ -54,6 +54,18 @@ namespace UnityAgenticTools.Util
 
             if (assetPath.EndsWith(".unity", StringComparison.OrdinalIgnoreCase))
             {
+                // Guard here, not at save: without it the edit applies to the
+                // in-memory play state before SaveScene throws Unity's bare
+                // "This cannot be used during play mode." Prefab targets stay
+                // allowed - LoadPrefabContents edits persist correctly in play
+                // mode (probed live). Reads pass forMutation: false.
+                if (forMutation && EditorApplication.isPlayingOrWillChangePlaymode)
+                {
+                    throw new InvalidOperationException(
+                        $"Play mode is active; scene edits to {assetPath} would be discarded on exit. " +
+                        "Run play.exit, gate on play.state, then retry. Prefab assets can be edited during play mode.");
+                }
+
                 var targetScene = UnitySceneManager.GetSceneByPath(assetPath);
                 var openedTemporarily = false;
                 if (!targetScene.IsValid() || !targetScene.isLoaded)
@@ -90,6 +102,18 @@ namespace UnityAgenticTools.Util
 
             throw new InvalidOperationException(
                 $"Unsupported mutation target \"{assetPath}\". Only .unity scenes and .prefab assets are supported.");
+        }
+
+        /// <summary>
+        /// The scene a new GameObject for this target must be born in. A scene
+        /// target is its own answer; a prefab target's answer is the isolated
+        /// scene LoadPrefabContents put the contents in. Constructing the object
+        /// anywhere else writes it into whatever scene the editor has active,
+        /// even when a reparent moves it out again a statement later.
+        /// </summary>
+        public UnityScene ObjectScene
+        {
+            get { return IsScene ? Scene : PrefabRoot.scene; }
         }
 
         public IEnumerable<GameObject> GetRootGameObjects()

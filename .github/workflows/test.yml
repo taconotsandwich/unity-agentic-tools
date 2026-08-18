@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: true
 
@@ -36,8 +36,10 @@ jobs:
       - name: Type check
         run: bun run type-check
 
-      - name: Check Unity ClassID drift
-        run: bun run check:classids
+      # Same entry point the git hooks use, so CI cannot check something the
+      # local hooks do not.
+      - name: Static checks
+        run: bun run check
 
       - name: Run unit tests
         run: bun run test

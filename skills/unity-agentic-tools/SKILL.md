@@ -17,7 +17,7 @@ Use this skill for Unity Agentic Tools CLI setup, command discovery, command exe
 | Command | What it does |
 |---------|-------------|
 | `list [query]` | Discover built-in aliases, attributed project commands, and optional raw static APIs. `--brief` omits per-argument detail; `--raw` adds raw statics |
-| `run <target> [args...]` | Execute a command alias or raw public static C# method/property through the Unity bridge |
+| `run <target> [args...]` | Execute a command alias through the Unity bridge, or a raw public static C# method/property with `--raw` |
 | `stream [topic]` | Watch real-time bridge events over WebSocket |
 | `install` | Install the Unity bridge package |
 | `uninstall` | Remove the Unity bridge package |
@@ -35,6 +35,15 @@ By default, `install` writes the GitHub package URL. For local bridge package de
 3. Inspect current state with `query.*`, `scene.hierarchy`, `ui.snapshot`, or screenshots.
 4. `unity-agentic-tools run <target> ... -p <project>`
 5. Verify with the matching query, snapshot, screenshot, tests, or console stream.
+
+## Workflow Rules
+
+1. Author in edit mode against asset paths. Scene edits made in play mode are discarded on exit.
+2. Verify structure with `query.object` or `scene.hierarchy`, not play mode or screenshots. Screenshots are for visual layout; take `ui.snapshot` first and reserve `screenshot.annotated` for when element geometry matters.
+3. Play mode is for behavior. Each transition is a domain reload, so batch authoring before `play.enter`, run queries after, and never interleave authoring with transitions.
+4. Prefer `tests.run` for behavior checks over manually driving `input.*` and reading screenshots.
+5. Never sleep-and-repoll: `wait.for` blocks on the condition (ui, ui-gone, scene, log, compile, delay) in one call, and `run --batch` executes a command sequence in one process.
+6. Skip `project.refresh` after bridge mutations; they import their own changes. It is only needed after files change outside the bridge.
 
 ## Examples
 
@@ -98,7 +107,7 @@ Full detail lives in `reference/troubleshooting.md`. Quick pointers:
 - **Bridge won't connect**: see "Bridge Not Reachable" (install, open Unity, wait for compile, status, cleanup). `reachable: true` with `is_stable: false` means busy, not broken.
 - **Long builds time out**: `run` defaults to 60s; see "Long-running Commands" (`--timeout 1200000`, `--no-wait`).
 - **Play mode looks wrong right after `play.enter`**: the response reports the current state, not the requested one. Poll `play.state`; see "Play Mode Transitions" in `reference/live-editor-workflows.md`.
-- **Reads are slow during a transition**: expected. Reads wait out a domain reload for up to 30s instead of failing; see "Domain reloads" in "Long-running Commands".
+- **Recognized built-in reads are slow during a transition**: expected. Those reads wait out a domain reload for up to 30s instead of failing; project commands and most raw getters use conservative command semantics. See "Domain reloads" in "Long-running Commands".
 - **Stale `@hN`/`@uN` refs**: re-run `scene.hierarchy` or `ui.snapshot`; see "Stale Refs".
 - **Need console logs**: `unity-agentic-tools stream console --duration 5000 -p <project>`.
-- **Need raw APIs**: `unity-agentic-tools list <type-or-namespace> --raw -p <project>`.
+- **Need raw APIs**: `unity-agentic-tools list <type-or-namespace> --raw -p <project>` to find one, then `run <target> --raw` to invoke it. `run` refuses an unregistered target without `--raw` and logs a warning in the Unity console when it accepts one. Prefer a registered alias whenever one exists.

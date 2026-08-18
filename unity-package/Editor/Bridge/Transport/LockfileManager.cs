@@ -15,14 +15,52 @@ namespace UnityAgenticTools.Bridge.Transport
 
         public static string LockfilePath => _lockfilePath;
 
-        public static bool Exists()
+        public static bool MatchesExpectedServer(int port, int pid)
         {
             var path = GetLockfilePath();
-            return !string.IsNullOrEmpty(path) && File.Exists(path);
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                return false;
+            }
+
+            try
+            {
+                return ContentMatchesExpectedServer(File.ReadAllText(path), port, pid);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static bool ContentMatchesExpectedServer(string content, int port, int pid)
+        {
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                return false;
+            }
+
+            try
+            {
+                var lockfile = JsonUtility.FromJson<LockfileContents>(content);
+                return lockfile != null &&
+                    lockfile.port == port &&
+                    lockfile.pid == pid &&
+                    lockfile.version == BridgeMetadata.PackageVersion;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public static void Write(int port, int pid)
         {
+            if (EditorProcessContext.IsAssetImportWorker)
+            {
+                return;
+            }
+
             try
             {
                 var projectPath = GetProjectPath();
@@ -36,7 +74,7 @@ namespace UnityAgenticTools.Bridge.Transport
                 EnsureGitignoreEntry(projectPath);
                 _lockfilePath = Path.Combine(dirPath, FileName);
 
-                var json = $"{{\n  \"port\": {port},\n  \"pid\": {pid},\n  \"version\": \"0.1.0\"\n}}\n";
+                var json = $"{{\n  \"port\": {port},\n  \"pid\": {pid},\n  \"version\": \"{BridgeMetadata.PackageVersion}\"\n}}\n";
                 File.WriteAllText(_lockfilePath, json);
             }
             catch (Exception ex)
@@ -98,6 +136,11 @@ namespace UnityAgenticTools.Bridge.Transport
 
         public static void Remove()
         {
+            if (EditorProcessContext.IsAssetImportWorker)
+            {
+                return;
+            }
+
             try
             {
                 var path = GetLockfilePath();
@@ -135,6 +178,14 @@ namespace UnityAgenticTools.Bridge.Transport
         private static string GetProjectPath()
         {
             return Path.GetDirectoryName(Application.dataPath);
+        }
+
+        [Serializable]
+        private sealed class LockfileContents
+        {
+            public int port;
+            public int pid;
+            public string version;
         }
     }
 }

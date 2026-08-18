@@ -1,6 +1,12 @@
 #!/bin/sh
 set -e
 
+# Cheapest first: the static checks cost under a second, so a drifted
+# command reference or an undeclared package dependency fails before the
+# 40s of type-check and unit tests.
+echo "[pre-commit] static checks"
+bun run check
+
 echo "[pre-commit] type-check"
 bun run type-check
 

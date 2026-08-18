@@ -72,7 +72,11 @@ describe('get_build_settings', () => {
 
     it('should flag missing build scenes on disk', () => {
         const tmp = mkdtempSync(join(tmpdir(), 'build-settings-missing-scene-'));
-        cpSync(FIXTURE_PATH, tmp, { recursive: true });
+        // get_build_settings reads ProjectSettings and probes each scene path, so
+        // copying the whole 20MB fixture project bought nothing and cost the 5s
+        // test timeout on a Windows runner scanning every file it writes.
+        cpSync(path.join(FIXTURE_PATH, 'ProjectSettings'), path.join(tmp, 'ProjectSettings'), { recursive: true });
+        cpSync(path.join(FIXTURE_PATH, 'Assets', 'Scenes'), path.join(tmp, 'Assets', 'Scenes'), { recursive: true });
         unlinkSync(path.join(tmp, 'Assets', 'Scenes', 'Level.unity'));
 
         try {

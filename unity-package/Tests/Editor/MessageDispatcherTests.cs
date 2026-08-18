@@ -1,8 +1,12 @@
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using UnityAgenticTools;
+using UnityAgenticTools.Bridge;
 using UnityAgenticTools.Bridge.Transport;
+using UnityEngine;
+using UnityEngine.TestTools;
 
 namespace UnityAgenticTools.Tests
 {
@@ -119,6 +123,41 @@ namespace UnityAgenticTools.Tests
         }
 
         [Test]
+        public void JsonRpcParser_InvokeTimeout_PreservesIntegerMilliseconds()
+        {
+            const int expectedTimeoutMs = 1200000;
+            var request = JsonRpcParser.ParseRequest(
+                "{\"jsonrpc\":\"2.0\",\"id\":\"timeout-1\",\"method\":\"editor.invoke\",\"params\":{" +
+                "\"type\":\"UnityEditor.EditorApplication\",\"member\":\"isCompiling\",\"_timeout\":1200000}}");
+
+            Assert.That(request.Params["_timeout"], Is.TypeOf<int>());
+            Assert.That(RequestTimeout.ResolveMilliseconds(request.Params), Is.EqualTo(expectedTimeoutMs));
+        }
+
+        [Test]
+        public void LockfileManager_ContentMatchesExpectedServer_RequiresCurrentOwnership()
+        {
+            const int port = 53782;
+            const int pid = 13484;
+            var valid = $"{{\"port\":{port},\"pid\":{pid},\"version\":\"{BridgeMetadata.PackageVersion}\"}}";
+
+            Assert.That(LockfileManager.ContentMatchesExpectedServer(valid, port, pid), Is.True);
+            Assert.That(LockfileManager.ContentMatchesExpectedServer(
+                $"{{\"port\":53785,\"pid\":{pid},\"version\":\"{BridgeMetadata.PackageVersion}\"}}",
+                port,
+                pid), Is.False);
+            Assert.That(LockfileManager.ContentMatchesExpectedServer(
+                $"{{\"port\":{port},\"pid\":22076,\"version\":\"{BridgeMetadata.PackageVersion}\"}}",
+                port,
+                pid), Is.False);
+            Assert.That(LockfileManager.ContentMatchesExpectedServer(
+                $"{{\"port\":{port},\"pid\":{pid},\"version\":\"0.1.0\"}}",
+                port,
+                pid), Is.False);
+            Assert.That(LockfileManager.ContentMatchesExpectedServer("not-json", port, pid), Is.False);
+        }
+
+        [Test]
         public async Task Dispatch_InvokePlayModeGetState_ReturnsResult()
         {
             MessageDispatcher.Reset();
@@ -177,13 +216,40 @@ namespace UnityAgenticTools.Tests
                 "UnityAgenticTools.Commands.Registry",
                 "Run",
                 "UnityEditor.EditorApplication.isCompiling",
-                "[]");
+                "[]",
+                "true");
+
+            LogAssert.Expect(LogType.Warning, new Regex("raw invocation"));
 
             var response = await MessageDispatcher.Dispatch(request);
 
             Assert.That(response, Does.Contain("\"id\":\"registry-run-1\""));
             Assert.That(response, Does.Contain("\"success\":true"));
             Assert.That(response, Does.Contain("\"result\""));
+        }
+
+        [Test]
+        public async Task Dispatch_InvokeCommandRegistryRun_RefusesRawTargetWithoutOptIn()
+        {
+            MessageDispatcher.Reset();
+
+            var request = BuildInvokeRequest(
+                "registry-run-refuse-1",
+                "UnityAgenticTools.Commands.Registry",
+                "Run",
+                "UnityEditor.EditorApplication.isCompiling",
+                "[]");
+
+            // The dispatcher logs the refusal as an error before answering, which
+            // the test framework would otherwise count as an unhandled failure.
+            LogAssert.Expect(LogType.Error, new Regex("Refusing to invoke the raw member"));
+
+            var response = await MessageDispatcher.Dispatch(request);
+
+            Assert.That(response, Does.Contain("\"id\":\"registry-run-refuse-1\""));
+            Assert.That(response, Does.Contain("\"error\""));
+            Assert.That(response, Does.Contain("--raw"));
+            Assert.That(response, Does.Not.Contain("\"success\":true"));
         }
 
         [Test]
@@ -196,7 +262,10 @@ namespace UnityAgenticTools.Tests
                 "UnityAgenticTools.Commands.Registry",
                 "Run",
                 "UnityEditor.AssetDatabase.FindAssets",
-                "[\"t:Scene\"]");
+                "[\"t:Scene\"]",
+                "true");
+
+            LogAssert.Expect(LogType.Warning, new Regex("raw invocation"));
 
             var response = await MessageDispatcher.Dispatch(request);
 

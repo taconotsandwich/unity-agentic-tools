@@ -282,7 +282,7 @@ namespace UnityAgenticTools.Bridge.Handlers
                         count = Convert.ToInt32(countObj);
                     }
 
-                    string typeFilter = null;
+                    var typeFilter = "";
                     if (parameters.TryGetValue("type", out var typeObj) && typeObj is string tf)
                     {
                         typeFilter = tf;
@@ -294,38 +294,11 @@ namespace UnityAgenticTools.Bridge.Handlers
                         includeStackTrace = Convert.ToBoolean(stackObj);
                     }
 
-                    // Re-read LogEntries to capture native assertions that bypass
-                    // Application.logMessageReceived (e.g. serialization errors)
-                    RefreshFromLogEntries();
-
-                    lock (_logLock)
-                    {
-                        IEnumerable<LogEntry> entries = _logBuffer;
-
-                        if (typeFilter != null)
-                        {
-                            entries = entries.Where(e => e.Type.Equals(typeFilter, StringComparison.OrdinalIgnoreCase));
-                        }
-
-                        var result = entries.TakeLast(count).Select(e => e.ToDictionary(includeStackTrace)).ToArray();
-                        return Task.FromResult<object>(new Dictionary<string, object>
-                        {
-                            { "count", result.Length },
-                            { "logs", result }
-                        });
-                    }
+                    return Task.FromResult(GetLogs(count, typeFilter, "", includeStackTrace));
                 }
 
                 case "clear":
-                    lock (_logLock)
-                    {
-                        _logBuffer.Clear();
-                    }
-                    return Task.FromResult<object>(new Dictionary<string, object>
-                    {
-                        { "success", true },
-                        { "message", "Console log buffer cleared" }
-                    });
+                    return Task.FromResult(Clear());
 
                 case "subscribe":
                     return Task.FromResult<object>(new Dictionary<string, object>
@@ -344,6 +317,88 @@ namespace UnityAgenticTools.Bridge.Handlers
                 default:
                     throw new InvalidOperationException($"Unknown console action: {action}");
             }
+        }
+
+        /// <summary>
+        /// Registry surface for logs.tail. Defaults are leaner than the RPC
+        /// action's on purpose: agents pull small tails, stack traces on request.
+        /// </summary>
+        public static object GetLogs(int count = 20, string type = "", string contains = "", bool includeStackTrace = false)
+        {
+            // Re-read LogEntries to capture native assertions that bypass
+            // Application.logMessageReceived (e.g. serialization errors)
+            RefreshFromLogEntries();
+
+            lock (_logLock)
+            {
+                IEnumerable<LogEntry> entries = _logBuffer;
+
+                if (!string.IsNullOrEmpty(type))
+                {
+                    if (type.Equals("error", StringComparison.OrdinalIgnoreCase))
+                    {
+                        entries = entries.Where(e => IsErrorType(e.Type));
+                    }
+                    else
+                    {
+                        entries = entries.Where(e => string.Equals(e.Type, type, StringComparison.OrdinalIgnoreCase));
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(contains))
+                {
+                    entries = entries.Where(e =>
+                        (e.Message ?? string.Empty).IndexOf(contains, StringComparison.OrdinalIgnoreCase) >= 0);
+                }
+
+                var result = entries.TakeLast(count).Select(e => e.ToDictionary(includeStackTrace)).ToArray();
+                return new Dictionary<string, object>
+                {
+                    { "count", result.Length },
+                    { "logs", result }
+                };
+            }
+        }
+
+        /// <summary>
+        /// Registry surface for logs.clear. Clears the native console too;
+        /// otherwise RefreshFromLogEntries resurrects every entry on the next read.
+        /// </summary>
+        public static object Clear()
+        {
+            lock (_logLock)
+            {
+                _logBuffer.Clear();
+            }
+
+            ClearNativeConsole();
+
+            return new Dictionary<string, object>
+            {
+                { "success", true },
+                { "message", "Unity console and captured log buffer cleared" }
+            };
+        }
+
+        // Unity splits failure output across three LogTypes; an "error" filter
+        // that missed exceptions and assertions would lie to agents.
+        private static bool IsErrorType(string type)
+        {
+            return string.Equals(type, "Error", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(type, "Exception", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(type, "Assert", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void ClearNativeConsole()
+        {
+            try
+            {
+                var logEntriesType = typeof(UnityEditor.Editor).Assembly.GetType("UnityEditor.LogEntries");
+                var clear = logEntriesType?.GetMethod("Clear",
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
+                clear?.Invoke(null, null);
+            }
+            catch { }
         }
 
         private static void OnLogMessage(string condition, string stackTrace, LogType type)

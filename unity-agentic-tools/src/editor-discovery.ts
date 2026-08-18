@@ -129,6 +129,24 @@ export async function discover_editor_config(project_path: string, timeout_ms: n
 }
 
 /**
+ * A pid worth waiting on during a domain reload, from any source readable
+ * without the Editor's cooperation.
+ *
+ * The lockfile is Unity-owned; the last-known cache is CLI-owned and outlives
+ * it. Consulting both means an unreadable lockfile alone no longer decides
+ * whether waiting out a reload is worthwhile. Returns 0 when no source knows.
+ */
+export function read_candidate_editor_pid(project_path: string): number {
+    const lockfile_result = read_editor_config(project_path);
+    if (!('error' in lockfile_result) && lockfile_result.pid > 0) {
+        return lockfile_result.pid;
+    }
+
+    const cached = read_cached_editor_config(project_path, normalize_project_path(project_path));
+    return cached && cached.pid > 0 ? cached.pid : 0;
+}
+
+/**
  * Read bridge identity directly from a known port.
  */
 async function read_bridge_info(port: number, timeout_ms: number): Promise<EditorBridgeInfo | null> {
@@ -275,7 +293,7 @@ function normalize_project_path(project_path: string): string {
         : normalized;
 }
 
-function is_pid_alive(pid: number): boolean {
+export function is_pid_alive(pid: number): boolean {
     try {
         process.kill(pid, 0);
         return true;

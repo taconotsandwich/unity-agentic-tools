@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, statSync } from 'fs';
 import { join, resolve } from 'path';
 import { add_package, load_manifest } from './packages';
 
@@ -39,6 +39,11 @@ export function install_bridge_package(
     const existing_version = manifest_result.manifest.dependencies[BRIDGE_PACKAGE_NAME];
     const should_preserve_existing_file = !options.remote && !options.local_package_path && !options.require_local;
     if (should_preserve_existing_file && typeof existing_version === 'string' && existing_version.startsWith('file:')) {
+        const validation_error = validate_existing_file_dependency(project_path, existing_version);
+        if (validation_error) {
+            return { error: validation_error };
+        }
+
         return {
             success: true,
             action: 'preserved',
@@ -48,6 +53,33 @@ export function install_bridge_package(
     }
 
     return add_package(project_path, BRIDGE_PACKAGE_NAME, target.version);
+}
+
+function validate_existing_file_dependency(project_path: string, version: string): string | undefined {
+    const dependency_path = version.slice('file:'.length);
+    const resolved_path = resolve(project_path, 'Packages', dependency_path);
+
+    if (dependency_path.length > 0 && is_valid_existing_file_dependency(resolved_path)) {
+        return undefined;
+    }
+
+    return `Existing local bridge dependency "${version}" is invalid. ` +
+        `Expected an existing .tgz archive or ${join(resolved_path, 'package.json')} ` +
+        `to declare name "${BRIDGE_PACKAGE_NAME}". ` +
+        'Use --local <path> to replace it with a valid local package or --remote to use the published package.';
+}
+
+function is_valid_existing_file_dependency(dependency_path: string): boolean {
+    try {
+        const stats = statSync(dependency_path);
+        if (stats.isDirectory()) {
+            return is_bridge_package(dependency_path);
+        }
+
+        return stats.isFile() && dependency_path.toLowerCase().endsWith('.tgz');
+    } catch {
+        return false;
+    }
 }
 
 function resolve_bridge_package_target(options: BridgeInstallOptions): BridgePackageTarget | { error: string } {

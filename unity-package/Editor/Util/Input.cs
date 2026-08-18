@@ -8,7 +8,7 @@ using UnityAgenticTools.Refs;
 
 namespace UnityAgenticTools.Util
 {
-    public static class Input
+    public static partial class Input
     {
         public static object Map(string filter = "", bool includeLegacyAxes = true)
         {
@@ -96,30 +96,7 @@ namespace UnityAgenticTools.Util
         public static object Touch(float x, float y, string mode = "tap")
         {
 #if ENABLE_INPUT_SYSTEM
-            var touchscreenType = FindType("UnityEngine.InputSystem.Touchscreen");
-            if (touchscreenType == null)
-                throw new InvalidOperationException("Input System Touchscreen device not found.");
-
-            var currentProp = touchscreenType.GetProperty("current", BindingFlags.Public | BindingFlags.Static);
-            var touchscreen = currentProp?.GetValue(null);
-
-            if (touchscreen == null)
-            {
-                return new Dictionary<string, object>
-                {
-                    { "success", false },
-                    { "error", "No touchscreen device available. Use input.mouse for screen coordinate interaction." }
-                };
-            }
-
-            return new Dictionary<string, object>
-            {
-                { "success", true },
-                { "x", x },
-                { "y", y },
-                { "mode", mode },
-                { "note", "Touch simulation queued" }
-            };
+            return SimulateTouchInputSystem(x, y, mode);
 #else
             return new Dictionary<string, object>
             {
@@ -394,64 +371,6 @@ namespace UnityAgenticTools.Util
             }
         }
 
-        private static object SimulateMouseInputSystem(float x, float y, string mode)
-        {
-            var mouseType = FindType("UnityEngine.InputSystem.Mouse");
-            if (mouseType == null) throw new InvalidOperationException("Input System Mouse device not found.");
-
-            var currentProp = mouseType.GetProperty("current", BindingFlags.Public | BindingFlags.Static);
-            var mouse = currentProp?.GetValue(null);
-            if (mouse == null) throw new InvalidOperationException("No mouse device is currently active.");
-
-            var inputSystemType = FindType("UnityEngine.InputSystem.InputSystem");
-            var mouseStateType = FindType("UnityEngine.InputSystem.LowLevel.MouseState");
-            if (inputSystemType == null || mouseStateType == null) throw new InvalidOperationException("InputSystem or MouseState type not found.");
-
-            QueueMouseState(inputSystemType, mouseStateType, mouse, x, y, pressed: mode == "click" || mode == "down");
-
-            if (mode == "click")
-            {
-                EditorApplication.delayCall += () =>
-                {
-                    try { QueueMouseState(inputSystemType, mouseStateType, mouse, x, y, pressed: false); } catch { }
-                };
-            }
-
-            return new Dictionary<string, object> { { "success", true }, { "x", x }, { "y", y }, { "mode", mode } };
-        }
-
-        private static void QueueMouseState(Type inputSystemType, Type mouseStateType, object mouse, float x, float y, bool pressed)
-        {
-            var stateObj = Activator.CreateInstance(mouseStateType);
-
-            var posField = mouseStateType.GetField("position", BindingFlags.Public | BindingFlags.Instance);
-            posField?.SetValue(stateObj, new Vector2(x, y));
-
-            var buttonsField = mouseStateType.GetField("buttons", BindingFlags.Public | BindingFlags.Instance);
-            buttonsField?.SetValue(stateObj, pressed ? (ushort)1 : (ushort)0);
-
-            var queueMethods = inputSystemType.GetMethods(BindingFlags.Public | BindingFlags.Static);
-            foreach (var method in queueMethods)
-            {
-                if (method.Name == "QueueStateEvent" && method.IsGenericMethod)
-                {
-                    var genericMethod = method.MakeGenericMethod(mouseStateType);
-                    var methodParams = genericMethod.GetParameters();
-
-                    var args = new List<object> { mouse, stateObj };
-                    for (int i = 2; i < methodParams.Length; i++)
-                    {
-                        if (methodParams[i].ParameterType == typeof(double)) args.Add(-1.0);
-                        else args.Add(null);
-                    }
-
-                    try { genericMethod.Invoke(null, args.ToArray()); break; } catch { }
-                }
-            }
-
-            var updateMethod = inputSystemType.GetMethod("Update", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
-            updateMethod?.Invoke(null, null);
-        }
 #endif
 
         private static List<object> DiscoverLegacyAxes()

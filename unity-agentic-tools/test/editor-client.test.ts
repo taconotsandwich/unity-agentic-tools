@@ -3,12 +3,14 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { call_editor, read_editor_readiness } from '../src/editor-client';
+import type { EditorRetryEvent } from '../src/types';
 import {
     DEAD_PID,
     RELOAD_WINDOW_MS,
     install_mock_websocket,
     registry_run_params,
     restore_websocket,
+    write_cached_config,
     write_lockfile,
 } from './editor-websocket-mock';
 
@@ -105,6 +107,113 @@ describe('call_editor', () => {
         expect(response.result).toEqual({ state: 'Playing' });
     });
 
+    test('wait.for invokes classify as reads and retry through discovery loss', async () => {
+        install_mock_websocket({
+            53785: {
+                reachable_sequence: [false, false, false, true, true],
+                bridge_info: {
+                    port: 53785,
+                    pid: 2222,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true, waited: 50 },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('wait.for', ['delay']),
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true, waited: 50 });
+    });
+
+    test('logs.tail invokes classify as reads and retry through discovery loss', async () => {
+        install_mock_websocket({
+            53785: {
+                reachable_sequence: [false, false, false, true, true],
+                bridge_info: {
+                    port: 53785,
+                    pid: 2222,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { count: 0, logs: [] },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('logs.tail'),
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ count: 0, logs: [] });
+    });
+
+    test('Registry.List retries errors that may arrive during a domain transition', async () => {
+        const sockets = install_mock_websocket({
+            53785: {
+                rpc_error_sequence: [
+                    { code: -32003, message: 'Editor unavailable during reload' },
+                    null,
+                ],
+                rpc_result: { commands: [] },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            port: 53785,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: {
+                type: 'UnityAgenticTools.Commands.Registry',
+                member: 'List',
+                args: JSON.stringify(['', 'false']),
+            },
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ commands: [] });
+        expect(sockets).toHaveLength(2);
+    });
+
+    test.each([
+        'UnityEditor.EditorApplication.isCompiling',
+        'UnityEditor.EditorApplication.isUpdating',
+    ])('%s raw getter uses read retry semantics', async (target) => {
+        const sockets = install_mock_websocket({
+            53785: {
+                rpc_error_sequence: [
+                    { code: -32000, message: 'Connection closed before response' },
+                    null,
+                ],
+                rpc_result: false,
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            port: 53785,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params(target),
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toBe(false);
+        expect(sockets).toHaveLength(2);
+    });
+
     test('mutating invokes keep the shorter default recovery window', async () => {
         install_mock_websocket({
             53785: {
@@ -129,6 +238,37 @@ describe('call_editor', () => {
 
         expect(response.result).toBeUndefined();
         expect(response.error).toBeDefined();
+    });
+
+    test('on_retry observes a retry without changing the final response', async () => {
+        install_mock_websocket({
+            53785: {
+                rpc_error_sequence: [
+                    { code: -32002, message: 'Request was not dispatched' },
+                    null,
+                ],
+                rpc_result: { success: true },
+            },
+        });
+
+        const retries: EditorRetryEvent[] = [];
+        const response = await call_editor({
+            project_path: tmp_dir,
+            port: 53785,
+            method: 'editor.invoke',
+            retries: 1,
+            timeout: 100,
+            params: registry_run_params('play.pause'),
+            on_retry: (event) => { retries.push(event); },
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true });
+        expect(retries).toEqual([{
+            code: -32002,
+            attempt: 1,
+            delay_ms: 500,
+        }]);
     });
 
     // Entering play mode reloads the domain, which takes the server down for
@@ -188,6 +328,119 @@ describe('call_editor', () => {
         });
 
         expect(response.error).toBeDefined();
+    });
+
+    // The lockfile is Unity-owned and can vanish for the whole reload window --
+    // exactly the window the budget exists to cover. The CLI-owned cache is
+    // enough to know a wait is worthwhile.
+    test('waits out a reload with no lockfile at all, on the cached pid', async () => {
+        write_cached_config(tmp_dir, 53785, process.pid);
+
+        install_mock_websocket({
+            53785: {
+                reachable_after_ms: RELOAD_WINDOW_MS,
+                bridge_info: {
+                    port: 53785,
+                    pid: process.pid,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('scene.save'),
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true });
+    });
+
+    test('a dead cached pid fails fast even though the record exists', async () => {
+        write_cached_config(tmp_dir, 53785, DEAD_PID);
+
+        install_mock_websocket({
+            53785: {
+                reachable_after_ms: RELOAD_WINDOW_MS,
+                bridge_info: {
+                    port: 53785,
+                    pid: DEAD_PID,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('scene.save'),
+        });
+
+        expect(response.error).toBeDefined();
+    });
+
+    test('no lockfile and no cache means no pid to wait on, so it fails fast', async () => {
+        install_mock_websocket({
+            53785: {
+                reachable_after_ms: RELOAD_WINDOW_MS,
+                bridge_info: {
+                    port: 53785,
+                    pid: process.pid,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('scene.save'),
+        });
+
+        expect(response.error).toBeDefined();
+    });
+
+    // A dead pid in the lockfile must not veto a live one the cache still knows.
+    test('falls through a dead lockfile pid to the cached record', async () => {
+        write_lockfile(tmp_dir, 53785, DEAD_PID);
+        write_cached_config(tmp_dir, 53786, process.pid);
+
+        install_mock_websocket({
+            53786: {
+                reachable_after_ms: RELOAD_WINDOW_MS,
+                bridge_info: {
+                    port: 53786,
+                    pid: process.pid,
+                    version: '0.1.0',
+                    project_path: tmp_dir,
+                    project_name: 'editor-client-test',
+                },
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params('scene.save'),
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true });
     });
 
     test('an explicit retries option caps waiting even for a live editor', async () => {
@@ -362,6 +615,65 @@ describe('call_editor', () => {
 
         expect(response.error).toBeUndefined();
         expect(response.result).toEqual({ success: true });
+    });
+
+    test.each([
+        ['play.pause', -32000],
+        ['play.pause', -32003],
+        ['play.step', -32000],
+        ['play.step', -32003],
+    ] as const)('%s does not retry a possibly dispatched %i response', async (target, code) => {
+        const sockets = install_mock_websocket({
+            53785: {
+                rpc_error_sequence: [
+                    { code, message: 'Request may already have been dispatched' },
+                    null,
+                ],
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            port: 53785,
+            method: 'editor.invoke',
+            retries: 5,
+            timeout: 100,
+            params: registry_run_params(target),
+        });
+
+        expect(response.result).toBeUndefined();
+        expect(response.error?.code).toBe(code);
+        expect(sockets).toHaveLength(1);
+    });
+
+    test.each([
+        ['play.pause', -32002],
+        ['play.pause', -32010],
+        ['play.step', -32002],
+        ['play.step', -32010],
+    ] as const)('%s still retries the pre-dispatch %i response', async (target, code) => {
+        const sockets = install_mock_websocket({
+            53785: {
+                rpc_error_sequence: [
+                    { code, message: 'Request was not dispatched' },
+                    null,
+                ],
+                rpc_result: { success: true },
+            },
+        });
+
+        const response = await call_editor({
+            project_path: tmp_dir,
+            port: 53785,
+            method: 'editor.invoke',
+            timeout: 100,
+            params: registry_run_params(target),
+        });
+
+        expect(response.error).toBeUndefined();
+        expect(response.result).toEqual({ success: true });
+        expect(sockets).toHaveLength(2);
     });
 
     test('UnityAgenticTools.Util.PlayMode.GetState invoke retries clean socket closes during play-mode transition', async () => {

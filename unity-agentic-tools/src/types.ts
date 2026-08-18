@@ -27,6 +27,14 @@ export interface CallEditorOptions {
   retries?: number;
   /** Fire-and-forget: send request and return immediately without waiting for response */
   no_wait?: boolean;
+  /** Observe retry attempts without changing the returned RPC response. */
+  on_retry?: (event: EditorRetryEvent) => void;
+}
+
+export interface EditorRetryEvent {
+  code: number;
+  attempt: number;
+  delay_ms: number;
 }
 
 export interface StreamEditorOptions extends CallEditorOptions {

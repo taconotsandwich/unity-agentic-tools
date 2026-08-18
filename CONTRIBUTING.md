@@ -21,7 +21,13 @@ Prerequisites: Bun, and — only for `build:unity-package` — a local Unity Edi
 - `main` is the release branch.
 - `dev` is the integration branch for ongoing work.
 - Create your working branch from `dev` and open pull requests back into `dev`.
-- When preparing a release (for example `0.5.0`), merge `dev` into `main`, then tag `main` with `v0.5.0`.
+- When preparing a release (for example `0.5.0`), add its `CHANGELOG.md` section, merge `dev` into `main`, run `bun scripts/sync-version.js --set 0.5.0` and commit, then push `main`. Before tagging, run the preflight — it checks every precondition the release workflow enforces, while the tag is still cheap to not create:
+
+```bash
+bun run release:preflight 0.5.0
+```
+
+  Tag `v0.5.0` only once it passes. The preflight is read-only: it never tags, pushes, publishes, commits, or moves a branch, so it is safe to run at any point.
 
 ## Branch Name Rules
 
@@ -76,19 +82,42 @@ Examples:
 
 `check:classids` fetches Unity's ClassID reference over the network, so it fails without a connection rather than because your change is wrong.
 
-Three things CI does not cover, because they need a local Unity install:
+Four things CI does not cover, because they need a local Unity install:
 
 - `bun run build:unity-package` — compiles the C# bridge package.
 - `bun run test:integration:unity` — headless Editor validation. Needs `--unity-bin` or `UNITY_BIN` pointing at a Unity executable.
+- `bun run test:integration:unity-tests` — runs the bridge package's EditMode tests in a throwaway Unity project. Same `--unity-bin`/`UNITY_BIN` contract. Reports total/passed/failed/skipped and exits non-zero on any failure, on a run that never reached the test runner, and on a run that executed zero tests. That last case matters: Unity exits 0 when a filter matches nothing.
 - `bun run test:integration:stress` — drives an already-open Editor through play mode while issuing reads, then reports transient failures and per-target latency. Needs `--project` or `UNITY_PROJECT` pointing at a project whose Editor is running with the bridge installed. Exits non-zero if any call failed.
 
-Run the first two yourself when you touch `unity-package/`, and the third when you touch retry or transport behaviour in `src/editor-client.ts`.
+Run the first three when you touch `unity-package/`, and the fourth when you touch retry or transport behaviour in `src/editor-client.ts`.
+
+These stay local on purpose, not as a gap waiting on CI. Running them in CI means a Unity licence in a GitHub secret and a licensing round trip on every job, for tests whose whole value is that a real Editor executed them. They are a pre-release gate a human runs, and `test/editor-tests-harness.test.ts` keeps the harness's own parsing under CI without needing Unity.
+
+```bash
+bun run test:integration:unity-tests -- --unity-bin /Applications/Unity/Hub/Editor/6000.4.0f1/Unity.app/Contents/MacOS/Unity
+```
 
 ## Release Format
 
-GitHub release notes should contain a single section only:
+Release notes live in `CHANGELOG.md`, one `## <version>` section per release. The
+workflow reads the section matching the tag and publishes it under a single
+`## What's Changed` heading.
 
-`## What's Changed`
+Write 2-4 concise bullets that summarize user-visible improvements. Avoid raw
+commit dumps, merge-commit lines, and extra sections.
 
-Under that heading, add 2-4 concise bullets that summarize user-visible improvements.
-Avoid raw commit dumps, merge-commit lines, and extra sections.
+A tag with no section fails the release, deliberately before the npm publish step
+rather than after it. But a workflow failure means the tag is already public and
+has to be deleted locally and on the remote before retrying, so check before
+tagging instead — `release:preflight` covers this along with version sync, a
+clean tree, tag availability, and the `origin/main` HEAD rule:
+
+```bash
+bun run release:preflight 0.7.0
+```
+
+To check the notes alone:
+
+```bash
+bun scripts/release-notes.js --check 0.7.0
+```

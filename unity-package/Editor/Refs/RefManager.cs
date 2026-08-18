@@ -15,8 +15,8 @@ namespace UnityAgenticTools.Refs
 
     public struct RefEntry
     {
-        public int InstanceId;
-        public string TreePath; // For UI Toolkit elements (no instanceId)
+        public UnityObjectId ObjectId;
+        public string TreePath; // For UI Toolkit elements (no object ID)
     }
 
     [InitializeOnLoad]
@@ -32,6 +32,7 @@ namespace UnityAgenticTools.Refs
         [Serializable]
         private class RefSnapshot
         {
+            public string format;
             public List<SnapshotEntry> uiRefs = new List<SnapshotEntry>();
             public List<SnapshotEntry> hierarchyRefs = new List<SnapshotEntry>();
             public int nextUiIndex;
@@ -42,7 +43,7 @@ namespace UnityAgenticTools.Refs
         private class SnapshotEntry
         {
             public int index;
-            public int instanceId;
+            public string objectId;
             public string treePath;
         }
 
@@ -69,17 +70,17 @@ namespace UnityAgenticTools.Refs
             _nextHierarchyIndex = 1;
         }
 
-        public static string RegisterUI(int instanceId, string treePath = null)
+        public static string RegisterUI(UnityObjectId objectId, string treePath = null)
         {
             int index = _nextUiIndex++;
-            _uiRefs[index] = new RefEntry { InstanceId = instanceId, TreePath = treePath };
+            _uiRefs[index] = new RefEntry { ObjectId = objectId, TreePath = treePath };
             return $"@u{index}";
         }
 
-        public static string RegisterHierarchy(int instanceId)
+        public static string RegisterHierarchy(UnityObjectId objectId)
         {
             int index = _nextHierarchyIndex++;
-            _hierarchyRefs[index] = new RefEntry { InstanceId = instanceId };
+            _hierarchyRefs[index] = new RefEntry { ObjectId = objectId };
             return $"@h{index}";
         }
 
@@ -117,10 +118,10 @@ namespace UnityAgenticTools.Refs
             if (!TryResolve(refStr, out var entry, out _))
                 throw new ArgumentException($"Stale or invalid ref '{refStr}'. Run scene.hierarchy or ui.snapshot to refresh refs.");
 
-            if (entry.InstanceId == 0)
+            if (entry.ObjectId.IsNone)
                 throw new ArgumentException($"Ref '{refStr}' is a UI Toolkit element (no GameObject). Use ui.* commands instead.");
 
-            var obj = UnityObjectCompat.ResolveObject(entry.InstanceId);
+            var obj = UnityObjectCompat.ResolveObject(entry.ObjectId);
             if (obj == null)
                 throw new ArgumentException($"Ref '{refStr}' points to a destroyed object. Run scene.hierarchy or ui.snapshot to refresh refs.");
 
@@ -177,13 +178,14 @@ namespace UnityAgenticTools.Refs
         {
             var snapshot = new RefSnapshot
             {
+                format = UnityObjectId.StorageFormat,
                 nextUiIndex = _nextUiIndex,
                 nextHierarchyIndex = _nextHierarchyIndex,
             };
             foreach (var kvp in _uiRefs)
-                snapshot.uiRefs.Add(new SnapshotEntry { index = kvp.Key, instanceId = kvp.Value.InstanceId, treePath = kvp.Value.TreePath });
+                snapshot.uiRefs.Add(new SnapshotEntry { index = kvp.Key, objectId = kvp.Value.ObjectId.Serialize(), treePath = kvp.Value.TreePath });
             foreach (var kvp in _hierarchyRefs)
-                snapshot.hierarchyRefs.Add(new SnapshotEntry { index = kvp.Key, instanceId = kvp.Value.InstanceId });
+                snapshot.hierarchyRefs.Add(new SnapshotEntry { index = kvp.Key, objectId = kvp.Value.ObjectId.Serialize() });
 
             EditorPrefs.SetString(PrefsKey, JsonUtility.ToJson(snapshot));
         }
@@ -195,16 +197,36 @@ namespace UnityAgenticTools.Refs
             {
                 var json = EditorPrefs.GetString(PrefsKey);
                 var snapshot = JsonUtility.FromJson<RefSnapshot>(json);
-                if (snapshot == null) return;
+                if (snapshot == null || snapshot.format != UnityObjectId.StorageFormat)
+                {
+                    ClearAll();
+                    return;
+                }
 
                 _uiRefs.Clear();
                 foreach (var e in snapshot.uiRefs)
-                    _uiRefs[e.index] = new RefEntry { InstanceId = e.instanceId, TreePath = e.treePath };
+                {
+                    if (!UnityObjectId.TryDeserialize(e.objectId, out UnityObjectId objectId))
+                    {
+                        ClearAll();
+                        return;
+                    }
+
+                    _uiRefs[e.index] = new RefEntry { ObjectId = objectId, TreePath = e.treePath };
+                }
                 _nextUiIndex = snapshot.nextUiIndex;
 
                 _hierarchyRefs.Clear();
                 foreach (var e in snapshot.hierarchyRefs)
-                    _hierarchyRefs[e.index] = new RefEntry { InstanceId = e.instanceId };
+                {
+                    if (!UnityObjectId.TryDeserialize(e.objectId, out UnityObjectId objectId))
+                    {
+                        ClearAll();
+                        return;
+                    }
+
+                    _hierarchyRefs[e.index] = new RefEntry { ObjectId = objectId };
+                }
                 _nextHierarchyIndex = snapshot.nextHierarchyIndex;
 
                 EditorPrefs.DeleteKey(PrefsKey);

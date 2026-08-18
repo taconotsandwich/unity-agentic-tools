@@ -5,6 +5,7 @@
  * Ensures version consistency across:
  * - unity-agentic-tools/package.json (source of truth)
  * - unity-package/package.json
+ * - unity-package/Editor/Bridge/BridgeMetadata.cs
  *
  * Usage:
  *   bun scripts/sync-version.js          # Sync versions
@@ -20,7 +21,10 @@ const ROOT = path.resolve(__dirname, '..');
 const FILES = {
   source: path.join(ROOT, 'unity-agentic-tools', 'package.json'),
   unityPackage: path.join(ROOT, 'unity-package', 'package.json'),
+  bridgeMetadata: path.join(ROOT, 'unity-package', 'Editor', 'Bridge', 'BridgeMetadata.cs'),
 };
+
+const BRIDGE_VERSION_PATTERN = /public const string PackageVersion = "([^"]+)";/;
 
 function readJSON(filePath) {
   try {
@@ -35,18 +39,41 @@ function writeJSON(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n');
 }
 
+function readBridgeVersion(filePath) {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const match = content.match(BRIDGE_VERSION_PATTERN);
+    return match ? match[1] : null;
+  } catch (err) {
+    console.error(`Error reading ${filePath}: ${err.message}`);
+    return null;
+  }
+}
+
+function writeBridgeVersion(filePath, version) {
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const updated = content.replace(
+    BRIDGE_VERSION_PATTERN,
+    `public const string PackageVersion = "${version}";`
+  );
+
+  if (updated === content && readBridgeVersion(filePath) !== version) {
+    throw new Error(`PackageVersion declaration not found in ${filePath}`);
+  }
+
+  fs.writeFileSync(filePath, updated);
+}
+
 function getVersions() {
   const versions = {};
 
   const source = readJSON(FILES.source);
-  if (source) {
-    versions.source = source.version;
-  }
+  versions.source = source ? source.version : null;
 
   const unityPackage = readJSON(FILES.unityPackage);
-  if (unityPackage) {
-    versions.unityPackage = unityPackage.version;
-  }
+  versions.unityPackage = unityPackage ? unityPackage.version : null;
+
+  versions.bridgeMetadata = readBridgeVersion(FILES.bridgeMetadata);
 
   return versions;
 }
@@ -57,6 +84,13 @@ function checkVersions() {
   console.log('Current versions:');
   console.log(`  unity-agentic-tools/package.json: ${versions.source || 'not found'}`);
   console.log(`  unity-package/package.json: ${versions.unityPackage || 'not found'}`);
+  console.log(`  unity-package/Editor/Bridge/BridgeMetadata.cs: ${versions.bridgeMetadata || 'not found'}`);
+
+  const missingVersions = Object.entries(versions).filter(([, version]) => !version);
+  if (missingVersions.length > 0) {
+    console.error('\nOne or more version sources are missing!');
+    return false;
+  }
 
   const allVersions = Object.values(versions).filter(Boolean);
   const uniqueVersions = [...new Set(allVersions)];
@@ -100,6 +134,9 @@ function syncVersions(targetVersion) {
     writeJSON(FILES.unityPackage, unityPackage);
     console.log(`  Updated: unity-package/package.json`);
   }
+
+  writeBridgeVersion(FILES.bridgeMetadata, version);
+  console.log(`  Updated: unity-package/Editor/Bridge/BridgeMetadata.cs`);
 
   console.log('\nVersion synchronization complete!');
 }

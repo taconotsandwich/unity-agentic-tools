@@ -40,8 +40,13 @@ Use this for GameObjects, components, prefab instances, parenting, sibling order
    - `unity-agentic-tools run ui.interact @uN click -p <project>`
    - `unity-agentic-tools run ui.interact @uN fill text -p <project>`
    - `unity-agentic-tools run ui.interact @uN toggle -p <project>`
-7. `unity-agentic-tools stream console --duration 2000 -p <project>`
-8. `unity-agentic-tools run play.exit -p <project>`
+7. Wait for the effect instead of sleeping and re-snapshotting:
+   - `unity-agentic-tools run wait.for ui @uN -p <project>` blocks until the ref'd element is active (`ui-gone` for the reverse)
+   - `unity-agentic-tools run wait.for log "" "" "saved" -p <project>` blocks until a console message containing "saved" arrives
+8. `unity-agentic-tools run logs.tail 20 error -p <project>`
+9. `unity-agentic-tools run play.exit -p <project>`
+
+`wait.for` takes `<condition> [refStr] [name] [text] [timeout] [ms]`; conditions are `ui`, `ui-gone`, `scene`, `log`, `compile`, and `delay`. `logs.tail` takes `[count] [type] [contains] [includeStackTrace]` and pulls from the buffered console, so it needs no open stream; keep `stream console --duration <ms>` for watching logs continuously.
 
 Refs such as `@hN` and `@uN` invalidate on scene change, play mode transition, or domain reload. Re-run `scene.hierarchy` or `ui.snapshot` to refresh.
 
@@ -72,3 +77,13 @@ unity-agentic-tools run update.batch Assets/Scenes/Main.unity '[{"gameObjectPath
 ```
 
 See "JSON Args" in `troubleshooting.md` for why this beats the equivalent `--args` form, and for the one case that still needs `--args`.
+
+### CLI Batch
+
+`run --batch` is the other batching axis: many commands in one CLI process, instead of many edits in one command. It takes a JSON array of `[target, ...args]` items, runs them sequentially, and stops at the first failure:
+
+```bash
+unity-agentic-tools run --batch '[["create.gameobject","Assets/Scenes/Main.unity","Enemy"],["create.component","Assets/Scenes/Main.unity","Enemy","BoxCollider"]]' -p <project>
+```
+
+Use `update.batch` when many property edits target one scene or prefab; use `run --batch` when a sequence of different commands belongs to one step. Batch items cannot use `--raw` targets.

@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { build_registry_run_params } from '../src/registry-invoke';
 
 let original_websocket: typeof WebSocket | undefined;
 
@@ -24,7 +25,7 @@ export interface MockPortBehavior {
     reachable?: boolean;
     reachable_sequence?: boolean[];
     /**
-     * Unreachable until this many ms after the mock is installed, then reachable.
+     * Unreachable until this many ms after the first connection, then reachable.
      * Models a domain reload. Prefer this over reachable_sequence when the assertion
      * is about how long the client waits: discovery opens a variable number of
      * connections per attempt, so a count-based sequence cannot express a duration.
@@ -34,12 +35,14 @@ export interface MockPortBehavior {
     rpc_result?: unknown;
     rpc_error?: MockRpcError;
     rpc_error_sequence?: Array<MockRpcError | null>;
+    omit_response?: boolean;
+    omit_response_sequence?: boolean[];
     close_before_response?: boolean;
     close_before_response_sequence?: boolean[];
     /**
-     * Models a domain reload, measured from mock install: already-open sockets are
-     * closed at `start`, connections attempted inside the window fail, and the port
-     * behaves normally again after `end`.
+     * Models a domain reload, measured from the first connection: already-open
+     * sockets are closed at `start`, connections attempted inside the window fail,
+     * and the port behaves normally again after `end`.
      */
     reload_window_ms?: MockWindow;
     /**
@@ -57,7 +60,11 @@ export function install_mock_websocket(port_behaviors: Record<number, MockPortBe
     );
     const connection_counts = new Map<number, number>();
     const sockets: MockSocketRecord[] = [];
-    const installed_at = Date.now();
+    // Anchored to the first connection, not to install. A test that installs the
+    // mock and then streams means "N ms after the client connects"; the gap
+    // between the two is scheduling noise, and under full-suite load it grew past
+    // the 40ms reload start often enough to fail the very first connect.
+    let anchor: number | undefined;
 
     class MockWebSocket {
         public url: string;
@@ -74,10 +81,11 @@ export function install_mock_websocket(port_behaviors: Record<number, MockPortBe
             const behavior = behavior_map.get(port);
             const connection_count = (connection_counts.get(port) ?? 0) + 1;
             connection_counts.set(port, connection_count);
-            const elapsed = Date.now() - installed_at;
+            anchor ??= Date.now();
+            const elapsed = Date.now() - anchor;
             const reload = behavior?.reload_window_ms;
             const reachable = !in_window(reload, elapsed)
-                && resolve_reachable(behavior, connection_count, installed_at);
+                && resolve_reachable(behavior, connection_count, anchor);
 
             this.record = { port, opened: false, closed: false };
             sockets.push(this.record);
@@ -145,6 +153,15 @@ export function install_mock_websocket(port_behaviors: Record<number, MockPortBe
                     return;
                 }
 
+                const omit_response = resolve_sequence_value(
+                    behavior.omit_response_sequence,
+                    behavior.omit_response ?? false,
+                    connection_count,
+                );
+                if (omit_response) {
+                    return;
+                }
+
                 const rpc_error = resolve_sequence_value(
                     behavior.rpc_error_sequence,
                     behavior.rpc_error ?? null,
@@ -204,14 +221,14 @@ function in_window(window: MockWindow | undefined, elapsed: number): boolean {
 function resolve_reachable(
     behavior: MockPortBehavior | undefined,
     connection_count: number,
-    installed_at: number,
+    anchor: number,
 ): boolean {
     if (!behavior) {
         return false;
     }
 
     if (behavior.reachable_after_ms !== undefined) {
-        return Date.now() - installed_at >= behavior.reachable_after_ms;
+        return Date.now() - anchor >= behavior.reachable_after_ms;
     }
 
     return resolve_sequence_value(behavior.reachable_sequence, behavior.reachable !== false, connection_count) !== false;
@@ -241,11 +258,18 @@ export function write_lockfile(dir: string, port: number, pid: number): void {
     writeFileSync(join(config_dir, 'editor.json'), JSON.stringify({ port, pid, version: '0.1.0' }), 'utf-8');
 }
 
-/** Mirrors what cli.ts sends: the real target lives inside params.args, not the method. */
+/** The CLI-owned last-known record, which outlives the Unity-owned lockfile. */
+export function write_cached_config(dir: string, port: number, pid: number): void {
+    const config_dir = join(dir, '.unity-agentic');
+    mkdirSync(config_dir, { recursive: true });
+    writeFileSync(
+        join(config_dir, 'editor.last.json'),
+        JSON.stringify({ port, pid, version: '0.1.0', project_path: dir }),
+        'utf-8',
+    );
+}
+
+/** What cli.ts sends: the real target lives inside params.args, not the method. */
 export function registry_run_params(target: string, args: string[] = []): Record<string, unknown> {
-    return {
-        type: 'UnityAgenticTools.Commands.Registry',
-        member: 'Run',
-        args: JSON.stringify([target, JSON.stringify(args)]),
-    };
+    return build_registry_run_params({ target, command_args_json: JSON.stringify(args) });
 }

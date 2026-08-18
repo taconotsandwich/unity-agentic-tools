@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, cpSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { add_package, remove_package } from '../src/packages';
@@ -17,6 +17,11 @@ interface TestManifest {
 
 function read_test_manifest(project_path: string): TestManifest {
     return JSON.parse(readFileSync(join(project_path, 'Packages', 'manifest.json'), 'utf-8')) as TestManifest;
+}
+
+function write_test_package(package_path: string, name: string = BRIDGE_PACKAGE_NAME): void {
+    mkdirSync(package_path, { recursive: true });
+    writeFileSync(join(package_path, 'package.json'), JSON.stringify({ name }), 'utf-8');
 }
 
 describe('bridge install helpers', () => {
@@ -61,19 +66,70 @@ describe('bridge install helpers', () => {
 
         test('preserves an existing local file bridge dependency', () => {
             const manifest_path = join(tmp_dir, 'Packages', 'manifest.json');
+            write_test_package(join(tmp_dir, 'local-bridge'));
             const manifest = read_test_manifest(tmp_dir);
-            manifest.dependencies[BRIDGE_PACKAGE_NAME] = 'file:../../unity-agentic-tools/unity-package';
+            manifest.dependencies[BRIDGE_PACKAGE_NAME] = 'file:../local-bridge';
             writeFileSync(manifest_path, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
 
             const result = install_bridge_package(tmp_dir);
             expect('error' in result).toBe(false);
             if (!('error' in result)) {
                 expect(result.action).toBe('preserved');
-                expect(result.version).toBe('file:../../unity-agentic-tools/unity-package');
+                expect(result.version).toBe('file:../local-bridge');
             }
 
             const updated_manifest = read_test_manifest(tmp_dir);
-            expect(updated_manifest.dependencies[BRIDGE_PACKAGE_NAME]).toBe('file:../../unity-agentic-tools/unity-package');
+            expect(updated_manifest.dependencies[BRIDGE_PACKAGE_NAME]).toBe('file:../local-bridge');
+        });
+
+        test('preserves an existing local tarball bridge dependency', () => {
+            const manifest_path = join(tmp_dir, 'Packages', 'manifest.json');
+            const tarball_path = join(tmp_dir, 'local-bridge.tgz');
+            writeFileSync(tarball_path, 'archive fixture', 'utf-8');
+            const manifest = read_test_manifest(tmp_dir);
+            manifest.dependencies[BRIDGE_PACKAGE_NAME] = 'file:../local-bridge.tgz';
+            writeFileSync(manifest_path, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+
+            const result = install_bridge_package(tmp_dir);
+
+            expect('error' in result).toBe(false);
+            if (!('error' in result)) {
+                expect(result.action).toBe('preserved');
+                expect(result.version).toBe('file:../local-bridge.tgz');
+            }
+        });
+
+        test('rejects an existing local file bridge dependency whose path is missing', () => {
+            const manifest_path = join(tmp_dir, 'Packages', 'manifest.json');
+            const manifest = read_test_manifest(tmp_dir);
+            manifest.dependencies[BRIDGE_PACKAGE_NAME] = 'file:../missing-bridge';
+            writeFileSync(manifest_path, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+
+            const result = install_bridge_package(tmp_dir);
+
+            expect('error' in result).toBe(true);
+            if ('error' in result) {
+                expect(result.error).toContain('Existing local bridge dependency');
+                expect(result.error).toContain('--local <path>');
+                expect(result.error).toContain('--remote');
+            }
+            expect(read_test_manifest(tmp_dir).dependencies[BRIDGE_PACKAGE_NAME]).toBe('file:../missing-bridge');
+        });
+
+        test('rejects an existing local file dependency for a different package', () => {
+            const manifest_path = join(tmp_dir, 'Packages', 'manifest.json');
+            write_test_package(join(tmp_dir, 'wrong-package'), 'com.example.wrong-package');
+            const manifest = read_test_manifest(tmp_dir);
+            manifest.dependencies[BRIDGE_PACKAGE_NAME] = 'file:../wrong-package';
+            writeFileSync(manifest_path, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+
+            const result = install_bridge_package(tmp_dir);
+
+            expect('error' in result).toBe(true);
+            if ('error' in result) {
+                expect(result.error).toContain(`declare name "${BRIDGE_PACKAGE_NAME}"`);
+            }
+            expect(read_test_manifest(tmp_dir).dependencies[BRIDGE_PACKAGE_NAME]).toBe('file:../wrong-package');
         });
 
         test('forces remote bridge package when requested', () => {

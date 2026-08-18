@@ -2,13 +2,13 @@
 
 Generated from `unity-package/Editor/Commands/Registry.cs`.
 
-Use aliases before raw public static C# targets. Argument hints: `<required>` `[optional]`.
+These aliases run without `--raw`. Any target not listed here is a raw public static C# member, which `run` refuses unless `--raw` is passed and logs a warning in the Unity console when it accepts. Argument hints: `<required>` `[optional]`.
 
 ## project
 
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
-| `project.refresh` | `UnityEditor.AssetDatabase.Refresh` | Refresh the Unity AssetDatabase. |
+| `project.refresh` | `UnityEditor.AssetDatabase.Refresh` | Refresh the Unity AssetDatabase. Only needed after out-of-band file changes; bridge mutations import their own. |
 | `project.save-assets` | `UnityEditor.AssetDatabase.SaveAssets` | Save modified project assets. |
 | `project.build.add <scenePath> [position]` | `UnityAgenticTools.Create.Project.Build` | Add a scene to build settings. |
 | `project.package.add <name> <version>` | `UnityAgenticTools.Create.Project.Package` | Add or update a package dependency. |
@@ -18,8 +18,8 @@ Use aliases before raw public static C# targets. Argument hints: `<required>` `[
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
 | `scene.open <scenePath> [additive]` | `UnityAgenticTools.Util.Scene.Open` | Open a scene in the Unity Editor. |
-| `scene.save` | `UnityAgenticTools.Util.Scene.Save` | Save the active scene. |
-| `scene.hierarchy [maxDepth] [includeInactive] [maxNodes]` | `UnityAgenticTools.Util.Hierarchy.Snapshot` | Return a hierarchy snapshot for the active scene. |
+| `scene.save` | `UnityAgenticTools.Util.Scene.Save` | Save every open scene. |
+| `scene.hierarchy [maxDepth] [includeInactive] [maxNodes] [scenePath]` | `UnityAgenticTools.Util.Hierarchy.Snapshot` | Return a hierarchy snapshot of every loaded scene, or one named scene. |
 | `scene.query <refStr> <query> [type]` | `UnityAgenticTools.Util.Hierarchy.Query` | Query a hierarchy ref from a snapshot. |
 
 ## query
@@ -28,7 +28,7 @@ Use aliases before raw public static C# targets. Argument hints: `<required>` `[
 |-------|-------------|---------|
 | `query.assets [filter] [foldersCsv] [maxResults]` | `UnityAgenticTools.Query.Assets.Find` | Find assets with Unity AssetDatabase filters. |
 | `query.asset <assetPath>` | `UnityAgenticTools.Query.Assets.Info` | Inspect basic AssetDatabase metadata for an asset path. |
-| `query.scene [assetPath] [maxDepth] [includeInactive]` | `UnityAgenticTools.Query.Scene.Hierarchy` | Inspect hierarchy data for the active scene or an asset path. |
+| `query.scene [assetPath] [maxDepth] [includeInactive]` | `UnityAgenticTools.Query.Scene.Hierarchy` | Inspect hierarchy data for an asset path, or for every loaded scene. |
 | `query.object <assetPath> <gameObjectPath>` | `UnityAgenticTools.Query.Scene.Object` | Inspect one GameObject in a scene or prefab asset. |
 
 ## create
@@ -84,7 +84,7 @@ Use aliases before raw public static C# targets. Argument hints: `<required>` `[
 
 | Alias | Backing API | Purpose |
 |-------|-------------|---------|
-| `play.enter` | `UnityAgenticTools.Util.PlayMode.Enter` | Enter play mode. |
+| `play.enter` | `UnityAgenticTools.Util.PlayMode.Enter` | Enter play mode. Scene edits made in play mode are discarded on exit. |
 | `play.exit` | `UnityAgenticTools.Util.PlayMode.Exit` | Exit play mode. |
 | `play.pause` | `UnityAgenticTools.Util.PlayMode.Pause` | Toggle pause state. |
 | `play.step` | `UnityAgenticTools.Util.PlayMode.Step` | Step one frame in play mode. |
@@ -97,6 +97,12 @@ Use aliases before raw public static C# targets. Argument hints: `<required>` `[
 | `ui.snapshot [maxElements]` | `UnityAgenticTools.Util.UI.Snapshot` | Return UI refs and metadata. |
 | `ui.query <refStr> <query>` | `UnityAgenticTools.Util.UI.Query` | Query a UI ref. |
 | `ui.interact <refStr> <action> [text] [value] [option] [byIndex] [direction] [amount]` | `UnityAgenticTools.Util.UI.Interact` | Interact with a UI ref. |
+
+## wait
+
+| Alias | Backing API | Purpose |
+|-------|-------------|---------|
+| `wait.for <condition> [refStr] [name] [text] [timeout] [ms]` | `UnityAgenticTools.Util.UI.Wait` | Wait for a condition: ui, ui-gone, scene, log, compile, delay. |
 
 ## input
 
@@ -121,3 +127,10 @@ Use aliases before raw public static C# targets. Argument hints: `<required>` `[
 |-------|-------------|---------|
 | `tests.run [mode] [filter]` | `UnityAgenticTools.Util.TestRunner.Run` | Run Unity tests. |
 | `tests.results` | `UnityAgenticTools.Util.TestRunner.GetResults` | Read the latest Unity test results. |
+
+## logs
+
+| Alias | Backing API | Purpose |
+|-------|-------------|---------|
+| `logs.tail [count] [type] [contains] [includeStackTrace]` | `UnityAgenticTools.Bridge.Handlers.ConsoleHandler.GetLogs` | Read recent console logs (pull, no streaming). |
+| `logs.clear` | `UnityAgenticTools.Bridge.Handlers.ConsoleHandler.Clear` | Clear the Unity console and the captured log buffer. |

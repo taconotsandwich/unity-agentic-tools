@@ -1,11 +1,14 @@
 #!/usr/bin/env bun
 import { program } from 'commander';
+import { readFileSync } from 'fs';
+import * as path from 'path';
+import { is_record, parse_batch_spec, payload_reports_failure, run_batch, type BatchItem } from './batch';
 import { install_bridge_package, type BridgeInstallOptions } from './bridge-install';
 import { cleanup } from './cleanup';
 import { call_editor, stream_editor, ping_editor, discover_editor_config, read_editor_readiness } from './editor-client';
 import { remove_package } from './packages';
+import { build_registry_list_params, build_registry_run_params } from './registry-invoke';
 import type { RpcEvent, RpcResponse } from './types';
-import * as path from 'path';
 
 // Version is inlined at build time by bun's bundler (no runtime path resolution)
 const VERSION: string = (require('../package.json') as { version: string }).version;
@@ -20,8 +23,11 @@ interface BridgeCommandOptions {
 
 interface RunCommandOptions extends BridgeCommandOptions {
     args?: string;
+    argsFile?: string;
     set?: string;
+    raw?: boolean;
     wait?: boolean;
+    batch?: string;
 }
 
 interface ListCommandOptions extends BridgeCommandOptions {
@@ -73,8 +79,49 @@ function resolve_bridge_options(options: BridgeCommandOptions): ResolvedBridgeOp
     return { project_path, timeout, ...(port !== undefined ? { port } : {}) };
 }
 
-function build_registry_args(values: string[]): string {
-    return JSON.stringify(values);
+function resolve_run_args(positional_args: string[], options: RunCommandOptions): string | { error: string } {
+    const has_json_args = options.args !== undefined;
+    const has_args_file = options.argsFile !== undefined;
+    const source_count = Number(has_json_args) + Number(has_args_file) + Number(positional_args.length > 0);
+
+    if (source_count > 1) {
+        return { error: 'Use only one argument source: positional arguments, --args, or --args-file.' };
+    }
+
+    if (options.argsFile !== undefined) {
+        const args_file = options.argsFile;
+        const source = args_file === '-' ? 'stdin' : `args file "${path.resolve(args_file)}"`;
+
+        try {
+            const contents = readFileSync(args_file === '-' ? 0 : path.resolve(args_file), 'utf-8');
+            return parse_json_string_array(contents, source);
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            return { error: `Could not read ${source}: ${message}` };
+        }
+    }
+
+    if (options.args !== undefined) {
+        return parse_json_string_array(options.args, '--args');
+    }
+
+    return JSON.stringify(positional_args);
+}
+
+function parse_json_string_array(value: string, source: string): string | { error: string } {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(value) as unknown;
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { error: `Invalid ${source}: expected a JSON array of strings (${message}).` };
+    }
+
+    if (!Array.isArray(parsed) || !parsed.every((entry: unknown) => typeof entry === 'string')) {
+        return { error: `Invalid ${source}: expected a JSON array containing only strings.` };
+    }
+
+    return JSON.stringify(parsed);
 }
 
 function resolve_install_options(options: InstallCommandOptions): BridgeInstallOptions | { error: string } {
@@ -120,22 +167,6 @@ function output_rpc_response(response: RpcResponse, pretty: boolean): void {
     if (payload_reports_failure(response.result)) {
         process.exitCode = 1;
     }
-}
-
-function payload_reports_failure(payload: unknown): boolean {
-    if (!is_record(payload)) {
-        return false;
-    }
-
-    if (payload.success === false) {
-        return true;
-    }
-
-    return payload_reports_failure(payload.result);
-}
-
-function is_record(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function strip_command_listing_details(payload: unknown): unknown {
@@ -218,11 +249,7 @@ program.command('list [query]')
         const response = await call_editor({
             ...bridge,
             method: 'editor.invoke',
-            params: {
-                type: 'UnityAgenticTools.Commands.Registry',
-                member: 'List',
-                args: build_registry_args([query || '', options.raw === true ? 'true' : 'false']),
-            },
+            params: build_registry_list_params(query || '', options.raw === true),
         });
         if (options.brief === true && !response.error) {
             response.result = strip_command_listing_details(response.result);
@@ -230,31 +257,103 @@ program.command('list [query]')
         output_rpc_response(response, options.pretty === true);
     });
 
-program.command('run <target> [args...]')
+program.command('run [target] [args...]')
     .description('Run a named Unity command or raw static method/property')
     .option('-p, --project <path>', 'Path to Unity project (defaults to cwd)')
     .option('--timeout <ms>', 'WebSocket timeout in ms', '60000')
     .option('--port <n>', 'Connect to a specific bridge port')
-    .option('--args <json>', 'JSON array of command arguments (overrides positional args)')
+    .option('--args <json>', 'JSON array of string arguments')
+    .option('--args-file <path>', 'Read a JSON array of string arguments from a file (- for stdin)')
     .option('--set <value>', 'Set a static property value')
+    .option('--raw', 'Allow invoking an unregistered public static member (logged in the Editor console)')
     .option('--no-wait', 'Fire and forget -- return immediately without waiting for result')
+    .option('--batch <json>', 'JSON array of [target, ...args] items; runs sequentially, stops on first error')
     .option('--pretty', 'Pretty-print JSON output')
-    .action(async (target: string, args: string[], options: RunCommandOptions) => {
-        const bridge = resolve_bridge_options(options);
-        const command_args_json = options.args || JSON.stringify(args);
-        const registry_args = options.set !== undefined
-            ? [target, command_args_json, options.set]
-            : [target, command_args_json];
+    .action(async (target: string | undefined, args: string[], options: RunCommandOptions) => {
+        if (options.batch !== undefined) {
+            const conflicts: string[] = [];
+            if (target !== undefined) {
+                conflicts.push('a positional target');
+            }
+            if (options.args !== undefined) {
+                conflicts.push('--args');
+            }
+            if (options.argsFile !== undefined) {
+                conflicts.push('--args-file');
+            }
+            if (options.set !== undefined) {
+                conflicts.push('--set');
+            }
+            if (options.raw === true) {
+                conflicts.push('--raw');
+            }
+            if (options.wait === false) {
+                conflicts.push('--no-wait');
+            }
+            if (conflicts.length > 0) {
+                print_json({
+                    success: false,
+                    error: `--batch cannot be combined with ${conflicts.join(', ')}.`,
+                }, options.pretty === true);
+                process.exitCode = 1;
+                return;
+            }
 
+            let items: BatchItem[];
+            try {
+                items = parse_batch_spec(options.batch);
+            } catch (err: unknown) {
+                print_json({
+                    success: false,
+                    error: err instanceof Error ? err.message : String(err),
+                }, options.pretty === true);
+                process.exitCode = 1;
+                return;
+            }
+
+            const bridge = resolve_bridge_options(options);
+            const outcome = await run_batch(items, (item: BatchItem) => call_editor({
+                ...bridge,
+                method: 'editor.invoke',
+                params: build_registry_run_params({
+                    target: item.target,
+                    command_args_json: JSON.stringify(item.args),
+                }),
+            }));
+            print_json(outcome, options.pretty === true);
+            if (!outcome.success) {
+                process.exitCode = 1;
+            }
+            return;
+        }
+
+        if (target === undefined) {
+            print_json({
+                success: false,
+                error: 'run requires a command target unless --batch is provided.',
+            }, options.pretty === true);
+            process.exitCode = 1;
+            return;
+        }
+
+        const command_args_json = resolve_run_args(args, options);
+        if (typeof command_args_json !== 'string') {
+            print_json({ success: false, error: command_args_json.error }, options.pretty === true);
+            process.exitCode = 1;
+            return;
+        }
+
+        const bridge = resolve_bridge_options(options);
         const response = await call_editor({
             ...bridge,
             method: 'editor.invoke',
             no_wait: options.wait === false,
-            params: {
-                type: 'UnityAgenticTools.Commands.Registry',
-                member: 'Run',
-                args: build_registry_args(registry_args),
-            },
+            params: build_registry_run_params({
+                target,
+                command_args_json,
+                allow_raw: options.raw === true,
+                ...(options.set !== undefined ? { set: options.set } : {}),
+            }),
         });
         output_rpc_response(response, options.pretty === true);
     });
@@ -433,6 +532,10 @@ program.command('status')
         }
 
         print_json(status, options.pretty === true);
+        const bridge_status = status.bridge;
+        if (is_record(bridge_status) && bridge_status.reachable === false) {
+            process.exitCode = 1;
+        }
     });
 
 program.parse();
