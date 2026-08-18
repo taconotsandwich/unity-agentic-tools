@@ -1,6 +1,9 @@
 #!/bin/sh
 set -e
 
+echo "[pre-push] static checks"
+bun run check
+
 echo "[pre-push] type-check"
 bun run type-check
 

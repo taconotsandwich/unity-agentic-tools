@@ -13,6 +13,7 @@
     "test:integration:unity": "cd unity-agentic-tools && bun run test:unity-headless",
     "test:integration:unity-tests": "cd unity-agentic-tools && bun run test:unity-editor-tests",
     "test:integration:stress": "cd unity-agentic-tools && bun run test:stress",
+    "check": "bun scripts/sync-version.js --check && bun run check:classids && bun run check:agent-guidance && bun run check:package-deps",
     "check:classids": "bun scripts/check-classid-drift.js",
     "check:agent-guidance": "bun scripts/check-agent-guidance-drift.js",
     "check:package-deps": "bun scripts/check-package-dependencies.js",

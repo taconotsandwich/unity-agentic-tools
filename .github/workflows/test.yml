@@ -36,17 +36,10 @@ jobs:
       - name: Type check
         run: bun run type-check
 
-      - name: Check version sync
-        run: bun scripts/sync-version.js --check
-
-      - name: Check Unity ClassID drift
-        run: bun run check:classids
-
-      - name: Check command reference drift
-        run: bun run check:agent-guidance
-
-      - name: Check bridge package dependencies
-        run: bun run check:package-deps
+      # Same entry point the git hooks use, so CI cannot check something the
+      # local hooks do not.
+      - name: Static checks
+        run: bun run check
 
       - name: Run unit tests
         run: bun run test
