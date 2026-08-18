@@ -1,5 +1,6 @@
 import { existsSync } from 'fs';
 import { call_editor } from '../src/editor-client';
+import { build_registry_run_params } from '../src/registry-invoke';
 import type { EditorRetryEvent, RpcResponse } from '../src/types';
 import { parse_args } from './bridge-stress-options';
 import type { StressOptions } from './bridge-stress-options';
@@ -71,25 +72,17 @@ const DEFAULT_TIMING: StressTiming = {
     stable_polls: STABLE_STATE_POLLS,
 };
 
-function build_invoke_params(
-    target: string,
-    args: string[],
-    allow_raw = false,
-): Record<string, unknown> {
-    return {
-        type: 'UnityAgenticTools.Commands.Registry',
-        member: 'Run',
-        args: JSON.stringify([target, JSON.stringify(args), allow_raw ? 'true' : 'false']),
-    };
-}
-
 function create_invoker(options: StressOptions): StressInvoker {
     return (target, args, controls = {}) => call_editor({
         project_path: options.project_path,
         method: 'editor.invoke',
         timeout: options.timeout_ms,
         ...(options.no_retry && !controls.safe_retries ? { retries: 0 } : {}),
-        params: build_invoke_params(target, args, controls.allow_raw === true),
+        params: build_registry_run_params({
+            target,
+            command_args_json: JSON.stringify(args),
+            allow_raw: controls.allow_raw === true,
+        }),
         on_retry: controls.on_retry,
     });
 }

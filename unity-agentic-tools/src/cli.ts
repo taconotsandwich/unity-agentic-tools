@@ -7,6 +7,7 @@ import { install_bridge_package, type BridgeInstallOptions } from './bridge-inst
 import { cleanup } from './cleanup';
 import { call_editor, stream_editor, ping_editor, discover_editor_config, read_editor_readiness } from './editor-client';
 import { remove_package } from './packages';
+import { build_registry_list_params, build_registry_run_params } from './registry-invoke';
 import type { RpcEvent, RpcResponse } from './types';
 
 // Version is inlined at build time by bun's bundler (no runtime path resolution)
@@ -76,10 +77,6 @@ function resolve_bridge_options(options: BridgeCommandOptions): ResolvedBridgeOp
     const timeout = parseInt(options.timeout || '10000', 10);
     const port = options.port ? parseInt(options.port, 10) : undefined;
     return { project_path, timeout, ...(port !== undefined ? { port } : {}) };
-}
-
-function build_registry_args(values: string[]): string {
-    return JSON.stringify(values);
 }
 
 function resolve_run_args(positional_args: string[], options: RunCommandOptions): string | { error: string } {
@@ -252,11 +249,7 @@ program.command('list [query]')
         const response = await call_editor({
             ...bridge,
             method: 'editor.invoke',
-            params: {
-                type: 'UnityAgenticTools.Commands.Registry',
-                member: 'List',
-                args: build_registry_args([query || '', options.raw === true ? 'true' : 'false']),
-            },
+            params: build_registry_list_params(query || '', options.raw === true),
         });
         if (options.brief === true && !response.error) {
             response.result = strip_command_listing_details(response.result);
@@ -322,11 +315,10 @@ program.command('run [target] [args...]')
             const outcome = await run_batch(items, (item: BatchItem) => call_editor({
                 ...bridge,
                 method: 'editor.invoke',
-                params: {
-                    type: 'UnityAgenticTools.Commands.Registry',
-                    member: 'Run',
-                    args: build_registry_args([item.target, JSON.stringify(item.args), 'false']),
-                },
+                params: build_registry_run_params({
+                    target: item.target,
+                    command_args_json: JSON.stringify(item.args),
+                }),
             }));
             print_json(outcome, options.pretty === true);
             if (!outcome.success) {
@@ -352,20 +344,16 @@ program.command('run [target] [args...]')
         }
 
         const bridge = resolve_bridge_options(options);
-        const allow_raw = options.raw === true ? 'true' : 'false';
-        const registry_args = options.set !== undefined
-            ? [target, command_args_json, allow_raw, options.set]
-            : [target, command_args_json, allow_raw];
-
         const response = await call_editor({
             ...bridge,
             method: 'editor.invoke',
             no_wait: options.wait === false,
-            params: {
-                type: 'UnityAgenticTools.Commands.Registry',
-                member: 'Run',
-                args: build_registry_args(registry_args),
-            },
+            params: build_registry_run_params({
+                target,
+                command_args_json,
+                allow_raw: options.raw === true,
+                ...(options.set !== undefined ? { set: options.set } : {}),
+            }),
         });
         output_rpc_response(response, options.pretty === true);
     });

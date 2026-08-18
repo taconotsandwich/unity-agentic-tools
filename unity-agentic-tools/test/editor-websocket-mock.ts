@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { build_registry_run_params } from '../src/registry-invoke';
 
 let original_websocket: typeof WebSocket | undefined;
 
@@ -263,11 +264,7 @@ export function write_cached_config(dir: string, port: number, pid: number): voi
     );
 }
 
-/** Mirrors what cli.ts sends: the real target lives inside params.args, not the method. */
+/** What cli.ts sends: the real target lives inside params.args, not the method. */
 export function registry_run_params(target: string, args: string[] = []): Record<string, unknown> {
-    return {
-        type: 'UnityAgenticTools.Commands.Registry',
-        member: 'Run',
-        args: JSON.stringify([target, JSON.stringify(args), 'false']),
-    };
+    return build_registry_run_params({ target, command_args_json: JSON.stringify(args) });
 }
