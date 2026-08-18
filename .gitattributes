@@ -1,4 +1,11 @@
-# Unity YAML files use LF natively — prevent git from converting to CRLF on Windows
+# Check every text file out as LF, on every platform. Without this, git hands a
+# Windows working tree CRLF, and anything that compares a checked-out file byte
+# for byte reports a difference that does not exist in the repository. That has
+# now cost two fixes: active-scene-ban.test.ts normalizes its input by hand, and
+# the command-reference drift check failed CI on windows-latest alone.
+* text=auto eol=lf
+
+# Unity YAML is LF natively and must stay that way regardless of the rule above.
 *.unity text eol=lf
 *.prefab text eol=lf
 *.asset text eol=lf
