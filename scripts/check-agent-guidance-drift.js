@@ -12,7 +12,10 @@ try {
     process.exit(1);
 }
 
-if (committed !== text) {
+// Git hands Windows checkouts CRLF, and the generator always emits LF. The
+// question here is whether the content drifted, not how the line endings were
+// stored, so both sides are compared with endings normalized.
+if (committed.replace(/\r\n/g, '\n') !== text) {
     console.error('Command reference has drifted from Registry.cs.');
     console.error('Run: bun run generate:agent-guidance, then commit the result.');
     process.exit(1);
