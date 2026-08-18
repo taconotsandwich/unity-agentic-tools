@@ -15,6 +15,7 @@ import type { CallKind, CallRecord, PhaseName } from './bridge-stress-summary';
 
 export interface StressInvokeControls {
     safe_retries?: boolean;
+    allow_raw?: boolean;
     on_retry?: (event: EditorRetryEvent) => void;
 }
 
@@ -70,11 +71,15 @@ const DEFAULT_TIMING: StressTiming = {
     stable_polls: STABLE_STATE_POLLS,
 };
 
-function build_invoke_params(target: string, args: string[]): Record<string, unknown> {
+function build_invoke_params(
+    target: string,
+    args: string[],
+    allow_raw = false,
+): Record<string, unknown> {
     return {
         type: 'UnityAgenticTools.Commands.Registry',
         member: 'Run',
-        args: JSON.stringify([target, JSON.stringify(args)]),
+        args: JSON.stringify([target, JSON.stringify(args), allow_raw ? 'true' : 'false']),
     };
 }
 
@@ -84,7 +89,7 @@ function create_invoker(options: StressOptions): StressInvoker {
         method: 'editor.invoke',
         timeout: options.timeout_ms,
         ...(options.no_retry && !controls.safe_retries ? { retries: 0 } : {}),
-        params: build_invoke_params(target, args),
+        params: build_invoke_params(target, args, controls.allow_raw === true),
         on_retry: controls.on_retry,
     });
 }
@@ -350,6 +355,7 @@ async function transition(
     records: CallRecord[],
     target: string,
     phase: PhaseName,
+    controls: StressInvokeControls = {},
 ): Promise<CallRecord> {
     const { record } = await timed_invoke(
         invoke,
@@ -357,6 +363,7 @@ async function transition(
         { name: target, args: [] },
         phase,
         'transition',
+        controls,
     );
 
     if (!record.ok) {
@@ -427,7 +434,7 @@ export async function run_compile_cycle(
     console.error(`cycle ${cycle}: requesting script compilation`);
     const record_start_index = records.length;
     const trigger_status: TransitionStatus = { settled: false };
-    const trigger = transition(invoke, records, COMPILE_TARGET, 'compiling')
+    const trigger = transition(invoke, records, COMPILE_TARGET, 'compiling', { allow_raw: true })
         .finally(() => {
             trigger_status.settled = true;
         });
