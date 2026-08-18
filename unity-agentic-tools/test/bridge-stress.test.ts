@@ -39,6 +39,10 @@ const OPTIONS: StressOptions = {
 // override this with a deliberately small value.
 const SETTLE_CEILING_MS = 400;
 
+// Windows clamps setTimeout to roughly this, which is what makes a budget sized
+// on a 1ms interval fail there and pass everywhere else.
+const COARSE_TIMER_MS = 16;
+
 const FAST_TIMING: StressTiming = {
     poll_interval_ms: 1,
     settle_timeout_ms: SETTLE_CEILING_MS,
@@ -404,7 +408,12 @@ describe('stress orchestration', () => {
         expect(records.some(item => item.kind === 'read' && item.phase === 'entering')).toBe(true);
     });
 
-    it('does not finish a compile cycle until compiling was observed and then stable', async () => {
+    // Parameterized by poll interval on purpose. Windows clamps setTimeout to
+    // about 15.6ms, so a settle ceiling sized against a 1ms interval starves the
+    // poll count there and nowhere else -- exactly the failure that reached CI
+    // and could not reach a macOS or Linux hook. Running the same cycle at a
+    // coarse interval keeps it reachable on every platform.
+    async function run_observed_compile_sequence(poll_interval_ms: number): Promise<void> {
         const records: CallRecord[] = [];
         const compile_states = [false, true, true, false, false];
         const observed_states: boolean[] = [];
@@ -432,16 +441,24 @@ describe('stress orchestration', () => {
             invoke,
             records,
             1,
-            FAST_TIMING,
+            { ...FAST_TIMING, poll_interval_ms },
         );
 
         expect(order[0]).toContain('RequestScriptCompilation');
         expect(observed_states).toEqual(compile_states);
         expect(records.some(item => item.target.includes('RequestScriptCompilation'))).toBe(true);
         expect(summarize(records, outcome()).total_retry_attempts).toBe(1);
+    }
+
+    it('does not finish a compile cycle until compiling was observed and then stable', async () => {
+        await run_observed_compile_sequence(1);
     });
 
-    it('does not accept stable false before a slow compile trigger returns', async () => {
+    it('observes the whole compile sequence when the platform timer is coarse', async () => {
+        await run_observed_compile_sequence(COARSE_TIMER_MS);
+    });
+
+    async function run_slow_trigger_cycle(poll_interval_ms: number): Promise<void> {
         const records: CallRecord[] = [];
         let trigger_returned = false;
         let post_trigger_polls = 0;
@@ -471,10 +488,18 @@ describe('stress orchestration', () => {
             invoke,
             records,
             1,
-            FAST_TIMING,
+            { ...FAST_TIMING, poll_interval_ms },
         );
 
         expect(post_trigger_polls).toBeGreaterThanOrEqual(3);
+    }
+
+    it('does not accept stable false before a slow compile trigger returns', async () => {
+        await run_slow_trigger_cycle(1);
+    });
+
+    it('waits out a slow compile trigger when the platform timer is coarse', async () => {
+        await run_slow_trigger_cycle(COARSE_TIMER_MS);
     });
 
     it('rejects a compile cycle when only an earlier cycle observed a reload', async () => {
