@@ -88,7 +88,13 @@ namespace UnityAgenticTools.Tests
 
         private static string Register(Selectable selectable)
         {
-            return RefManager.RegisterUI(UnityObjectCompat.GetObjectId(selectable));
+            var normalized = JsonRpcParser.NormalizeValueForTransport(selectable) as Dictionary<string, object>;
+            Assert.That(normalized, Is.Not.Null);
+            Assert.That(
+                UnityObjectId.TryDeserialize((string)normalized["objectId"], out UnityObjectId objectId),
+                Is.True);
+
+            return RefManager.RegisterUI(objectId);
         }
 
         private static void AssertSnapshotStartsAtFirstRef(object result)
