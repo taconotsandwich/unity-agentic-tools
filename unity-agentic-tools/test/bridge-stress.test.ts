@@ -31,9 +31,17 @@ const OPTIONS: StressOptions = {
     no_retry: false,
     compile_cycles: false,
 };
+// A ceiling, not a measurement. These tests assert on how many polls the
+// orchestrator made and finish as soon as the state settles, so the budget only
+// has to be wide enough that a coarse platform timer cannot starve the poll
+// count. Windows clamps setTimeout to ~15.6ms, which fit two polls inside the
+// previous 40ms where the assertions needed five. Tests that assert a timeout
+// override this with a deliberately small value.
+const SETTLE_CEILING_MS = 400;
+
 const FAST_TIMING: StressTiming = {
     poll_interval_ms: 1,
-    settle_timeout_ms: 40,
+    settle_timeout_ms: SETTLE_CEILING_MS,
     stable_polls: 2,
 };
 
@@ -463,7 +471,7 @@ describe('stress orchestration', () => {
             invoke,
             records,
             1,
-            { ...FAST_TIMING, settle_timeout_ms: 50 },
+            FAST_TIMING,
         );
 
         expect(post_trigger_polls).toBeGreaterThanOrEqual(3);
