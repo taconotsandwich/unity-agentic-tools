@@ -1,3 +1,5 @@
+**Notice: This project is no longer maintained due to recent changes to Unity’s Terms of Service and personal circumstances.**
+
 # Unity Agentic Tools
 
 Unity Agentic Tools is a compact command runner for AI agents and scripts that need to inspect, change, and verify a Unity project through an already-running Unity Editor.
